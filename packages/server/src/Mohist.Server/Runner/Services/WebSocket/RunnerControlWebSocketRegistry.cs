@@ -7,6 +7,7 @@ using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -14,7 +15,7 @@ using Mohist.Server.Infrastructure.Workspace;
 
 namespace Mohist.Server.Runner.Services.WebSocket;
 
-public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerControlTransport, IRunnerSessionCommandTransport
+public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerControlTransport, IRunnerSessionCommandTransport, IRunnerAuthorityFence
 {
     private static readonly IReadOnlyDictionary<string, (Type Params, Type Result, bool AllowsNull)> RequestMethods =
         new Dictionary<string, (Type, Type, bool)>(StringComparer.Ordinal)
@@ -29,31 +30,40 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
             ["session.followup"] = (typeof(FollowupParams), typeof(RunnerFollowupDeliveryResult), false),
             ["session.stop"] = (typeof(SessionStopParams), typeof(RunnerStopReply), false),
             ["session.command"] = (typeof(SessionCommandRequest), typeof(SessionCommandResult), false),
+            ["session.probe"] = (typeof(RunnerSessionActivityProbeRequest), typeof(RunnerSessionActivityProbeResult), false),
         };
 
     private readonly ConcurrentDictionary<string, RunnerControlWebSocketConnection> _connections = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<Guid, RunnerControlConnectionReservation> _connectionIds = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource> _connectionSignals = new(StringComparer.Ordinal);
     private readonly RunnerControlInstallationGate _installationGate = new();
+    private readonly object _authoritySync = new();
+    private readonly Dictionary<string, long> _authorityEpochs = new(StringComparer.Ordinal);
     private readonly RunnerConnectionTracker _tracker;
     private readonly IGrainFactory _grains;
+    private readonly IRunnerActivityProbeCoordinator _activityProbes;
     private readonly TimeProvider _timeProvider;
     private readonly ILoggerFactory _logs;
 
     public RunnerControlWebSocketRegistry(
         RunnerConnectionTracker tracker,
         IGrainFactory grains,
+        IRunnerActivityProbeCoordinator activityProbes,
         TimeProvider timeProvider,
         ILoggerFactory logs)
     {
         _tracker = tracker;
         _grains = grains;
+        _activityProbes = activityProbes;
         _timeProvider = timeProvider;
         _logs = logs;
     }
 
     internal Action<string, Guid>? InstallationWaiting { get; set; }
     internal Func<string, Guid, CancellationToken, Task>? InstallationAcquiredAsync { get; set; }
+    internal Func<string, Guid, CancellationToken, Task>? InstallationAuthorityValidatedAsync { get; set; }
+    internal Func<string, Guid, CancellationToken, Task>? InstallationPublicationReadyAsync { get; set; }
+    internal Func<string, CancellationToken, Task>? RequestAuthorityWaitingAsync { get; set; }
     internal Func<string, string, CancellationToken, Task>? SessionCommandGenerationValidatedAsync { get; set; }
 
     internal bool TryReserve(Guid connectionId, out RunnerControlConnectionReservation reservation)
@@ -66,11 +76,23 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
         _connectionIds.TryRemove(
             new KeyValuePair<Guid, RunnerControlConnectionReservation>(reservation.ConnectionId, reservation));
 
+    internal Task<bool> IsControlAuthorityCurrentAsync(
+        string runnerId,
+        RunnerControlHandshake handshake,
+        RunnerPresentedAuthority presentedAuthority) =>
+        !string.IsNullOrWhiteSpace(handshake.ProcessGeneration)
+            ? _grains.GetGrain<IRunnerGrain>(runnerId)
+                .IsCurrentRegistrationAuthorityAsync(
+                    handshake.ProcessGeneration,
+                    presentedAuthority)
+            : Task.FromResult(false);
+
     internal async Task RunAsync(
         string runnerId,
         RunnerControlConnectionReservation reservation,
         System.Net.WebSockets.WebSocket socket,
         RunnerControlHandshake handshake,
+        RunnerPresentedAuthority presentedAuthority,
         CancellationToken ct)
     {
         try
@@ -78,7 +100,13 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
             if (!_connectionIds.TryGetValue(reservation.ConnectionId, out var currentReservation)
                 || !ReferenceEquals(currentReservation, reservation))
                 throw new InvalidOperationException("Connection ID was not reserved before upgrade");
-            await RunConnectionAsync(runnerId, reservation.ConnectionId, socket, handshake, ct);
+            await RunConnectionAsync(
+                runnerId,
+                reservation.ConnectionId,
+                socket,
+                handshake,
+                presentedAuthority,
+                ct);
         }
         finally
         {
@@ -91,24 +119,33 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
         Guid connectionId,
         System.Net.WebSockets.WebSocket socket,
         RunnerControlHandshake handshake,
+        RunnerPresentedAuthority presentedAuthority,
         CancellationToken ct)
     {
+        long installationAuthorityEpoch;
+        lock (_authoritySync)
+            installationAuthorityEpoch = AuthorityEpochUnderLock(runnerId);
         if (string.IsNullOrEmpty(handshake.ProcessGeneration))
             throw new RunnerControlUnavailableException("Runner control processGeneration is required");
         if (!await _grains.GetGrain<IRunnerGrain>(runnerId)
-                .IsCurrentProcessGenerationAsync(handshake.ProcessGeneration))
-            throw new RunnerControlUnavailableException("Runner control processGeneration is not current");
+                .IsCurrentRegistrationAuthorityAsync(
+                    handshake.ProcessGeneration,
+                    presentedAuthority))
+            throw new RunnerControlUnavailableException(
+                "Runner control registration authority is not current");
 
         var connection = new RunnerControlWebSocketConnection(
             runnerId,
             connectionId,
             handshake.ProcessGeneration,
+            presentedAuthority,
             socket,
             _timeProvider,
             _logs.CreateLogger<RunnerControlWebSocketConnection>());
         var trackerInstalled = false;
         var published = false;
         Task? run = null;
+        Task? activityProbe = null;
         try
         {
             using (await _installationGate.AcquireAsync(
@@ -121,8 +158,11 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
                 try
                 {
                     if (!await _grains.GetGrain<IRunnerGrain>(runnerId)
-                            .IsCurrentProcessGenerationAsync(handshake.ProcessGeneration))
-                        throw new RunnerControlUnavailableException("Runner control processGeneration is not current");
+                            .IsCurrentRegistrationAuthorityAsync(
+                                handshake.ProcessGeneration,
+                                presentedAuthority))
+                        throw new RunnerControlUnavailableException(
+                            "Runner control registration authority is not current");
 
                     Task? replacedFence = null;
                     if (_connections.TryGetValue(runnerId, out var replaced))
@@ -136,17 +176,37 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
                         handshake.BuildGitHash,
                         handshake.Component,
                         handshake.Version,
-                        handshake.SourceRevision ?? handshake.BuildGitHash,
+                        RunnerBuildIdentityPolicy.ResolveSourceRevision(
+                            handshake.SchemaVersion,
+                            handshake.SourceRevision,
+                            handshake.BuildGitHash),
                         handshake.TreeHash,
                         handshake.ArtifactDigest,
                         handshake.ReleaseId,
                         handshake.Generation,
-                        generation);
+                        generation,
+                        handshake.SchemaVersion);
+                    if (InstallationAuthorityValidatedAsync is not null)
+                        await InstallationAuthorityValidatedAsync(runnerId, connectionId, ct);
+                    if (!await _grains.GetGrain<IRunnerGrain>(runnerId)
+                            .IsCurrentRegistrationAuthorityAsync(
+                                handshake.ProcessGeneration,
+                                presentedAuthority))
+                        throw new RunnerControlUnavailableException(
+                            "Runner control registration authority changed during installation");
+                    if (InstallationPublicationReadyAsync is not null)
+                        await InstallationPublicationReadyAsync(runnerId, connectionId, ct);
 
                     run = connection.RunAsync(ct);
                     if (run.IsCompleted) await run;
-                    _connections[runnerId] = connection;
-                    published = true;
+                    lock (_authoritySync)
+                    {
+                        if (AuthorityEpochUnderLock(runnerId) != installationAuthorityEpoch)
+                            throw new RunnerControlUnavailableException(
+                                "Runner control authority was revoked during installation");
+                        _connections[runnerId] = connection;
+                        published = true;
+                    }
                     if (_connectionSignals.TryGetValue(runnerId, out var signal))
                         signal.TrySetResult();
                 }
@@ -166,6 +226,11 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
                 }
             }
 
+            // Installation has completed and both receive/write loops are now
+            // running. Probe work is tied to this exact connection and is
+            // observed here; it is never awaited while holding the installation
+            // gate and cannot move to a replacement connection.
+            activityProbe = ObserveActivityProbeAsync(connection);
             if (run is not null) await run;
         }
         finally
@@ -185,11 +250,90 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
             finally
             {
                 connection.CompleteDisconnect();
+                if (activityProbe is not null)
+                    await ObserveCancellationAsync(activityProbe);
             }
         }
     }
 
-    public Task<TResult> SendRequestAsync<TParams, TResult>(
+    private async Task ObserveActivityProbeAsync(RunnerControlWebSocketConnection connection)
+    {
+        try
+        {
+            await _activityProbes.ProbeAsync(
+                connection.RunnerId,
+                connection.ProcessGeneration,
+                ct => IsCurrentConnectionAsync(connection, ct),
+                (probe, ct) => connection.SendRequestAsync<RunnerSessionActivityProbeRequest, RunnerSessionActivityProbeResult>(
+                    "session.probe", probe, ct),
+                connection.LifetimeToken);
+        }
+        catch (OperationCanceledException) when (connection.LifetimeToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logs.CreateLogger<RunnerControlWebSocketRegistry>().LogWarning(
+                ex,
+                "Runner {RunnerId} reconnect activity probing stopped",
+                connection.RunnerId);
+        }
+    }
+
+    private async Task<bool> IsCurrentConnectionAsync(
+        RunnerControlWebSocketConnection connection,
+        CancellationToken ct)
+    {
+        if (!IsPublishedAndAuthorized(connection))
+            return false;
+        return await _grains.GetGrain<IRunnerGrain>(connection.RunnerId)
+            .IsCurrentRegistrationAuthorityAsync(
+                connection.ProcessGeneration,
+                connection.PresentedAuthority);
+    }
+
+    public async Task<RunnerAuthorityFenceResult> FenceAsync(
+        string runnerId,
+        string? processGeneration,
+        CancellationToken ct = default)
+    {
+        RunnerControlWebSocketConnection? connection = null;
+        Task? connectionFence = null;
+        lock (_authoritySync)
+        {
+            _authorityEpochs[runnerId] = checked(AuthorityEpochUnderLock(runnerId) + 1);
+            if (_connections.TryGetValue(runnerId, out var current))
+            {
+                if (_connections.TryRemove(
+                    new KeyValuePair<string, RunnerControlWebSocketConnection>(runnerId, current)))
+                {
+                    connection = current;
+                    // Fence synchronously marks the connection unavailable before
+                    // releasing the registry authority lock; completion may await
+                    // socket ownership outside the lock.
+                    connectionFence = current.FenceAsync(
+                        WebSocketCloseStatus.NormalClosure,
+                        "Runner authority revoked");
+                }
+            }
+        }
+
+        if (connection is null)
+            return RunnerAuthorityFenceResult.Empty;
+        await connectionFence!.WaitAsync(ct);
+        var sessions = _tracker.UnregisterAndGetSessions(
+            runnerId,
+            connection.ConnectionId.ToString("D"));
+        return new RunnerAuthorityFenceResult(sessions);
+    }
+
+    private static async Task ObserveCancellationAsync(Task task)
+    {
+        try { await task; }
+        catch (OperationCanceledException) { }
+    }
+
+    public async Task<TResult> SendRequestAsync<TParams, TResult>(
         string runnerId,
         string method,
         TParams parameters,
@@ -200,12 +344,39 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
             || contract.Params != typeof(TParams)
             || contract.Result != typeof(TResult))
             throw new ArgumentException($"Unsupported Runner control request contract '{method}'", nameof(method));
-        return GetConnection(runnerId).SendRequestAsync<TParams, TResult>(
-            method,
-            parameters,
-            contract.AllowsNull,
-            requestEnqueued,
-            ct);
+        var validatedConnection = GetConnection(runnerId);
+        if (!await _grains.GetGrain<IRunnerGrain>(runnerId)
+                .IsCurrentRegistrationAuthorityAsync(
+                    validatedConnection.ProcessGeneration,
+                    validatedConnection.PresentedAuthority))
+            throw new RunnerControlUnavailableException(
+                "Runner control registration authority is not current");
+        if (RequestAuthorityWaitingAsync is not null)
+            await RequestAuthorityWaitingAsync(runnerId, ct);
+
+        RunnerControlWebSocketConnection connection;
+        Task<TResult> response;
+        lock (_authoritySync)
+        {
+            connection = GetConnectionUnderAuthorityLock(runnerId);
+            if (!ReferenceEquals(connection, validatedConnection))
+                throw new RunnerControlUnavailableException(
+                    "Runner control authority changed before request enqueue");
+            // Request enqueue is the transport-authority linearization point:
+            // either it completes under this lock, or revocation wins first
+            // and no unscoped request can enter the outgoing queue.
+            response = connection.SendRequestAsync<TParams, TResult>(
+                method,
+                parameters,
+                contract.AllowsNull,
+                requestEnqueued,
+                ct);
+        }
+        var result = await response;
+        if (!IsPublishedAndAuthorized(connection))
+            throw new RunnerControlUnavailableException(
+                "Runner control request result belongs to revoked authority");
+        return result;
     }
 
     public bool IsConnected(string runnerId) => HasReadyConnection(runnerId);
@@ -215,12 +386,19 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
         string processGeneration,
         CancellationToken ct = default)
     {
-        if (!_connections.TryGetValue(runnerId, out var connection)
-            || !connection.IsAvailable
-            || !string.Equals(connection.ProcessGeneration, processGeneration, StringComparison.Ordinal))
+        RunnerControlWebSocketConnection connection;
+        try
+        {
+            connection = GetConnection(runnerId, processGeneration);
+        }
+        catch (RunnerControlUnavailableException)
+        {
             return false;
+        }
         return await _grains.GetGrain<IRunnerGrain>(runnerId)
-            .IsCurrentProcessGenerationAsync(processGeneration);
+            .IsCurrentRegistrationAuthorityAsync(
+                processGeneration,
+                connection.PresentedAuthority);
     }
 
     public async Task<string> GetCurrentProcessGenerationAsync(
@@ -242,23 +420,30 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
     {
         var connection = GetConnection(runnerId, processGeneration);
         if (!await _grains.GetGrain<IRunnerGrain>(runnerId)
-                .IsCurrentProcessGenerationAsync(processGeneration))
-            throw new RunnerControlUnavailableException("Runner control processGeneration is not current");
+                .IsCurrentRegistrationAuthorityAsync(
+                    processGeneration,
+                    connection.PresentedAuthority))
+            throw new RunnerControlUnavailableException(
+                "Runner control registration authority is not current");
         if (SessionCommandGenerationValidatedAsync is not null)
             await SessionCommandGenerationValidatedAsync(runnerId, processGeneration, ct);
-        if (!_connections.TryGetValue(runnerId, out var current)
-            || !ReferenceEquals(current, connection)
-            || !connection.IsAvailable)
-            throw new RunnerControlUnavailableException(
-                $"Runner '{runnerId}' has no control connection for the supplied process generation");
+        Task<TResult> response;
+        lock (_authoritySync)
+        {
+            if (!IsPublishedAndAuthorizedUnderLock(connection))
+                throw new RunnerControlUnavailableException(
+                    $"Runner '{runnerId}' has no authorized control connection for the supplied process generation");
+            response = connection.SendRequestAsync<TParams, TResult>(method, parameters, ct);
+        }
 
-        var result = await connection.SendRequestAsync<TParams, TResult>(method, parameters, ct);
-        if (!_connections.TryGetValue(runnerId, out current)
-            || !ReferenceEquals(current, connection)
-            || !connection.IsAvailable
+        var result = await response;
+        if (!IsPublishedAndAuthorized(connection)
             || !await _grains.GetGrain<IRunnerGrain>(runnerId)
-                .IsCurrentProcessGenerationAsync(processGeneration))
-            throw new RunnerControlUnavailableException("Runner control request result belongs to a stale process generation");
+                .IsCurrentRegistrationAuthorityAsync(
+                    processGeneration,
+                    connection.PresentedAuthority))
+            throw new RunnerControlUnavailableException(
+                "Runner control request result belongs to stale registration authority");
         return result;
     }
 
@@ -300,119 +485,43 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
     internal Task WaitForCurrentDisconnectionAsync(string runnerId, CancellationToken ct) =>
         GetConnection(runnerId).Disconnected.WaitAsync(ct);
 
-    private bool HasReadyConnection(string runnerId) =>
-        _connections.TryGetValue(runnerId, out var connection) && connection.IsAvailable;
-
-    internal RunnerControlWebSocketConnection GetConnection(string runnerId) =>
-        _connections.TryGetValue(runnerId, out var connection)
-            ? connection
-            : throw new RunnerControlUnavailableException($"Runner '{runnerId}' has no control connection");
-
-}
-
-internal sealed class RunnerControlConnectionReservation(Guid connectionId)
-{
-    public Guid ConnectionId { get; } = connectionId;
-}
-
-internal sealed class RunnerControlInstallationGate
-{
-    private readonly object _sync = new();
-    private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
-
-    internal int Count
+    private bool HasReadyConnection(string runnerId)
     {
-        get { lock (_sync) return _entries.Count; }
-    }
-
-    public async Task<IDisposable> AcquireAsync(string runnerId, Action? waiting, CancellationToken ct)
-    {
-        Entry entry;
-        lock (_sync)
+        lock (_authoritySync)
         {
-            if (!_entries.TryGetValue(runnerId, out entry!))
-            {
-                entry = new Entry();
-                _entries.Add(runnerId, entry);
-            }
-            entry.References++;
-        }
-
-        try
-        {
-            waiting?.Invoke();
-            await entry.Gate.WaitAsync(ct);
-            return new Lease(this, runnerId, entry);
-        }
-        catch
-        {
-            ReleaseReference(runnerId, entry);
-            throw;
+            return _connections.TryGetValue(runnerId, out var connection)
+                && connection.IsAvailable;
         }
     }
 
-    private void Release(string runnerId, Entry entry)
+    private bool IsPublishedAndAuthorized(RunnerControlWebSocketConnection connection)
     {
-        entry.Gate.Release();
-        ReleaseReference(runnerId, entry);
+        lock (_authoritySync)
+            return IsPublishedAndAuthorizedUnderLock(connection);
     }
 
-    private void ReleaseReference(string runnerId, Entry entry)
+    private bool IsPublishedAndAuthorizedUnderLock(RunnerControlWebSocketConnection connection) =>
+        _connections.TryGetValue(connection.RunnerId, out var current)
+        && ReferenceEquals(current, connection)
+        && connection.IsAvailable;
+
+    private long AuthorityEpochUnderLock(string runnerId) =>
+        _authorityEpochs.TryGetValue(runnerId, out var epoch) ? epoch : 0;
+
+    internal RunnerControlWebSocketConnection GetConnection(string runnerId)
     {
-        lock (_sync)
-        {
-            entry.References--;
-            if (entry.References == 0
-                && _entries.TryGetValue(runnerId, out var current)
-                && ReferenceEquals(current, entry))
-                _entries.Remove(runnerId);
-        }
+        lock (_authoritySync)
+            return GetConnectionUnderAuthorityLock(runnerId);
     }
 
-    private sealed class Entry
+    private RunnerControlWebSocketConnection GetConnectionUnderAuthorityLock(string runnerId)
     {
-        public SemaphoreSlim Gate { get; } = new(1, 1);
-        public int References { get; set; }
+        if (_connections.TryGetValue(runnerId, out var connection)
+            && connection.IsAvailable)
+            return connection;
+        throw new RunnerControlUnavailableException($"Runner '{runnerId}' has no authorized control connection");
     }
 
-    private sealed class Lease(RunnerControlInstallationGate owner, string runnerId, Entry entry) : IDisposable
-    {
-        private int _disposed;
-
-        public void Dispose()
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) == 0)
-                owner.Release(runnerId, entry);
-        }
-    }
-}
-
-public sealed record RunnerControlHandshake(
-    string? BuildGitHash,
-    string? Component,
-    string? Version,
-    string? SourceRevision,
-    string? TreeHash,
-    string? ArtifactDigest,
-    string? ReleaseId,
-    long? Generation,
-    string? ProcessGeneration)
-{
-    public static RunnerControlHandshake FromQuery(IQueryCollection query) => new(
-        Normalize(query["buildGitHash"]),
-        Normalize(query["component"]),
-        Normalize(query["version"]),
-        Normalize(query["sourceRevision"]),
-        Normalize(query["treeHash"]),
-        Normalize(query["artifactDigest"]),
-        Normalize(query["releaseId"]),
-        long.TryParse(query["generation"], out var generation) && generation > 0 ? generation : null,
-        Exact(query["processGeneration"]));
-
-    private static string? Normalize(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
-    private static string? Exact(string? value) => string.IsNullOrEmpty(value) ? null : value;
 }
 
 public sealed class RunnerControlUnavailableException(string message, Exception? inner = null)
@@ -441,7 +550,10 @@ internal sealed class RunnerControlWebSocketConnection
     private readonly Guid _connectionId;
     private readonly System.Net.WebSockets.WebSocket _socket;
 
+    public string RunnerId => _runnerId;
+    public Guid ConnectionId => _connectionId;
     public string ProcessGeneration { get; }
+    public RunnerPresentedAuthority PresentedAuthority { get; }
     private readonly TimeProvider _timeProvider;
     private readonly ILogger _log;
     private readonly Channel<byte[]> _outgoing = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(QueueCapacity)
@@ -460,6 +572,7 @@ internal sealed class RunnerControlWebSocketConnection
     private Task? _fenceTask;
 
     public Task Disconnected => _disconnected.Task;
+    public CancellationToken LifetimeToken => _closed.Token;
     public bool IsAvailable => Volatile.Read(ref _fenced) == 0;
     internal bool IsSocketSendGateAvailable => _socketSendGate.CurrentCount == 1;
 
@@ -467,6 +580,7 @@ internal sealed class RunnerControlWebSocketConnection
         string runnerId,
         Guid connectionId,
         string processGeneration,
+        RunnerPresentedAuthority presentedAuthority,
         System.Net.WebSockets.WebSocket socket,
         TimeProvider timeProvider,
         ILogger log)
@@ -474,6 +588,7 @@ internal sealed class RunnerControlWebSocketConnection
         _runnerId = runnerId;
         _connectionId = connectionId;
         ProcessGeneration = processGeneration;
+        PresentedAuthority = presentedAuthority;
         _socket = socket;
         _timeProvider = timeProvider;
         _log = log;

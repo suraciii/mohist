@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Capacity;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Domain;
@@ -12,7 +13,7 @@ using Mohist.Server.Workspace.Grains;
 namespace Mohist.Server.Agent.Grains;
 
 /// <summary>
-/// Admission, runner election, and concurrency-permit lifecycle for
+/// Admission, runner election, and derived Agent-capacity claiming for
 /// an <see cref="AgentJobGrain"/>. Split from the grain file under the
 /// line-count ratchet; all methods share the partial class's private
 /// state via the host.
@@ -28,8 +29,9 @@ public sealed partial class AgentJobGrain
 
         // If the row already carries a dispatch snapshot (a previous
         // admission succeeded), the next claim race is owned by the
-        // poll path. Re-admitting here would clobber ReadySince and
-        // extend the deadline; only re-admit when no runner was found.
+        // poll path. Re-admitting here would extend the deadline; the
+        // first capacity claim's timestamps stay fixed, so only the
+        // assignment is revised.
         var pinnedRunnerId = State.Input.PinnedRunnerId;
         if (!string.IsNullOrWhiteSpace(State.RunnerId)
             && !string.IsNullOrWhiteSpace(_ledger?.DispatchJson)
@@ -42,39 +44,30 @@ public sealed partial class AgentJobGrain
                 State.WorkId = null;
                 State.RunnerAccepted = false;
                 State.RunningSince = null;
-                State.ReadySince = null;
                 await PersistAsync();
             }
             else
             {
-            var assignedRunner = GrainFactory.GetGrain<IRunnerGrain>(State.RunnerId);
-            if ((await assignedRunner.GetRuntimeStateAsync()).Status == RunnerStatus.Online)
-                return;
+                var assignedRunner = GrainFactory.GetGrain<IRunnerGrain>(State.RunnerId);
+                if ((await assignedRunner.GetRuntimeStateAsync()).Status == RunnerStatus.Online)
+                    return;
 
-            State.RunnerId = null;
-            State.RunnerAccepted = false;
-            State.RunningSince = null;
-            State.ReadySince = null;
-            await PersistAsync();
+                State.RunnerId = null;
+                State.RunnerAccepted = false;
+                State.RunningSince = null;
+                await PersistAsync();
             }
         }
 
-        if (!await AcquireConcurrencyPermitAsync())
+        if (!await ClaimAgentCapacityAsync())
             return;
-
-        State.WaitingReason = null;
-        await PersistAsync();
 
         var projectId = State.Input.ProjectId ?? string.Empty;
         if (!string.IsNullOrWhiteSpace(pinnedRunnerId))
         {
-            State.WaitingReason = null;
-            if (!await TryAdmitOnRunnerAsync(pinnedRunnerId))
-            {
-                State.WaitingReason = AgentAvailabilityWaitReasons.NoOnlineRunner;
-                await ReleaseConcurrencyPermitAsync();
-                await PersistAsync();
-            }
+            if (await TryAdmitOnRunnerAsync(pinnedRunnerId))
+                return;
+            await SetWaitingReasonAsync(AgentAvailabilityWaitReasons.NoOnlineRunner);
             return;
         }
 
@@ -82,15 +75,14 @@ public sealed partial class AgentJobGrain
         var runners = await registry.ListEligibleRunnersAsync(projectId);
         if (runners.Count == 0)
         {
-            State.WaitingReason = AgentAvailabilityWaitReasons.NoOnlineRunner;
-            await ReleaseConcurrencyPermitAsync();
+            await SetWaitingReasonAsync(AgentAvailabilityWaitReasons.NoOnlineRunner);
             return;
         }
 
         // Workspace affinity: a bound job routes to the workspace's home
         // runner first. A stale home (runner offline) is cleared and the
         // job falls back to the generic election; the runner that wins
-        // materializes the workspace and reports the new home.
+        // provisions the workspace and reports the new home.
         if (!string.IsNullOrWhiteSpace(State.Input.WorkspaceName)
             && !string.IsNullOrWhiteSpace(State.Input.ProjectId))
         {
@@ -118,145 +110,122 @@ public sealed partial class AgentJobGrain
                 return;
         }
 
-        State.WaitingReason = AgentAvailabilityWaitReasons.CapacityFull;
-        await ReleaseConcurrencyPermitAsync();
-        await PersistAsync();
+        await SetWaitingReasonAsync(AgentAvailabilityWaitReasons.CapacityFull);
     }
 
-    private async Task<bool> AcquireConcurrencyPermitAsync()
+    /// <summary>
+    /// Claims Agent occupancy in the derived capacity store before Runner
+    /// election. The claim runs in the store's single SQLite immediate
+    /// transaction against the actually persisted ledger revision, so it
+    /// happens even when no Runner is online and a concurrent writer
+    /// cannot split counting from claiming. The durable recovery
+    /// reminder is armed first: a crash after the commit still leaves a
+    /// wake-up that re-evaluates from the committed row.
+    /// </summary>
+    private async Task<bool> ClaimAgentCapacityAsync()
     {
-        if (State.Input is null)
-            return false;
-
-        var projectId = State.Input.ProjectId;
-        var agentId = State.Input.AgentId;
-        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(agentId))
+        if (State.CapacityClaimedAt is not null)
             return true;
 
-        var token = State.ConcurrencyPermitToken ??= $"{Key}:execution";
-        var dispatchId = State.ConcurrencyDispatchId ??= $"job:{Key}";
-        var gate = _grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId));
-        var result = await gate.AcquireAsync(
-            projectId,
-            agentId,
-            token,
-            Key,
-            AgentConcurrencyPermitOwnerKind.Job,
-            dispatchId);
-        if (result == AgentConcurrencyAcquireResult.Waiting)
-        {
-            var waiter = (await gate.GetSnapshotAsync()).Waiters.FirstOrDefault(candidate =>
-                string.Equals(candidate.Token, token, StringComparison.Ordinal)
-                && string.Equals(candidate.OwnerId, Key, StringComparison.Ordinal));
-            State.ConcurrencyPermitHeld = false;
-            State.ConcurrencyPermitId = null;
-            State.ConcurrencyWaiterId = waiter?.WaiterId;
-            State.ConcurrencyGeneration = waiter?.Generation ?? State.ConcurrencyGeneration;
-            State.ConcurrencyGateStatus = AgentConcurrencyPermitStatus.DispatchPending;
-            State.WaitingReason = AgentAvailabilityWaitReasons.CapacityFull;
+        // The accepted input must be on the row before the claim
+        // transaction can read it.
+        if (_ledger is null)
             await PersistAsync();
-            return false;
-        }
+        await EnsureRecoveryReminderAsync();
 
-        var permit = await gate.GetPermitAsync(token);
-        State.ConcurrencyPermitHeld = permit is not null;
-        State.ConcurrencyPermitId = permit?.PermitId;
-        State.ConcurrencyWaiterId = null;
-        State.ConcurrencyGeneration = permit?.Generation ?? 0;
-        State.ConcurrencyDispatchId = permit?.DispatchId ?? dispatchId;
-        State.ConcurrencyGateStatus = AgentConcurrencyPermitStatus.DispatchPending;
-        State.WaitingReason = AgentAvailabilityWaitReasons.DispatchPending;
-        await PersistAsync();
-        if (permit is not null)
-            await gate.ConfirmDispatchPendingAsync(projectId, agentId, token, permit.PermitId!, permit.DispatchId!);
-        return true;
-    }
-
-    public async Task ConcurrencyPermitGrantedAsync(
-        string? token = null,
-        string? permitId = null,
-        string? dispatchId = null)
-    {
-        await HydrateAsync();
-        if (token is not null
-            && !string.Equals(State.ConcurrencyPermitToken, token, StringComparison.Ordinal))
-            return;
-        if (permitId is not null
-            && State.ConcurrencyPermitId is not null
-            && !string.Equals(State.ConcurrencyPermitId, permitId, StringComparison.Ordinal))
-            return;
-        if (dispatchId is not null
-            && State.ConcurrencyDispatchId is not null
-            && !string.Equals(State.ConcurrencyDispatchId, dispatchId, StringComparison.Ordinal))
-            return;
-        if (State.Status == AgentJobStatus.Pending)
-            await TryAdmitAsync();
-    }
-
-    private async Task ReleaseConcurrencyPermitAsync()
-    {
-        if (State.Input is null)
-            return;
-
-        var projectId = State.Input.ProjectId;
-        var agentId = State.Input.AgentId;
-        var token = State.ConcurrencyPermitToken;
-        if (string.IsNullOrWhiteSpace(projectId)
-            || string.IsNullOrWhiteSpace(agentId)
-            || string.IsNullOrWhiteSpace(token))
-        {
-            State.ConcurrencyPermitHeld = false;
-            return;
-        }
-
-        State.ConcurrencyPermitHeld = false;
-        State.ConcurrencyReleasePending = true;
-        await PersistAsync();
-        await TryReleaseConcurrencyPermitAsync();
-    }
-
-    private async Task TryReleaseConcurrencyPermitAsync()
-    {
-        if (!State.ConcurrencyReleasePending
-            || State.Input is null
-            || string.IsNullOrWhiteSpace(State.Input.ProjectId)
-            || string.IsNullOrWhiteSpace(State.Input.AgentId)
-            || string.IsNullOrWhiteSpace(State.ConcurrencyPermitToken))
-            return;
-
+        AgentJobCapacityClaimResult result;
         try
         {
-            var projectId = State.Input.ProjectId;
-            var agentId = State.Input.AgentId;
-            var gate = _grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId));
-            if (State.ConcurrencyPermitId is not null
-                && State.ConcurrencyDispatchId is not null)
-            {
-                await gate.MarkTerminalAsync(
-                    projectId,
-                    agentId,
-                    State.ConcurrencyPermitToken,
-                    State.ConcurrencyPermitId,
-                    State.ConcurrencyDispatchId,
-                    State.Status == AgentJobStatus.Cancelled);
-            }
-            await gate.ReleaseAsync(
-                projectId,
-                agentId,
-                State.ConcurrencyPermitToken,
-                State.ConcurrencyPermitId,
-                State.ConcurrencyGeneration == 0 ? null : State.ConcurrencyGeneration,
-                State.ConcurrencyWaiterId);
-            State.ConcurrencyReleasePending = false;
-            await PersistAsync();
+            result = await _capacityStore.ClaimJobAsync(Key, _ledger!.Revision);
         }
         catch (Exception ex)
         {
+            // An exception leaves the commit outcome unknown: the row may
+            // already hold the claim. Reload the authoritative row before
+            // this activation takes any further effect and let the
+            // reminder retry from those facts; treating the claim as
+            // failed here could admit a second occupant.
             _log.LogWarning(ex,
-                "AgentJob {Id} could not release concurrency permit {Token}; recovery reminder will retry",
-                Key,
-                State.ConcurrencyPermitToken);
+                "AgentJob {Id} capacity claim outcome is uncertain; state reloaded before any further effect",
+                Key);
+            _hydrated = false;
+            await HydrateAsync();
+            return false;
         }
+
+        switch (result.Disposition)
+        {
+            case AgentCapacityClaimDisposition.Claimed:
+            case AgentCapacityClaimDisposition.AlreadyClaimed:
+                if (result.Job is not null)
+                    InstallCommittedLedger(result.Job);
+                await SetWaitingReasonAsync(AgentAvailabilityWaitReasons.DispatchPending);
+                return true;
+
+            case AgentCapacityClaimDisposition.Conflict:
+                // A concurrent writer moved the row; only a fresh reload
+                // makes a retry safe. Never save the stale cache over it.
+                _hydrated = false;
+                await HydrateAsync();
+                return false;
+
+            case AgentCapacityClaimDisposition.Incomplete:
+                // Missing Agent identity or definition, or owner evidence
+                // that cannot attribute this Job: the accepted work stays
+                // Pending until the definition or identity is repaired.
+                await SetWaitingReasonAsync(AgentAvailabilityWaitReasons.DispatchPending);
+                return false;
+
+            case AgentCapacityClaimDisposition.CapacityFull:
+            case AgentCapacityClaimDisposition.NotInOrder:
+            case AgentCapacityClaimDisposition.NotEligible:
+                // Accepted work waiting behind other occupants or behind
+                // its own Session's earlier deliverable Turn. It never
+                // fails from this fact; the reminder re-evaluates.
+                await SetWaitingReasonAsync(AgentAvailabilityWaitReasons.CapacityFull);
+                return false;
+
+            default:
+                return false;
+        }
+    }
+
+    private async Task SetWaitingReasonAsync(string? reason)
+    {
+        if (State.WaitingReason == reason)
+            return;
+        State.WaitingReason = reason;
+        await PersistAsync();
+    }
+
+    /// <summary>
+    /// Installs a ledger record that a storage transaction just committed
+    /// on this owner's behalf (the derived capacity claim). The committed
+    /// row — including its incremented revision and the claim facts — is the
+    /// only valid base for the next save or dispatch; a stale cache over it
+    /// would write a lost update.
+    /// </summary>
+    private void InstallCommittedLedger(AgentJobLedgerRecord record)
+    {
+        _ledger = record;
+        _state = JsonSerializer.Deserialize<AgentJobState>(record.StateJson, JSON.Options) ?? new AgentJobState();
+        BackfillSchedulingFieldsFromRecord(record);
+        _hydrated = true;
+    }
+
+    private void BackfillSchedulingFieldsFromRecord(AgentJobLedgerRecord record)
+    {
+        if (_state is null)
+            return;
+        // Backfill scheduling fields from the row so callers that read
+        // state see the indexed values too.
+        _state.RunnerId ??= record.AssignedRunnerId;
+        _state.WorkId ??= record.WorkId;
+        _state.SubmittedAt ??= record.ReadySince;
+        _state.ReadySince ??= record.ReadySince;
+        _state.RunningSince ??= record.RunningSince;
+        if (Enum.TryParse<AgentLaunchVisibility>(record.LaunchVisibility, true, out var visibility))
+            _state.LaunchVisibility = visibility;
     }
 
     private async Task<bool> TryAdmitOnRunnerAsync(string runnerId)
@@ -276,14 +245,14 @@ public sealed partial class AgentJobGrain
 
         // Admission writes the ledger row directly. The grain does not
         // call RunnerGrain.AssignAgentJobAsync and does not transition
-        // the job to Running; the next poll claim does that.
-        var now = _timeProvider.GetUtcNow();
+        // the job to Running; the next poll claim does that. The first
+        // capacity claim fixed ReadySince; assignment never restamps it.
         var workId = StableWorkId(Key);
         var dispatch = await BuildDispatchAsync(workId);
 
         State.RunnerId = runnerId;
         State.WorkId = workId;
-        State.ReadySince = now;
+        State.ReadySince = _ledger?.ReadySince ?? State.ReadySince;
         State.RunnerAccepted = false;
         State.RunningSince = null;
 
@@ -293,7 +262,7 @@ public sealed partial class AgentJobGrain
             Revision: _ledger?.Revision ?? 0,
             AssignedRunnerId: runnerId,
             WorkId: workId,
-            ReadySince: now,
+            ReadySince: State.ReadySince,
             RunningSince: null,
             DispatchJson: JsonSerializer.Serialize(dispatch, JSON.Options),
             WorkType: "agent-job",
@@ -322,29 +291,12 @@ public sealed partial class AgentJobGrain
 
         _log.LogInformation(
             "AgentJob {Id} admitted to runner {Runner} as work {Work} (readySince={ReadySince})",
-            Key, runnerId, workId, now);
+            Key, runnerId, workId, State.ReadySince);
 
         await EnsureRecoveryReminderAsync();
 
-        if (State.ConcurrencyPermitHeld
-            && State.ConcurrencyPermitId is not null
-            && State.ConcurrencyDispatchId is not null
-            && State.Input?.ProjectId is { } projectId
-            && State.Input.AgentId is { } agentId)
-        {
-            await _grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId))
-                .MarkDispatchedAsync(
-                    projectId,
-                    agentId,
-                    State.ConcurrencyPermitToken!,
-                    State.ConcurrencyPermitId,
-                    State.ConcurrencyDispatchId);
-            State.ConcurrencyGateStatus = AgentConcurrencyPermitStatus.Dispatched;
-            await PersistAsync();
-        }
-
         // The test-only signal is the admission boundary: all durable
-        // assignment and concurrency state must be visible before polling.
+        // assignment and capacity state must be visible before polling.
         await SafeAssignmentPreparedAsync(runnerId, workId);
 
         return true;

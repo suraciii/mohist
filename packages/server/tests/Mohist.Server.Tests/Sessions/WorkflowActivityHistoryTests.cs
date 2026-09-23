@@ -396,7 +396,11 @@ public sealed class WorkflowActivityHistoryTests : WorkflowActivityHistoryTestSu
             [AgentSessionQueryMetadataKeys.SessionName] = $"task-{issueNumber}",
         };
         if (sourceKind is not null)
+        {
             labels[AgentSessionQueryMetadataKeys.SourceKind] = sourceKind;
+            if (string.Equals(sourceKind, "workflow", StringComparison.Ordinal))
+                labels[GenericAgentSessionMetadata.AgentId] = "workflow-agent";
+        }
         var session = new AgentSession
         {
             Id = sessionId,
@@ -448,6 +452,7 @@ public sealed class WorkflowActivityHistoryTests : WorkflowActivityHistoryTestSu
                 {
                     [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
                     [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
+                    [GenericAgentSessionMetadata.AgentId] = "workflow-agent",
                     [AgentSessionQueryMetadataKeys.WorkflowRunId] = workflowRunId,
                     [AgentSessionQueryMetadataKeys.WorkId] = workId,
                     [AgentSessionQueryMetadataKeys.WorkType] = "task",

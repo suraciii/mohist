@@ -55,8 +55,20 @@ Outputs:
 - `run`: original script content.
 - `shell`: shell executable that was used.
 - `exitCode`: shell exit code.
-- `stdout`: truncated standard output.
-- `stderr`: truncated standard error.
+- `stdout`: retained standard output.
+- `stderr`: retained standard error.
+- `stdoutTruncated`: whether the result boundary shortened `stdout`.
+- `stderrTruncated`: whether the result boundary shortened `stderr`.
+
+Each stream keeps its first 20,000 UTF-16 code units. A stream of exactly
+20,000 units or fewer is returned unchanged with its flag `false`; a longer
+stream returns those first 20,000 units with its flag `true`. The two flags are
+independent, and neither stream gains explanatory characters. The flags
+describe shortening by this result boundary only: they do not certify that
+every unit the process emitted was captured. A stored result written before
+these fields existed has no recorded completeness fact; a missing flag is not
+`false`. Consumers read the flags instead of inferring completeness from the
+returned length.
 
 Business error codes:
 

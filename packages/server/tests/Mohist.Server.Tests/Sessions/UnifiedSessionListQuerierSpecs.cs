@@ -328,6 +328,7 @@ public class UnifiedSessionListQuerierSpecs
             {
                 [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
                 [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
+                [GenericAgentSessionMetadata.AgentId] = "workflow-agent",
                 [AgentSessionQueryMetadataKeys.WorkflowRunId] = workflowRunId,
                 [AgentSessionQueryMetadataKeys.WorkId] = workId,
                 [AgentSessionQueryMetadataKeys.WorkType] = "task",

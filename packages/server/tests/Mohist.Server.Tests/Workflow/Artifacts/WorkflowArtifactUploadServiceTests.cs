@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -73,7 +74,7 @@ public sealed class WorkflowArtifactUploadServiceTests
 
         public Task<WorkflowArtifactStorageWriteResult> WriteDirectoryAsync(
             string storagePath,
-            IReadOnlyList<WorkflowArtifactDirectoryEntryInput> entries,
+            IAsyncEnumerable<WorkflowArtifactDirectoryEntryInput> entries,
             WorkflowArtifactFileWrite write,
             DateTimeOffset recordedAt,
             WorkflowArtifactDirectoryLimits? limits = null,
@@ -114,7 +115,8 @@ public sealed class WorkflowArtifactUploadServiceTests
         var service = new WorkflowArtifactUploadService(
             factory, storage, new StubWorkContextResolver(),
             NullLogger<WorkflowArtifactUploadService>.Instance, time,
-            WorkflowArtifactUploadService.DefaultPendingTtl);
+            WorkflowArtifactUploadService.DefaultPendingTtl,
+            Options.Create(new WorkflowArtifactStorageOptions()));
         return new Harness(service, factory, storage, keeper);
     }
 

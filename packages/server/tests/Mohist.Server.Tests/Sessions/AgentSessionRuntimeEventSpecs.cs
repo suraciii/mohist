@@ -13,6 +13,7 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Api;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
@@ -60,7 +61,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport, IClassFixt
             {
                 [AgentSessionQueryMetadataKeys.ProjectId] = SlackDeliveryOwnerIds.ManagerProjectId,
                 [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
-                [GenericAgentSessionMetadata.AgentId] = "manager-agent",
+                [GenericAgentSessionMetadata.AgentId] = $"builtin:{BuiltInAgentCatalog.MohistSlackName}",
             })));
         await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
             "manager-route-input",
@@ -68,6 +69,12 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport, IClassFixt
             "manager request",
             "agent-launch",
             "manager-route-job",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = SlackDeliveryOwnerIds.ManagerProjectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = $"builtin:{BuiltInAgentCatalog.MohistSlackName}",
+            }),
             Provenance: provenance));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-route"));
         await grain.MarkInitialTurnTerminalAsync("manager-route-job", AgentTurnStatus.Completed, null);
@@ -181,7 +188,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport, IClassFixt
                 [AgentSessionQueryMetadataKeys.SourceKind] = "agent-connection",
                 [AgentSessionQueryMetadataKeys.ConnectionId] = enrollmentId,
                 [AgentSessionQueryMetadataKeys.OriginMarker] = AgentOriginMarkers.SlackManager,
-                [GenericAgentSessionMetadata.AgentId] = "manager-agent",
+                [GenericAgentSessionMetadata.AgentId] = $"builtin:{BuiltInAgentCatalog.MohistSlackName}",
             })));
         await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
             "manager-initial-input",
@@ -189,6 +196,14 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport, IClassFixt
             "manager request",
             "agent-connection",
             "manager-initial-job",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = SlackDeliveryOwnerIds.ManagerProjectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-connection",
+                [AgentSessionQueryMetadataKeys.ConnectionId] = enrollmentId,
+                [AgentSessionQueryMetadataKeys.OriginMarker] = AgentOriginMarkers.SlackManager,
+                [GenericAgentSessionMetadata.AgentId] = $"builtin:{BuiltInAgentCatalog.MohistSlackName}",
+            }),
             Provenance: initialProvenance));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-initial-recovery"));
         await grain.MarkInitialTurnTerminalAsync("manager-initial-job", AgentTurnStatus.Unknown, null);

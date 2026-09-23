@@ -1,7 +1,7 @@
 import { request, projectApiPath } from '../../../shared/api/client'
 import type { AgentActivity, AgentSessionInfo, AgentStatus } from '../model/types'
 
-type AgentRuntime = 'opencode' | 'pi'
+type AgentRuntime = 'opencode' | 'pi' | 'codex'
 
 /** The Runtime an unset Agent definition resolves to at dispatch. */
 const RUNTIME_DEFAULT: AgentRuntime = 'pi'
@@ -102,7 +102,11 @@ export interface AgentAvailabilityCapacity {
 export interface AgentAvailabilityResponse {
   canStartNow: boolean
   waitingReason: string | null
-  activeRuns: number
+  /**
+   * Derived active occupancy. Null when the Server cannot attribute the
+   * owning facts: an unknown count is never presented as zero.
+   */
+  activeRuns: number | null
   maxConcurrentRuns: number | null
   capacity: AgentAvailabilityCapacity
   observedAt: string
@@ -112,10 +116,10 @@ export interface AgentAvailabilitySummaryEntry {
   agentId: string
   canStartNow: boolean
   waitingReason: string | null
-  activeRuns: number
+  activeRuns: number | null
   maxConcurrentRuns: number | null
   capacity: AgentAvailabilityCapacity
-  queuedCount: number
+  queuedCount: number | null
 }
 
 export interface AgentWaitingWorkItem {
@@ -235,7 +239,8 @@ export function readAgentDefinitionModelAndVariant(agent: Pick<AgentInfo, 'agent
     config && typeof config.reasoningEffort === 'string' && config.reasoningEffort.trim()
       ? config.reasoningEffort
       : null
-  const rawRuntime = config?.runtime === 'opencode' || config?.runtime === 'pi' ? config.runtime : null
+  const rawRuntime =
+    config?.runtime === 'opencode' || config?.runtime === 'pi' || config?.runtime === 'codex' ? config.runtime : null
   return {
     model: rawModel,
     variant: rawVariant,
@@ -254,7 +259,10 @@ export function readAgentModelAndVariant(
 } {
   const definition = readAgentDefinitionModelAndVariant(agent)
   const effective = agent?.effectiveExecutionConfig
-  const effectiveRuntime = effective?.runtime === 'opencode' || effective?.runtime === 'pi' ? effective.runtime : null
+  const effectiveRuntime =
+    effective?.runtime === 'opencode' || effective?.runtime === 'pi' || effective?.runtime === 'codex'
+      ? effective.runtime
+      : null
   const effectiveModel = typeof effective?.model === 'string' && effective.model.trim() ? effective.model : null
   const effectiveVariant = typeof effective?.variant === 'string' && effective.variant.trim() ? effective.variant : null
   return {

@@ -152,6 +152,7 @@ public abstract class AgentSessionTestSupport
             .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, projectId)
             .WithLabel(AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString())
             .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+            .WithLabel(GenericAgentSessionMetadata.AgentId, "agent-1")
             .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId)
             .WithLabel(AgentSessionQueryMetadataKeys.SessionName, sessionName)
             .WithLabel(AgentSessionQueryMetadataKeys.WorkId, workId)

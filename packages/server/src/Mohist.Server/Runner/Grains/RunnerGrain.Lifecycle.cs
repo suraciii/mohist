@@ -15,7 +15,8 @@ public partial class RunnerGrain
         // claims in scope; the older claims stay in scope as non-authoritative.
         if (!string.IsNullOrWhiteSpace(state.CurrentProcessGeneration))
             state.ClosingProcessGeneration = state.CurrentProcessGeneration;
-        _draining = !string.IsNullOrWhiteSpace(state.ClosingProcessGeneration);
+        _draining = state.AdministrativeRemoval is not null
+            || !string.IsNullOrWhiteSpace(state.ClosingProcessGeneration);
     }
 
     /// <summary>
@@ -61,7 +62,8 @@ public partial class RunnerGrain
         }
 
         state.ClosingProcessGeneration = null;
-        _draining = !string.IsNullOrWhiteSpace(state.PendingProcessGeneration)
+        _draining = state.AdministrativeRemoval is not null
+            || !string.IsNullOrWhiteSpace(state.PendingProcessGeneration)
             || !string.IsNullOrWhiteSpace(state.UpdateInterruptFence?.PendingId);
         try
         {
@@ -174,7 +176,8 @@ public partial class RunnerGrain
         // deadline-based, so a claim recording no generation to close out is
         // not an AgentJob closeout trigger.
         IReadOnlyList<AgentJobLedgerRecord> agentJobs = [];
-        if (!string.IsNullOrWhiteSpace(closingGeneration))
+        if (_state.State?.AdministrativeRemoval is null
+            && !string.IsNullOrWhiteSpace(closingGeneration))
         {
             try
             {
@@ -213,6 +216,68 @@ public partial class RunnerGrain
         }
 
         return (complete, unsettledClaimGeneration);
+    }
+
+    /// <summary>
+    /// Administrative removal leaves no authoritative process generation, so
+    /// every generation-bound Workflow claim for this Runner is lost. Owner
+    /// claims remain the durable inventory: a failed discovery or settlement
+    /// leaves the removal phase pending and the next reminder enumerates them
+    /// again. AgentJobs are intentionally outside this path because Session
+    /// convergence owns their terminal-unknown settlement.
+    /// </summary>
+    private async Task<bool> ReconcileAllWorkflowClaimsForAdministrativeRemovalAsync()
+    {
+        IReadOnlyList<string> workflowRunIds;
+        try
+        {
+            workflowRunIds = await _workflowRuns.FindActiveWorkOwnersAssignedToAsync(RunnerId);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(
+                ex,
+                "Runner {RunnerId} could not discover Workflow owners during administrative removal",
+                RunnerId);
+            return false;
+        }
+
+        var complete = true;
+        foreach (var workflowRunId in workflowRunIds)
+        {
+            try
+            {
+                var run = await _workflowRuns.LoadAsync(workflowRunId);
+                if (run is null)
+                {
+                    complete = false;
+                    continue;
+                }
+
+                var active = run.CurrentActiveWorkFor(RunnerId);
+                if (active is null || string.IsNullOrWhiteSpace(active.ProcessGeneration))
+                    continue;
+                var verdict = await GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId)
+                    .FailActiveWorkAsync(
+                        RunnerId,
+                        active.WorkId,
+                        active.ProcessGeneration,
+                        "runner-lost");
+                if (verdict == WorkReportVerdict.Outstanding)
+                    complete = false;
+            }
+            catch (Exception ex)
+            {
+                complete = false;
+                _log.LogWarning(
+                    ex,
+                    "Runner {RunnerId} failed to close Workflow {WorkflowRunId} during administrative removal",
+                    RunnerId,
+                    workflowRunId);
+            }
+        }
+
+        return complete;
     }
 
     /// <summary>

@@ -1,4 +1,4 @@
-import { MarkdownReader } from '@/shared/ui'
+import { MarkdownReader } from '@/shared/ui/markdown-reader'
 
 export interface ArtifactTextContentProps {
   content: string

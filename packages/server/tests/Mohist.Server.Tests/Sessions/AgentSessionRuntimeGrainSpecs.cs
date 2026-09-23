@@ -39,6 +39,7 @@ public sealed class AgentSessionRuntimeGrainSpecs
             metadata: new AgentSessionMetadata()
                 .WithLabel("mohist.io/project-id", "project-1")
                 .WithLabel("mohist.io/source-kind", "workflow")
+                .WithLabel("mohist.io/agent-id", "workflow-agent")
                 .WithLabel("mohist.io/source-id", "workflow-1")
                 .WithLabel("mohist.io/session-name", "build"),
             now: _fixture.TimeProvider.GetUtcNow().UtcDateTime,
@@ -99,6 +100,107 @@ public sealed class AgentSessionRuntimeGrainSpecs
         Assert.Equal("/work", _fixture.StateStore.State.Runtime.WorkDir);
     }
 
+    [Fact]
+    public async Task AcceptFollowup_TerminalLaunchWithoutBindingThrowsRuntimeSessionMissing()
+    {
+        var grain = NewGrain();
+        await grain.OpenAsync(OpenCommand());
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job",
+            Metadata: OpenCommand().Metadata));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-session-1"));
+
+        var sessionId = grain.GetPrimaryKeyString();
+        var launched = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(launched);
+        var blackHole = launched!;
+        blackHole.Status = blackHole.Status with
+        {
+            AgentRuntimeSessionId = null,
+            Turns = [.. blackHole.Status.Turns!.Select(turn => turn with { Status = AgentTurnStatus.Completed })]
+        };
+        await _fixture.StateStore.SaveAsync(sessionId, blackHole);
+        await TestLifecycle.Deactivate(grain);
+
+        var exception = await Assert.ThrowsAsync<RuntimeSessionMissingException>(() =>
+            grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+                "continue", "agent-session-followup", "black-hole-key", AllowPendingInitialLaunch: true)));
+
+        Assert.Equal(sessionId, exception.SessionId);
+        Assert.Contains("Reset", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AcceptFollowup_PendingLaunchWithoutBindingStillAccepts()
+    {
+        var grain = NewGrain();
+        await grain.OpenAsync(OpenCommand());
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job",
+            Metadata: OpenCommand().Metadata));
+
+        var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "continue", "agent-session-followup", "pending-launch-key", AllowPendingInitialLaunch: true));
+
+        Assert.False(accepted.AlreadyAccepted);
+        var state = await _fixture.StateStore.LoadAsync(grain.GetPrimaryKeyString());
+        Assert.Equal(AgentTurnStatus.Queued, Assert.Single(state!.Status.Turns!, turn => turn.Id == accepted.TurnId).Status);
+    }
+
+    [Fact]
+    public async Task AcceptFollowup_UnknownLaunchWithoutBindingStillAccepts()
+    {
+        var grain = NewGrain();
+        await grain.OpenAsync(OpenCommand());
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job",
+            Metadata: OpenCommand().Metadata));
+
+        var sessionId = grain.GetPrimaryKeyString();
+        var launched = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(launched);
+        var unresolved = launched!;
+        unresolved.Status = unresolved.Status with
+        {
+            AgentRuntimeSessionId = null,
+            Turns = [.. unresolved.Status.Turns!.Select(turn => turn with { Status = AgentTurnStatus.Unknown })]
+        };
+        await _fixture.StateStore.SaveAsync(sessionId, unresolved);
+        await TestLifecycle.Deactivate(grain);
+
+        var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "continue", "agent-session-followup", "unknown-launch-key", AllowPendingInitialLaunch: true));
+
+        Assert.False(accepted.AlreadyAccepted);
+    }
+
+    [Fact]
+    public async Task AcceptFollowup_TerminalLaunchWithBindingAccepts()
+    {
+        var grain = NewGrain();
+        await grain.OpenAsync(OpenCommand());
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job",
+            Metadata: OpenCommand().Metadata));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-session-1"));
+
+        var sessionId = grain.GetPrimaryKeyString();
+        var launched = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(launched);
+        var finished = launched!;
+        finished.Status = finished.Status with
+        {
+            Turns = [.. finished.Status.Turns!.Select(turn => turn with { Status = AgentTurnStatus.Completed })]
+        };
+        await _fixture.StateStore.SaveAsync(sessionId, finished);
+        await TestLifecycle.Deactivate(grain);
+
+        var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "continue", "agent-session-followup", "terminal-bound-key", AllowPendingInitialLaunch: true));
+
+        Assert.False(accepted.AlreadyAccepted);
+    }
+
     private IAgentSessionGrain NewGrain() =>
         _fixture.Grains.GetGrain<IAgentSessionGrain>($"runtime-grain-{Guid.NewGuid():N}");
 
@@ -109,6 +211,7 @@ public sealed class AgentSessionRuntimeGrainSpecs
         Metadata: new AgentSessionMetadata()
             .WithLabel("mohist.io/project-id", "project-1")
             .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/agent-id", "workflow-agent")
             .WithLabel("mohist.io/source-id", "workflow-1")
             .WithLabel("mohist.io/session-name", "build"));
 }

@@ -276,6 +276,30 @@ public sealed class CredentialStore : ICredentialStore, IRunnerCredentialStatusR
             : RunnerCredentialStatus.Missing;
     }
 
+    public async Task<RunnerCredentialAuthority?> GetActiveAuthorityAsync(
+        string runnerId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(runnerId))
+            return null;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var rows = await db.Credentials
+            .AsNoTracking()
+            .Where(candidate => candidate.Kind.ToLower() == "runner"
+                && candidate.Name == runnerId
+                && candidate.RevokedAt == null)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var now = _time.GetUtcNow();
+        var row = rows
+            .Where(candidate => candidate.ExpiresAt is null || candidate.ExpiresAt.Value > now)
+            .OrderByDescending(candidate => candidate.CreatedAt)
+            .ThenByDescending(candidate => candidate.Id, StringComparer.Ordinal)
+            .FirstOrDefault();
+        return row is null ? null : new RunnerCredentialAuthority(row.Id, row.CreatedAt);
+    }
+
     public async Task<bool> RevokeRunnerCredentialAsync(
         string runnerId,
         DateTimeOffset revokedAt,

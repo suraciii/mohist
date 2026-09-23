@@ -1,34 +1,70 @@
 # Product Vision
 
-Mohist is an Agent-oriented software factory. It turns the path from idea to
-delivery into a production line that people can define, run, and supervise.
-An Issue enters and a deliverable leaves. People intervene when judgment or
-exception handling is required.
+Mohist is an Agent-native application that provides an Agent product and a
+programmable software factory. People can use a Mohist Agent as their own
+Agent or use Mohist through an External Agent.
+
+The factory turns the path from idea to delivery into a production line that
+people can define, run, and supervise. An Issue enters and a deliverable
+leaves. People retain direction and judgment throughout delivery, while
+Agents perform delegated work.
 
 ## Goal
 
 When the production line is clear enough and Agent execution is reliable
-enough, one person can deliver as much as a small team.
+enough, one person can deliver as much as a small team while retaining the
+ability to understand, evaluate, and redirect the work.
+
+## Philosophy
+
+[Philosophy of Software Development](philosophy.md) examines development as a
+purposeful practical activity. Human intentions guide the work; building
+and using its results can also change how humans understand those intentions.
+Review and correction continue this activity. Agents connect human intent to
+program operations and return evidence for judgment. Programs make defined
+rules enforceable within those operations. The argument extends to how
+applications can be organized for use through a user's Agent, and how this
+priority changes interfaces and presentation.
+
+Mohist applies that perspective through a software factory. It amplifies
+human capacity to act while preserving users' ability to inspect evidence,
+question assumptions, and redirect work. Its organization must demonstrate
+its value through the results it helps users achieve.
 
 ## How People Use Mohist
 
-People normally stay in Slack, an IDE, or another existing workspace. Mohist
-executes work, records evidence, and returns results there. The long-term goal
-is to complete more than 90% of daily queries, delegations, and operations in
-those existing places without requiring an Agent to run outside Mohist.
+Agent interaction is the first priority. People primarily express intent,
+delegate work, and discuss results in natural-language conversations with
+Agents. They can use a Mohist Agent directly or converse in existing spaces
+such as Slack and Discord.
 
-A configured Mohist Agent works directly in the Web UI or CLI and can appear in
-an external interaction location through an Agent Connection. Configure its
-Instructions, execution settings, and Skills once in Mohist. AgentJobs launch
-work and AgentSessions preserve the continuing session.
+Agent interaction must support the complete work cycle: express an idea,
+clarify requirements, delegate work, inspect progress, resolve exceptions,
+make decisions, examine results, and correct direction. The Agent must
+translate intent into operations and explain results using execution facts
+that the user can inspect and question.
 
-An External Agent can use the Mohist Skill and `mo` to query state, delegate
-work, and perform operations. It returns the result to its existing
+The [Web UI](web-ui.md) focuses on displaying progress, relationships,
+evidence, and results. People can use these views alongside Agent
+conversations to understand and judge the work. Direct controls remain
+available for configuration, decisions, and manual takeover.
+
+A Mohist Agent works with the user as their own Agent: discussing goals,
+organizing work, and explaining results. It can join the user's communication
+space through an Agent Connection. Its Instructions, execution settings, and
+Skills belong to the Agent.
+
+Users can also keep an Agent from another product. That External Agent uses
+the Mohist Skill and `mo` to operate Mohist and returns results to its existing
 conversation. It does not become a Mohist Agent resource.
 
-Mohist Issues and Workflows form the execution layer. AgentSessions retain the
-traceable execution record. The Web UI is a fallback operations and
-visualization plane, not a workspace that users must adopt.
+Users can clarify, question, and revise their requests while work proceeds.
+The Agent must relate new input to the ongoing work and explain any decision
+needed to change direction.
+
+Mohist Issues and Workflows form the execution layer. Agents use programmatic
+interfaces to record intent, start work, read evidence, and apply decisions.
+Users do not have to translate their requests into Mohist's resource model.
 
 ## How the Factory Operates
 
@@ -48,23 +84,28 @@ visualization plane, not a workspace that users must adopt.
   without reading full logs.
 - **Events keep work moving:** Event routing can trigger supervision, failure
   handling, and progress responses without making a person watch every step.
-- **Exceptions reach people:** When work stops, Mohist shows where it stopped,
-  what it tried, and what decision is needed. People supervise exceptions
-  instead of watching every step.
+- **Exceptions reach people:** When work stops, Mohist reports the stopping
+  point, attempted actions, and required decision in the user's conversation.
+  People supervise exceptions instead of watching every step.
 
-## Principles
+## Product Principles
 
-- **Agents work independently:** A Mohist Agent is configurable, startable,
-  continuable, and able to read results before it has an external Connection.
-- **One Agent, many entry points:** The Web UI, CLI, Slack, and automation use
-  the same Agent capability. Entry points handle identity, protocol, and
-  presentation without keeping another copy of the Agent definition.
-- **Agent-friendly interfaces first:** A Mohist Agent has a stable invocation
-  interface. An External Agent can discover and operate Mohist with a Skill and
-  `mo`. Critical capabilities must not exist only in the Web UI.
-- **Issues carry complete objectives:** An Issue contains everything an Agent
-  needs to finish the work: requirements, acceptance criteria, and boundaries.
-  The Agent must not have to ask for decisions after the work starts.
+- **Agents are reusable capabilities:** A Mohist Agent can be configured,
+  started, continued, and queried through programmatic interfaces. Its
+  capabilities remain independent of any communication channel.
+- **Connections carry conversations:** An Agent Connection handles identity,
+  protocol, and presentation. It does not keep another copy of the Agent
+  definition or implement its own reasoning.
+- **Application interfaces serve Agents first:** Every product operation must
+  have a stable programmatic interface with explicit inputs, results, and
+  failures. Agents use these interfaces to act and inspect state and evidence.
+  The Web UI uses the same operations. Skills explain how Agents use these
+  interfaces.
+- **Issues carry complete objectives:** An Issue contains the requirements,
+  acceptance criteria, and boundaries needed to start work. When new evidence
+  requires a decision outside those boundaries, the Agent must bring that
+  decision to the user. An Agent proposal does not become a user decision
+  without the user's approval.
 - **Feedback density over volume:** Each result is local to a change or a
   stage, quick to get, and objectively verifiable. An Agent uses the cheapest
   check that can answer its current question. Feedback that is slow or does
@@ -84,33 +125,34 @@ visualization plane, not a workspace that users must adopt.
 
 ## What Mohist Is Not
 
-- Mohist is not an IDE, chat tool, or collaboration workspace. Users keep their
-  daily collaboration in existing interaction locations while Mohist executes
-  work and records evidence.
+- Mohist is not an IDE or a general-purpose chat or collaboration tool. It
+  connects to existing communication spaces and provides views for directing
+  and inspecting software delivery.
 - Mohist is not CI. CI verifies a commit. Mohist advances a complete unit of
   work from requirement to integration.
 
 ## Direction
 
-Mohist is moving toward a factory where people leave routine execution in the
-loop only when they choose to supervise it. Supervision Agents can handle
-proxy Approval and failure routing, while mentions and event routing make that
-help configurable and revocable. See [Agent Supervision](agent-supervision.md)
+Mohist is moving toward a factory that reduces routine execution and
+coordination work so people can focus on direction, trade-offs, and results.
+People can inspect and redirect work even when no failure has been reported.
+Supervision Agents can handle proxy Approval and failure routing within their
+delegated authority, while mentions and event routing make that help
+configurable and revocable. See [Agent Supervision](agent-supervision.md)
 and [Agent Event Routing](event-routing.md).
 
-The same Agent should remain useful wherever the work starts. Agents should
-work independently in Mohist, join existing interaction locations with
-independent identities, and let External Agents use the same domain actions.
+The same Agent should remain useful wherever the conversation starts. Agents
+join existing communication spaces with independent identities, while
+External Agents use the same domain actions through programmatic interfaces.
 See [Agents and AgentSessions](agent-sessions.md), [Slack](slack.md),
 [Skills](skills.md), and [CLI Reference](cli-reference.md).
 
 The factory should support work whose shape becomes clear only during
-execution, larger plans, and reliable fallback supervision. Session trees,
-Epics, composite Issues, the Web UI, and mobile supervision with anomaly
-notifications extend that direction without moving daily collaboration into
-Mohist. See [Subagents and Session Trees](subagents.md), [Planning with
-Epics](epics.md), [Composite Issues and Child Issues](composite-issues.md), and
-[Web UI Guide](web-ui.md).
+execution, larger plans, and reliable supervision. Session trees, Epics, and
+composite Issues organize that work while people continue to supervise it
+through conversation. See [Subagents and Session Trees](subagents.md),
+[Planning with Epics](epics.md), and
+[Composite Issues and Child Issues](composite-issues.md).
 
 Parallel work depends on structure more than on scale. Workers need
 non-overlapping groups, written assignments, isolated work areas, interfaces
@@ -118,5 +160,3 @@ that stay unchanged, and a commit after each verified step. Clear, verifiable
 bulk work, such as cleanup, migration, and hardening, is rarely scheduled
 by hand. This is the first class of work that parallel delegation makes
 economical.
-
-This document describes the future product, not a delivery-status list.

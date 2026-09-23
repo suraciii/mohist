@@ -100,6 +100,20 @@ public sealed class ManagedSlackAgentApp
             validationState);
         RuntimeCredentialValidationState = validationState;
     }
+
+    public void ApplyManifest(int manifestVersion, string manifestHash)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(manifestVersion);
+        ArgumentException.ThrowIfNullOrWhiteSpace(manifestHash);
+        if (AppLifecycle != SlackAppLifecycle.Created || string.IsNullOrWhiteSpace(AppId))
+            throw new InvalidOperationException("A manifest can only be applied to a created Agent App with a known App id.");
+        if (DesiredManifestVersion != manifestVersion
+            || !string.Equals(DesiredManifestHash, manifestHash, StringComparison.Ordinal))
+            throw new InvalidOperationException("The applied manifest must match the desired manifest.");
+
+        AppliedManifestVersion = manifestVersion;
+        AppliedManifestHash = manifestHash.Trim();
+    }
 }
 
 public static class SlackAppLifecycle

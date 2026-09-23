@@ -123,6 +123,9 @@ func TestStageManagedTargetsRunnerStagesHoistedAndLocalDependencies(t *testing.T
 	if target.LaunchMode != 1 || !target.UsesCanonicalEntrypoint {
 		t.Fatalf("runner launch target = %#v", target)
 	}
+	if target.Identity.SchemaVersion != 1 || target.Identity.BuildGitHash != managedBuildTestCommit || target.Identity.RunnerID != "runner-pluto" {
+		t.Fatalf("staged runner identity = %#v, want canonical schemaVersion 1 and captured buildGitHash", target.Identity)
+	}
 }
 
 func TestStageManagedTargetsRejectsMissingRunnerEntrypoint(t *testing.T) {
@@ -148,6 +151,8 @@ func TestManagedUpdaterBuildFailurePrecedesServiceActivation(t *testing.T) {
 	commands.failPublish = true
 	control := &managedBuildTestControl{}
 	previous := managedBuildTestServerTarget()
+	previousIdentity, _ := json.MarshalIndent(previous.Identity, "", "  ")
+	files.put("/old/runtime-identity.json", append(previousIdentity, '\n'))
 	runtimeRoot := filepath.Join("/home/test", ".local", "share", "mohist", "runtime")
 	activePath := filepath.Join(runtimeRoot, "active.json")
 	verifiedPath := filepath.Join(runtimeRoot, "verified.json")
@@ -229,29 +234,159 @@ func TestManagedArtifactDigestSortsPathsAndExcludesMetadata(t *testing.T) {
 	}
 }
 
-func TestWriteManagedMetadataUsesExactCamelCaseIdentity(t *testing.T) {
+func TestWriteManagedMetadataUsesExactCanonicalIdentity(t *testing.T) {
 	files := newManagedBuildTestFiles()
 	identity := managedRuntimeIdentity{
-		Component: "runner", Version: "0.0.0+" + managedBuildTestCommit,
-		SourceRevision: managedBuildTestCommit, TreeHash: managedBuildTestTree,
+		SchemaVersion: 1, Component: "runner", Version: "0.0.0+" + managedBuildTestCommit,
+		SourceRevision: managedBuildTestCommit, BuildGitHash: managedBuildTestCommit, TreeHash: managedBuildTestTree,
 		ArtifactDigest: strings.Repeat("d", 64), ReleaseID: "mohist-runner-" + managedBuildTestCommit,
-		Generation: 31, RunnerID: "runner-pluto", BuildGitHash: managedBuildTestCommit, IsComplete: true,
+		Generation: 31, RunnerID: "runner-pluto",
 	}
 	err := writeManagedMetadata(files, "/candidate/runner", managedBuildTestSource(), identity)
 	if err != nil {
 		t.Fatalf("writeManagedMetadata() error = %v", err)
 	}
 
-	assertExactJSONKeys(t, files, "/candidate/runner/runtime-identity.json", []string{
-		"artifactDigest", "buildGitHash", "component", "generation", "isComplete", "releaseId", "runnerId", "sourceRevision", "treeHash", "version",
-	})
+	canonicalKeys := []string{
+		"schemaVersion", "component", "sourceRevision", "buildGitHash", "treeHash",
+		"artifactDigest", "releaseId", "generation", "runnerId",
+	}
+	identityKeys := append(append([]string(nil), canonicalKeys...), "version")
+	assertExactJSONKeys(t, files, "/candidate/runner/runtime-identity.json", identityKeys)
 	assertExactJSONKeys(t, files, "/candidate/runner/release.json", []string{"identity", "snapshotRoot", "sourceRoot"})
-	assertExactNestedJSONKeys(t, files, "/candidate/runner/release.json", "identity", []string{
-		"artifactDigest", "buildGitHash", "component", "generation", "isComplete", "releaseId", "runnerId", "sourceRevision", "treeHash", "version",
-	})
-	assertExactJSONKeys(t, files, "/candidate/runner/dist/build-info.json", []string{
-		"artifactDigest", "component", "generation", "gitHash", "releaseId", "runnerId", "sourceRevision", "treeHash", "version",
-	})
+	assertExactNestedJSONKeys(t, files, "/candidate/runner/release.json", "identity", identityKeys)
+	assertExactJSONKeys(t, files, "/candidate/runner/dist/build-info.json", identityKeys)
+	assertCanonicalIdentityValues(t, files, "/candidate/runner/runtime-identity.json", identity)
+	assertCanonicalIdentityValues(t, files, "/candidate/runner/dist/build-info.json", identity)
+	assertNoLegacyIdentityKeys(t, files, "/candidate/runner/runtime-identity.json")
+	assertNoLegacyIdentityKeys(t, files, "/candidate/runner/dist/build-info.json")
+}
+
+func TestWriteManagedMetadataServerIdentityCarriesBuildGitHash(t *testing.T) {
+	files := newManagedBuildTestFiles()
+	identity := managedRuntimeIdentity{
+		SchemaVersion: 1, Component: "server", Version: "0.0.0+" + managedBuildTestCommit,
+		SourceRevision: managedBuildTestCommit, BuildGitHash: managedBuildTestCommit, TreeHash: managedBuildTestTree,
+		ArtifactDigest: strings.Repeat("e", 64), ReleaseID: "mohist-server-" + managedBuildTestCommit,
+		Generation: 37,
+	}
+	if err := writeManagedMetadata(files, "/candidate/server", managedBuildTestSource(), identity); err != nil {
+		t.Fatalf("writeManagedMetadata() error = %v", err)
+	}
+
+	want := []string{
+		"schemaVersion", "component", "sourceRevision", "buildGitHash", "treeHash",
+		"artifactDigest", "releaseId", "generation", "runnerId", "version",
+	}
+	assertExactJSONKeys(t, files, "/candidate/server/runtime-identity.json", want)
+	assertExactNestedJSONKeys(t, files, "/candidate/server/release.json", "identity", want)
+	if files.has("/candidate/server/dist/build-info.json") {
+		t.Fatal("server metadata wrote a Runner build-info file")
+	}
+	assertCanonicalIdentityValues(t, files, "/candidate/server/runtime-identity.json", identity)
+	value, _, _ := files.ReadFile("/candidate/server/runtime-identity.json")
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(value, &object); err != nil {
+		t.Fatal(err)
+	}
+	var runnerID string
+	_ = json.Unmarshal(object["runnerId"], &runnerID)
+	if runnerID != "" {
+		t.Fatalf("server runnerId = %q, want present and empty", runnerID)
+	}
+}
+
+func TestValidManagedRuntimeIdentityCanonicalAndMalformed(t *testing.T) {
+	canonical := managedRuntimeIdentity{
+		SchemaVersion: 1, Component: "runner", Version: "0.0.0+" + managedBuildTestCommit,
+		SourceRevision: managedBuildTestCommit, BuildGitHash: managedBuildTestCommit, TreeHash: managedBuildTestTree,
+		ArtifactDigest: strings.Repeat("d", 64), ReleaseID: "mohist-runner-" + managedBuildTestCommit,
+		Generation: 31, RunnerID: "runner-pluto",
+	}
+	server := canonical
+	server.Component = "server"
+	server.RunnerID = ""
+	tests := []struct {
+		name   string
+		mutate func(*managedRuntimeIdentity)
+		valid  bool
+	}{
+		{name: "canonical runner", valid: true},
+		{name: "canonical server", mutate: func(identity *managedRuntimeIdentity) { *identity = server }, valid: true},
+		{name: "bad schema version", mutate: func(identity *managedRuntimeIdentity) { identity.SchemaVersion = 2 }},
+		{name: "zero schema version", mutate: func(identity *managedRuntimeIdentity) { identity.SchemaVersion = 0 }},
+		{name: "missing source revision", mutate: func(identity *managedRuntimeIdentity) { identity.SourceRevision = "" }},
+		{name: "missing build git hash", mutate: func(identity *managedRuntimeIdentity) { identity.BuildGitHash = "" }},
+		{name: "missing tree hash", mutate: func(identity *managedRuntimeIdentity) { identity.TreeHash = "" }},
+		{name: "missing artifact digest", mutate: func(identity *managedRuntimeIdentity) { identity.ArtifactDigest = "" }},
+		{name: "missing release id", mutate: func(identity *managedRuntimeIdentity) { identity.ReleaseID = "" }},
+		{name: "non-positive generation", mutate: func(identity *managedRuntimeIdentity) { identity.Generation = 0 }},
+		{name: "missing runner id", mutate: func(identity *managedRuntimeIdentity) { identity.RunnerID = "" }},
+		{name: "invalid component", mutate: func(identity *managedRuntimeIdentity) { identity.Component = "worker" }},
+		{name: "server with runner id", mutate: func(identity *managedRuntimeIdentity) { *identity = server; identity.RunnerID = "runner-pluto" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			identity := canonical
+			if test.mutate != nil {
+				test.mutate(&identity)
+			}
+			if got := validManagedRuntimeIdentity(identity); got != test.valid {
+				t.Fatalf("validManagedRuntimeIdentity() = %v, want %v for %#v", got, test.valid, identity)
+			}
+		})
+	}
+}
+
+func TestPointerTargetRejectsMalformedAndLegacyIdentity(t *testing.T) {
+	canonical := managedRuntimeTarget{
+		Component: "server", Entrypoint: "/release/server/Mohist.Server", WorkingDirectory: "/release/server",
+		Arguments: []string{}, RuntimeIdentifier: "linux-x64", IsAbsoluteTarget: true, UsesCanonicalEntrypoint: true,
+		Identity: managedRuntimeIdentity{
+			SchemaVersion: 1, Component: "server", Version: "0.0.0+" + managedBuildTestCommit,
+			SourceRevision: managedBuildTestCommit, BuildGitHash: managedBuildTestCommit, TreeHash: managedBuildTestTree,
+			ArtifactDigest: strings.Repeat("e", 64), ReleaseID: "mohist-server-" + managedBuildTestCommit, Generation: 37,
+		},
+	}
+	tests := []struct {
+		name   string
+		mutate func(*managedRuntimeTarget)
+	}{
+		{name: "bad schema version", mutate: func(target *managedRuntimeTarget) { target.Identity.SchemaVersion = 2 }},
+		{name: "zero schema version", mutate: func(target *managedRuntimeTarget) { target.Identity.SchemaVersion = 0 }},
+		{name: "missing build git hash", mutate: func(target *managedRuntimeTarget) { target.Identity.BuildGitHash = "" }},
+		{name: "missing artifact digest", mutate: func(target *managedRuntimeTarget) { target.Identity.ArtifactDigest = "" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target := canonical
+			test.mutate(&target)
+			pointer := managedPointer{"server": managedBuildTestJSON(target)}
+			if _, err := pointerTarget(pointer, "server"); err == nil {
+				t.Fatalf("pointerTarget() accepted malformed target %#v", target.Identity)
+			}
+		})
+	}
+
+	legacy := map[string]any{
+		"component": "server", "entrypoint": "/release/server/Mohist.Server",
+		"workingDirectory": "/release/server", "isAbsoluteTarget": true, "usesCanonicalEntrypoint": true,
+		"identity": map[string]any{
+			"component": "server", "sourceRevision": managedBuildTestCommit,
+			"treeHash": managedBuildTestTree, "artifactDigest": strings.Repeat("e", 64),
+			"releaseId": "mohist-server-" + managedBuildTestCommit, "generation": 37,
+			"gitHash": managedBuildTestCommit, "isComplete": true,
+		},
+	}
+	pointer := managedPointer{"server": managedBuildTestJSON(legacy)}
+	target, err := pointerTarget(pointer, "server")
+	if err != nil {
+		t.Fatalf("pointerTarget() rejected a legacy v0 target: %v", err)
+	}
+	if target.Identity.SchemaVersion != 0 || target.Identity.SourceRevision != managedBuildTestCommit ||
+		target.Identity.BuildGitHash != managedBuildTestCommit {
+		t.Fatalf("legacy target identity = %#v", target.Identity)
+	}
 }
 
 func TestStageManagedTargetsUsesGenerationInAbsoluteReleaseLayout(t *testing.T) {
@@ -276,6 +411,9 @@ func TestStageManagedTargetsUsesGenerationInAbsoluteReleaseLayout(t *testing.T) 
 	if target.Identity.Generation != 41 || target.Identity.ReleaseID != "mohist-server-"+managedBuildTestCommit {
 		t.Fatalf("identity = %#v, want generation 41 and server release identity", target.Identity)
 	}
+	if target.Identity.SchemaVersion != 1 || target.Identity.BuildGitHash != managedBuildTestCommit || target.Identity.RunnerID != "" {
+		t.Fatalf("staged server identity = %#v, want canonical schemaVersion 1 and captured buildGitHash", target.Identity)
+	}
 	if !target.IsAbsoluteTarget || !filepath.IsAbs(target.Entrypoint) || !filepath.IsAbs(target.WorkingDirectory) {
 		t.Fatalf("target paths/trust = %#v", target)
 	}
@@ -291,8 +429,9 @@ func managedBuildTestSource() managedSource {
 
 func managedBuildTestServerTarget() *managedRuntimeTarget {
 	identity := managedRuntimeIdentity{
-		Component: "server", Version: "0.0.0+old", SourceRevision: "old-source", TreeHash: "old-tree",
-		ArtifactDigest: strings.Repeat("a", 64), ReleaseID: "mohist-server-old", Generation: 7, IsComplete: true,
+		SchemaVersion: 1, Component: "server", Version: "0.0.0+old", SourceRevision: "old-source",
+		BuildGitHash: "old-source", TreeHash: "old-tree",
+		ArtifactDigest: strings.Repeat("a", 64), ReleaseID: "mohist-server-old", Generation: 7,
 	}
 	return &managedRuntimeTarget{
 		Component: "server", Entrypoint: "/old/Mohist.Server", WorkingDirectory: "/old",
@@ -361,6 +500,39 @@ func assertExactNestedJSONKeys(t *testing.T, files *managedBuildTestFiles, path,
 	sort.Strings(wantCopy)
 	if !reflect.DeepEqual(got, wantCopy) {
 		t.Fatalf("%s.%s keys = %#v, want exact keys %#v", path, field, got, wantCopy)
+	}
+}
+
+func assertCanonicalIdentityValues(t *testing.T, files *managedBuildTestFiles, path string, want managedRuntimeIdentity) {
+	t.Helper()
+	value, _, err := files.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", path, err)
+	}
+	var got managedRuntimeIdentity
+	if err := json.Unmarshal(value, &got); err != nil {
+		t.Fatalf("%s is invalid canonical identity JSON: %v", path, err)
+	}
+	got.Version = want.Version
+	if got != want {
+		t.Fatalf("%s identity = %#v, want %#v", path, got, want)
+	}
+}
+
+func assertNoLegacyIdentityKeys(t *testing.T, files *managedBuildTestFiles, path string) {
+	t.Helper()
+	value, _, err := files.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", path, err)
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(value, &object); err != nil {
+		t.Fatalf("%s is invalid JSON: %v", path, err)
+	}
+	for _, key := range []string{"gitHash", "isComplete", "connectionGeneration"} {
+		if _, present := object[key]; present {
+			t.Fatalf("%s emitted legacy key %q", path, key)
+		}
 	}
 }
 

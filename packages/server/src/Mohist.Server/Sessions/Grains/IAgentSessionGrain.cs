@@ -10,7 +10,8 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionInfo> OpenAsync(OpenAgentSessionCommand command);
     Task<AgentSessionInfo> AttachPhysicalSessionAsync(AttachPhysicalSessionCommand command);
     Task<AgentSessionInfo> RecoverMissingRuntimeSessionAsync(RecoverMissingRuntimeSessionCommand command);
-    Task<AgentSessionInfo> ReconcileMissingBindingAsync(ReconcileMissingBindingCommand command);
+    Task<InitialAgentJobSessionReceipt> RecoverInitialAgentJobRuntimeSessionAsync(RecoverInitialAgentJobRuntimeSessionCommand command);
+    Task<InitialAgentJobSessionReceipt> AdmitInitialAgentJobInputAsync(AdmitInitialAgentJobInputCommand command);
     Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(AppendAgentSessionRuntimeEventsCommand command);
     Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendSystemEventsAsync(AppendAgentSessionSystemEventsCommand command);
 
@@ -37,13 +38,6 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionRecoveryResult> CompleteCompactAsync(CompleteCompactAgentSessionCommand command);
     Task<AgentSessionRecoveryResult> CompleteResetAsync(CompleteResetAgentSessionCommand command);
     Task AbandonResetAsync(string operationId);
-    Task<AgentSessionFollowupReservation> BeginFollowupAsync();
-    Task ConfirmFollowupAsync(string operationId);
-    Task AbandonFollowupAsync(string operationId);
-    Task ConcurrencyPermitGrantedAsync(
-        string? token = null,
-        string? permitId = null,
-        string? dispatchId = null);
 
     Task<AgentSessionFollowupAcceptResult> AcceptFollowupAsync(AcceptFollowupCommand command);
     Task<AgentSessionFollowupDispatch?> BeginNextFollowupDispatchAsync();
@@ -84,6 +78,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
         AgentSessionStopDisposition disposition,
         string? reason = null);
     Task<AgentSessionStopClaim?> GetStopClaimAsync();
+    Task<AgentSessionStopClaim?> GetStopClaimAsync(string turnId, string operationId);
     Task RunStopRecoveryAsync();
 
     Task<AgentTurnControlState?> ResolveTurnControlAsync(string turnId);
@@ -93,6 +88,25 @@ public interface IAgentSessionGrain : IGrainWithStringKey
 
     Task EnsureRuntimeSessionPresentAsync();
     Task RunnerDisconnectedAsync();
+
+    /// <summary>
+    /// Captures the outstanding activity observation for one Runner probe and
+    /// returns the wire request, or null when the binding is incomplete for
+    /// that Runner or nothing is capturable. A re-registration probe captures
+    /// an <c>unknown</c> Activity; an administrative removal may also capture
+    /// an active one. The capture is durable so a repeated or superseded
+    /// answer stays fenced across a grain reload.
+    /// </summary>
+    Task<RunnerSessionActivityProbeRequest?> PrepareActivityProbeAsync(string runnerId, bool runnerRemoved = false);
+
+    /// <summary>
+    /// Applies one Runner answer to the captured observation. Returns false
+    /// for invalid, stale, superseded or post-capture evidence; those are
+    /// discarded without a partial settlement. <c>executing</c> restores
+    /// active and settles nothing; <c>idle</c> and <c>unknown-to-runner</c>
+    /// supersede the captured Turns and operations and re-derive Activity.
+    /// </summary>
+    Task<bool> ApplyActivityProbeAsync(RunnerSessionActivityProbeResult result);
 
     /// <summary>
     /// Idempotently record the initial input and turn for a launch. The
@@ -207,11 +221,44 @@ public sealed record RecoverMissingRuntimeSessionCommand(
     [property: Id(5)] string? ReplacementRuntime = null);
 
 [GenerateSerializer]
-public sealed record ReconcileMissingBindingCommand(
-    [property: Id(0)] string ExpectedRunnerId,
-    [property: Id(1)] string ExpectedRuntime,
-    [property: Id(2)] string ExpectedRuntimeSessionId,
-    [property: Id(3)] string ReplacementRuntimeSessionId);
+public sealed record RecoverInitialAgentJobRuntimeSessionCommand(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string JobId,
+    [property: Id(2)] string WorkId,
+    [property: Id(3)] string ProcessGeneration,
+    [property: Id(4)] string RunnerId,
+    [property: Id(5)] string InputId,
+    [property: Id(6)] string TurnId,
+    [property: Id(7)] string ExpectedRuntime,
+    [property: Id(8)] string ExpectedRuntimeSessionId,
+    [property: Id(9)] string ReplacementRuntime,
+    [property: Id(10)] string ReplacementRuntimeSessionId,
+    [property: Id(11)] long ExpectedBindingEpoch);
+
+[GenerateSerializer]
+public sealed record AdmitInitialAgentJobInputCommand(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string JobId,
+    [property: Id(2)] string WorkId,
+    [property: Id(3)] string ProcessGeneration,
+    [property: Id(4)] string RunnerId,
+    [property: Id(5)] string InputId,
+    [property: Id(6)] string TurnId,
+    [property: Id(7)] string Runtime,
+    [property: Id(8)] string RuntimeSessionId,
+    [property: Id(9)] long BindingEpoch,
+    [property: Id(10)] long ContextGeneration,
+    [property: Id(11)] string SubmissionAttemptId);
+
+[GenerateSerializer]
+public sealed record InitialAgentJobSessionReceipt(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string Runtime,
+    [property: Id(2)] string RuntimeSessionId,
+    [property: Id(3)] long BindingEpoch,
+    [property: Id(4)] long ContextGeneration,
+    [property: Id(5)] bool EffectAdmitted,
+    [property: Id(6)] string? SubmissionAttemptId);
 
 [GenerateSerializer]
 public sealed record AppendAgentSessionRuntimeEventsCommand(
@@ -340,12 +387,6 @@ public sealed record CompleteCompactAgentSessionCommand(
     [property: Id(3)] int? MaxSummaryChars = null);
 
 [GenerateSerializer]
-public sealed record AgentSessionFollowupReservation(
-    [property: Id(0)] string? OperationId,
-    [property: Id(1)] bool StartsIdleTurn = false,
-    [property: Id(2)] bool ConcurrencyPermitHeld = false);
-
-[GenerateSerializer]
 public sealed record AcceptFollowupCommand(
     [property: Id(0)] string Text,
     [property: Id(1)] string Source,
@@ -395,46 +436,18 @@ public sealed record AcceptFollowupCommand(
     /// retry path uses this when it has pre-allocated a distinct turn
     /// identity for a failed follow-up.
     /// </summary>
-    [property: Id(9)] bool ForceNewTurn = false);
+    [property: Id(9)] bool ForceNewTurn = false,
+    /// <summary>
+    /// Internal immutable identity fence for trusted Workflow reuse.
+    /// Both expected identities must be supplied together.
+    /// </summary>
+    [property: Id(10)] string? ExpectedProjectId = null,
+    [property: Id(11)] string? ExpectedAgentId = null);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(
     [property: Id(0)] string Type,
     [property: Id(1)] string PayloadJson);
-
-[GenerateSerializer]
-public sealed record AgentSessionInfo(
-    [property: Id(0)] string Id,
-    [property: Id(1)] string? RunnerId,
-    [property: Id(2)] string? AgentSessionId,
-    [property: Id(3)] string Status,
-    [property: Id(4)] string? Model,
-    [property: Id(5)] string? WorkDir,
-    [property: Id(6)] string CreatedAt,
-    [property: Id(7)] string? StartedAt,
-    [property: Id(8)] string? LastDataAt,
-    [property: Id(9)] string? ResolvedModel,
-    [property: Id(10)] long? InputTokens,
-    [property: Id(11)] long? OutputTokens,
-    [property: Id(12)] long? TotalTokens,
-    [property: Id(13)] long? CachedReadTokens,
-    [property: Id(14)] long? ThoughtTokens,
-    [property: Id(15)] double? CostAmount,
-    [property: Id(16)] string? CostCurrency,
-    [property: Id(17)] long? ContextWindowUsed,
-    [property: Id(18)] long? ContextWindowSize,
-    [property: Id(19)] string? FailureCategory,
-    [property: Id(20)] int? ToolCallCount,
-    [property: Id(21)] int? ToolErrorCount,
-    [property: Id(22)] string? Runtime,
-    [property: Id(23)] long? CachedWriteTokens,
-    [property: Id(24)] long BindingEpoch = 0,
-    [property: Id(25)] string? LastTerminalStatus = null,
-    /// <summary>
-    /// Reasoning effort applied to the last execution, resolved from the
-    /// session activity evidence. Null when unset or not yet recorded.
-    /// </summary>
-    [property: Id(28)] string? AppliedReasoningEffort = null);
 
 [GenerateSerializer]
 public sealed record AgentSessionRecoveryResult(

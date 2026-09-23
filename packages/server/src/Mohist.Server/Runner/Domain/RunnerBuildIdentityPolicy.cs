@@ -16,4 +16,15 @@ public static class RunnerBuildIdentityPolicy
         string? pendingBuildGitHash,
         string? current) =>
         incoming ?? pendingBuildGitHash ?? current;
+
+    /// <summary>
+    /// Keeps the legacy <c>SourceRevision ?? BuildGitHash</c> fallback only for
+    /// a payload without <c>schemaVersion</c>. A canonical payload reports
+    /// <c>sourceRevision</c> directly.
+    /// </summary>
+    public static string? ResolveSourceRevision(
+        int? schemaVersion,
+        string? sourceRevision,
+        string? buildGitHash) =>
+        schemaVersion is null ? sourceRevision ?? buildGitHash : sourceRevision;
 }

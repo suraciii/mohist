@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Workflow.Grains;
@@ -16,12 +17,14 @@ public sealed class AgentJobArtifactUploadService : IScopedService
         IDbContextFactory<MohistDbContext> dbFactory,
         IWorkflowArtifactStorage storage,
         IGrainFactory grains,
+        IOptions<WorkflowArtifactStorageOptions> options,
         ILogger<WorkflowArtifactUploadService> log)
     {
         _uploadService = new WorkflowArtifactUploadService(
             dbFactory,
             storage,
             new AgentJobArtifactUploadWorkContextResolver(grains),
+            options,
             log);
     }
 

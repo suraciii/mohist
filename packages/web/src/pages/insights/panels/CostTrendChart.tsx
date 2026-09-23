@@ -1,13 +1,7 @@
 import { useAgentUsage } from '../../../entities/agent'
 import type { AgentUsageTimeseriesDto } from '../../../entities/agent'
 import type { InsightsRange } from '../model/insights-range'
-import {
-  ChartContainer,
-  ChartAccessibility,
-  BarSeries,
-  LineSeries,
-  ChartAxes,
-} from '../charts'
+import { ChartContainer, ChartAccessibility, BarSeries, LineSeries, ChartAxes } from '../charts'
 import type { AxisTick, LinePoint } from '../charts'
 
 const SVG_WIDTH = 500
@@ -55,22 +49,20 @@ function getCurrency(buckets: AgentUsageTimeseriesDto['buckets']): string | null
   return null
 }
 
+type UsageBucket = AgentUsageTimeseriesDto['buckets'][number]
+
+function hasRecordedCost(bucket: UsageBucket): bucket is UsageBucket & { costAmount: number } {
+  return bucket.costAmount != null
+}
+
 function hasUsageData(data: AgentUsageTimeseriesDto | undefined): data is AgentUsageTimeseriesDto {
   if (!data || data.buckets.length === 0) return false
 
-  const hasBucketUsage = data.buckets.some((bucket) =>
-    bucket.inputTokens > 0
-    || bucket.outputTokens > 0
-    || bucket.totalTokens > 0
-    || bucket.costAmount > 0
-    || bucket.costCurrency !== null,
-  )
+  const hasRecordedBucketCost = data.buckets.some(hasRecordedCost)
 
-  const hasMeasuredCumulativeCost = (data.cumulativeCostPerShip ?? []).some((point) =>
-    point.cumulativeCost !== null,
-  )
+  const hasMeasuredCumulativeCost = (data.cumulativeCostPerShip ?? []).some((point) => point.cumulativeCost != null)
 
-  return hasBucketUsage || hasMeasuredCumulativeCost
+  return hasRecordedBucketCost || hasMeasuredCumulativeCost
 }
 
 export type AgentUsageHook = (
@@ -86,17 +78,12 @@ export function CostTrendChart({
 }) {
   const { data, isLoading, isError } = agentUsageHook(range)
 
-  const status = isLoading ? 'loading'
-    : isError ? 'error'
-    : !hasUsageData(data) ? 'empty'
-    : 'resolved'
+  const status = isLoading ? 'loading' : isError ? 'error' : !hasUsageData(data) ? 'empty' : 'resolved'
 
   return (
     <section data-testid="cost-trend-chart" aria-label="Cost Trend">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Cost Trend
-        </h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cost Trend</h3>
         {hasUsageData(data) && (
           <span
             data-testid="cost-trend-chart-window"
@@ -110,8 +97,8 @@ export function CostTrendChart({
         status={status}
         emptyAction={
           <p className="text-sm text-muted-foreground text-center">
-            Cost and cost-per-ship appear once an agent session reports usage
-            on this project.
+            Recorded cost and recorded cost per completed Issue appear once an agent session reports a cost on this
+            project.
           </p>
         }
       >
@@ -128,11 +115,9 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
   const totalGap = barGap * (barCount - 1)
   const barWidth = barCount > 0 ? (plotWidth - totalGap) / barCount : 0
 
-  const maxCost = Math.max(...buckets.map((b) => b.costAmount), 0) || 1
+  const maxCost = Math.max(...buckets.map((b) => b.costAmount ?? 0), 0) || 1
 
-  const trendValues = (cumulativeCostPerShip ?? [])
-    .map((p) => p.costPerShip)
-    .filter((v): v is number => v != null)
+  const trendValues = (cumulativeCostPerShip ?? []).map((p) => p.costPerShip).filter((v): v is number => v != null)
   const hasTrend = trendValues.length > 0
   const maxTrend = hasTrend ? Math.max(...trendValues.map(Math.abs), 0) || 1 : 1
 
@@ -148,30 +133,30 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
   const leftTicks = computeTicks(maxCost, plotHeight)
   const rightTicks = hasTrend ? computeTicks(maxTrend, plotHeight) : []
 
-  const totalCost = buckets.reduce((s, b) => s + b.costAmount, 0)
-  const peakBucket = [...buckets].sort((a, b) => b.costAmount - a.costAmount)[0]
-  const firstTrend = hasTrend
-    ? cumulativeCostPerShip!.find((p) => p.costPerShip != null)
-    : null
-  const lastTrend = hasTrend
-    ? [...cumulativeCostPerShip!].reverse().find((p) => p.costPerShip != null)
-    : null
+  const recordedBuckets = buckets.filter(hasRecordedCost)
+  const totalCost = recordedBuckets.reduce((sum, bucket) => sum + bucket.costAmount, 0)
+  const peakBucket =
+    recordedBuckets.length > 0
+      ? recordedBuckets.reduce((peak, bucket) => (bucket.costAmount > peak.costAmount ? bucket : peak))
+      : null
+  const firstTrend = hasTrend ? cumulativeCostPerShip!.find((p) => p.costPerShip != null) : null
+  const lastTrend = hasTrend ? [...cumulativeCostPerShip!].reverse().find((p) => p.costPerShip != null) : null
 
   const firstBucket = buckets[0]
   const lastBucket = buckets[buckets.length - 1]
 
   const summary =
-    `Daily cost bar chart from ${firstBucket ? formatLabel(firstBucket.bucketStart) : formatLabel(data.rangeFrom)} to ${lastBucket ? formatLabel(lastBucket.bucketStart) : formatLabel(data.rangeTo)}. ` +
-    `Total window cost: ${totalCost.toFixed(2)}. ` +
+    `Recorded cost bar chart from ${firstBucket ? formatLabel(firstBucket.bucketStart) : formatLabel(data.rangeFrom)} to ${lastBucket ? formatLabel(lastBucket.bucketStart) : formatLabel(data.rangeTo)}. ` +
+    `Total window recorded cost: ${recordedBuckets.length > 0 ? totalCost.toFixed(2) : 'unknown'}. ` +
     `Peak day: ${peakBucket ? `${formatLabel(peakBucket.bucketStart)} ${peakBucket.costAmount.toFixed(2)}` : 'N/A'}.` +
     (hasTrend && firstTrend && lastTrend
-      ? ` Cost per ship from ${firstTrend.costPerShip!.toFixed(2)} to ${lastTrend.costPerShip!.toFixed(2)}.`
+      ? ` Recorded cost per completed Issue from ${firstTrend.costPerShip!.toFixed(2)} to ${lastTrend.costPerShip!.toFixed(2)}.`
       : '')
 
   const legend = [
-    { label: 'Daily cost', shape: 'bar' as const, className: 'fill-chart-2' },
+    { label: 'Recorded cost', shape: 'bar' as const, className: 'fill-chart-2' },
     ...(hasTrend
-      ? [{ label: 'Cost per ship', shape: 'line' as const, className: 'stroke-chart-5' }]
+      ? [{ label: 'Recorded cost per completed Issue', shape: 'line' as const, className: 'stroke-chart-5' }]
       : []),
   ]
 
@@ -179,7 +164,7 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
 
   return (
     <ChartAccessibility
-      ariaLabel={`Cost trend for project: daily cost bar chart${hasTrend ? ' with cost-per-ship trend overlay' : ''}`}
+      ariaLabel={`Cost trend for project: recorded cost bar chart${hasTrend ? ' with recorded-cost-per-completed-Issue trend overlay' : ''}`}
       summary={summary}
       legend={legend}
       viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
@@ -191,7 +176,7 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
         textAnchor="middle"
         className="fill-chart-2 text-[9px] tabular-nums font-medium"
       >
-        Daily cost{currency ? ` (${currency})` : ''}
+        Recorded cost{currency ? ` (${currency})` : ''}
       </text>
 
       <text
@@ -200,7 +185,7 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
         textAnchor="middle"
         className="fill-chart-5 text-[9px] tabular-nums font-medium"
       >
-        Cost per ship{currency ? ` (${currency}/issue)` : ''}
+        Recorded cost per completed Issue{currency ? ` (${currency}/issue)` : ''}
       </text>
 
       {buckets.map((bucket, i) => {
@@ -244,7 +229,7 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
 
       <BarSeries
         data={buckets.map((b) => ({
-          value: b.costAmount,
+          value: b.costAmount ?? null,
           label: formatLabel(b.bucketStart),
         }))}
         plotX={plotX}
@@ -255,13 +240,7 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
         className="fill-chart-2"
       />
 
-      {hasTrend && (
-        <LineSeries
-          points={trendPoints}
-          className="stroke-chart-5"
-          markerClassName="fill-chart-5"
-        />
-      )}
+      {hasTrend && <LineSeries points={trendPoints} className="stroke-chart-5" markerClassName="fill-chart-5" />}
     </ChartAccessibility>
   )
 }

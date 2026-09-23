@@ -11,7 +11,14 @@ export interface PlanSelection {
 }
 
 export function planIdentity(config: SuiteConfig): string {
-  return createHash('sha256').update(JSON.stringify(config.plan)).digest('hex')
+  const identity = {
+    suiteDeadlineMs: config.suiteDeadlineMs,
+    killGraceMs: config.killGraceMs,
+    canonical: config.canonical ?? null,
+    plan: config.plan ?? null,
+    tracks: config.tracks,
+  }
+  return createHash('sha256').update(JSON.stringify(identity)).digest('hex')
 }
 
 export function validatePlan(config: SuiteConfig): string[] {

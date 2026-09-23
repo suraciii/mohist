@@ -2,6 +2,7 @@ import type { RunnerControlHandlers } from './runner-control-dispatcher.js'
 import { createCancelHandler, type CancelHandlerDeps } from './cancel-handler.js'
 import { createFollowupHandler, type FollowupHandlerDeps } from './followup-handler.js'
 import { createSessionCommandHandler, type SessionCommandHandlerDeps } from './session-command-handler.js'
+import { createSessionProbeHandler, type SessionProbeHandlerDeps } from './session-probe-handler.js'
 import { createWorkspaceGitHandlers, type WorkspaceGitHandlerDeps } from './workspace-git-handlers.js'
 import {
   createWorkspaceInspectionHandler,
@@ -17,6 +18,7 @@ export interface RunnerControlHandlerDeps {
   cancel: CancelHandlerDeps
   sessionCommand: SessionCommandHandlerDeps
   withWorkspaceUse?: <T>(workDir: string, work: () => Promise<T>) => Promise<T>
+  sessionProbe: SessionProbeHandlerDeps
 }
 
 export function createRunnerControlHandlers(deps: RunnerControlHandlerDeps): RunnerControlHandlers {
@@ -28,6 +30,7 @@ export function createRunnerControlHandlers(deps: RunnerControlHandlerDeps): Run
   const command = createSessionCommandHandler(deps.sessionCommand)
   const guarded = async <T>(workDir: string | null | undefined, work: () => Promise<T>): Promise<T> =>
     workDir && deps.withWorkspaceUse ? await deps.withWorkspaceUse(workDir, work) : await work()
+  const probe = createSessionProbeHandler(deps.sessionProbe)
   return {
     workspaceDiff: git.getDiff,
     workspaceCommits: git.getCommits,
@@ -61,5 +64,6 @@ export function createRunnerControlHandlers(deps: RunnerControlHandlerDeps): Run
         throw error
       }
     },
+    sessionProbe: (payload) => guarded(payload?.workDir, () => probe(payload)),
   }
 }

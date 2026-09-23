@@ -17,7 +17,7 @@ export interface AgentRuntimeConfig {
   pollInterval: number
 }
 
-export type AgentRuntime = 'opencode' | 'pi'
+export type AgentRuntime = 'opencode' | 'pi' | 'codex'
 
 export interface SystemInfo {
   running: {

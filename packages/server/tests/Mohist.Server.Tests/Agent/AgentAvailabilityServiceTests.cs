@@ -48,17 +48,64 @@ public sealed class AgentAvailabilityServiceTests
     }
 
     [Fact]
+    public void Incomplete_owner_evidence_reports_dispatch_pending_with_unknown_active_count()
+    {
+        var result = AgentAvailabilityService.Compute(
+            new RunnerCapacityView(1, 2),
+            activeRuns: null,
+            maxConcurrentRuns: 2,
+            ObservedAt,
+            hasOnlineRunner: true,
+            capacityIncomplete: true);
+
+        Assert.False(result.CanStartNow);
+        Assert.Equal(AgentAvailabilityWaitReasons.DispatchPending, result.WaitingReason);
+        Assert.True(result.CapacityIncomplete);
+        // An unknown active count is never coerced to zero.
+        Assert.Null(result.ActiveRuns);
+    }
+
+    [Fact]
+    public void Missing_online_runner_outranks_incomplete_owner_evidence()
+    {
+        var result = AgentAvailabilityService.Compute(
+            new RunnerCapacityView(0, 0),
+            activeRuns: null,
+            maxConcurrentRuns: null,
+            ObservedAt,
+            hasOnlineRunner: false,
+            capacityIncomplete: true);
+
+        Assert.False(result.CanStartNow);
+        Assert.Equal(AgentAvailabilityWaitReasons.NoOnlineRunner, result.WaitingReason);
+        Assert.True(result.CapacityIncomplete);
+    }
+
+    [Fact]
+    public void Unknown_active_count_alone_is_not_a_ready_conclusion()
+    {
+        var result = AgentAvailabilityService.Compute(
+            new RunnerCapacityView(1, 2),
+            activeRuns: null,
+            maxConcurrentRuns: 2,
+            ObservedAt,
+            hasOnlineRunner: true);
+
+        Assert.False(result.CanStartNow);
+        Assert.Equal(AgentAvailabilityWaitReasons.DispatchPending, result.WaitingReason);
+    }
+
+    [Fact]
     public void Waiting_work_is_distinguishable_and_has_a_server_reason()
     {
         var pending = new[]
         {
-            new AgentJobListItem("job-capacity", "agent-1", "pending", "2026-07-29T12:00:00Z", null, AgentAvailabilityWaitReasons.CapacityFull),
+            new AgentJobListItem("job-capacity", "agent-1", "pending", "2026-07-29T12:00:00Z", null),
             new AgentJobListItem("job-concurrency", "agent-1", "pending", "2026-07-29T12:01:00Z", null),
         };
 
         var waiting = AgentAvailabilityService.BuildWaitingWork(
             pending,
-            new HashSet<string>(["job-concurrency"], StringComparer.Ordinal),
             AgentAvailabilityWaitReasons.CapacityFull);
 
         Assert.All(waiting, item => Assert.Equal("waiting", item.Status));
@@ -76,14 +123,10 @@ public sealed class AgentAvailabilityServiceTests
                 "agent-1",
                 "pending",
                 "2026-07-29T12:00:00Z",
-                null,
-                AgentAvailabilityWaitReasons.CapacityFull),
+                null),
         };
 
-        var waiting = AgentAvailabilityService.BuildWaitingWork(
-            pending,
-            new HashSet<string>(StringComparer.Ordinal),
-            availabilityReason: null);
+        var waiting = AgentAvailabilityService.BuildWaitingWork(pending, availabilityReason: null);
 
         Assert.Equal(AgentAvailabilityWaitReasons.DispatchPending, Assert.Single(waiting).WaitingReason);
     }

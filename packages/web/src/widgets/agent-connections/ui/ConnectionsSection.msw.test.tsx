@@ -147,10 +147,10 @@ describe('ConnectionsSection (MSW integration)', () => {
     expect(screen.queryByTestId('agent-connection-row-conn_other')).not.toBeInTheDocument()
   })
 
-  it('POSTs create on Add Slack and navigates to the new connection page', async () => {
+  it('starts managed setup on Connect Slack and navigates to the connection page', async () => {
     const createCalls: Array<{ method: string; body: unknown }> = []
     server.use(
-      http.post('*/api/projects/:projectId/slack-connections', async ({ request }) => {
+      http.post('*/api/projects/:projectId/slack-manager/install-agent', async ({ request }) => {
         const text = await request.text()
         let body: unknown = text
         try {
@@ -164,9 +164,20 @@ describe('ConnectionsSection (MSW integration)', () => {
             success: true,
             data: {
               connection: makeConnection({ id: 'conn_created', agentId: 'agent-1', botName: 'preview-bot' }),
-              botName: 'preview-bot',
-              appDescription: 'A derived description',
-              slackAppCreationReference: 'https://api.slack.com/apps?new_app=1',
+              agentApp: {
+                appLifecycle: 'created',
+                authorization: 'pending',
+                runtimeCredentialValidationState: 'not_provided',
+                bindingState: 'unbound',
+                manifestState: 'applied',
+                transportReadiness: 'not_ready',
+                nextAction: 'approve_install',
+                installUrl: 'https://slack.com/oauth/v2/authorize',
+                unknownOutcome: null,
+                errorClass: null,
+              },
+              nextAction: 'approve_install',
+              errorClass: null,
             },
           },
           { status: 201 },

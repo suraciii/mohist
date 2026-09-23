@@ -1,4 +1,6 @@
 import { errorMessage } from '../core/errors.js'
+
+export { executeCodexTurn, projectCodexTurnToWorkItemResult } from './agent-job-codex-turn.js'
 import type { AgentExecutionBinding, JsonObject, DispatchWorkItem, WorkItemResult } from '../core/types.js'
 import type {
   RuntimeResult,
@@ -9,6 +11,7 @@ import type {
   RuntimeFilePart,
 } from './opencode/index.js'
 import type { PiRuntimeEvent, PiResult, PiTurnObserver, PiTurnRequest, PiTurnResult } from './pi/index.js'
+import type { CodexDiagnostic, CodexRuntimeTurnEvent } from './codex/index.js'
 import { callFollowup, resolveAccessor, type CommandRuntimeHandle } from '../server/command-runtime.js'
 import type { ServerConnection } from '../server/connection.js'
 import { boundedWait } from './bounded-wait.js'
@@ -24,7 +27,13 @@ import type {
   ParsedModel,
 } from './agent-job-executor.js'
 import { knownBinding } from './agent-job-executor.js'
-import { mapOpenCodeErrorKind, mapPiErrorKind, normalizeAgentRuntimeErrorCode } from './error-kind-mapping.js'
+import { admitInitialProviderSubmission } from './agent-job-initial-provider-admission.js'
+import {
+  mapOpenCodeErrorKind,
+  mapPiErrorKind,
+  mapRuntimeErrorKind,
+  normalizeAgentRuntimeErrorCode,
+} from './error-kind-mapping.js'
 
 const log = runnerLogger.child('job')
 
@@ -130,6 +139,7 @@ export async function executeOpenCodeTurn(
         })
       }
       await eventSink.attachSession(session.runtimeSessionId, session.workDir, modelInput)
+      await admitInitialProviderSubmission(deps.connection, work, binding, 'opencode', session.runtimeSessionId, signal)
       if (!skipInitialInput && !attachedInputPublished) {
         attachedInputPublished = true
         await eventSink.publishSessionInput(composed, session.runtimeSessionId)
@@ -290,6 +300,7 @@ export async function executePiTurn(
   }
   try {
     await eventSink.attachSession(runtimeSessionId, workDir, modelInput)
+    await admitInitialProviderSubmission(deps.connection, work, binding, 'pi', runtimeSessionId, signal)
     if (!work.initialInputId || !work.initialTurnId) {
       await eventSink.publishSessionInput(composed, runtimeSessionId)
     }
@@ -382,7 +393,7 @@ export async function executePiTurn(
   )
 }
 
-function physicalBinding(
+export function physicalBinding(
   work: DispatchWorkItem,
   agentSessionId: string | null,
   runtime: AgentExecutionBinding['runtime'],
@@ -397,11 +408,11 @@ function physicalBinding(
   }
 }
 
-function withAgentBinding(result: WorkItemResult, binding: AgentExecutionBinding | null): WorkItemResult {
+export function withAgentBinding(result: WorkItemResult, binding: AgentExecutionBinding | null): WorkItemResult {
   return binding ? { ...result, agentBinding: binding } : result
 }
 
-function redactManagerResult(result: WorkItemResult, boundary: ManagerExecutionBoundary | null): WorkItemResult {
+export function redactManagerResult(result: WorkItemResult, boundary: ManagerExecutionBoundary | null): WorkItemResult {
   if (!boundary) return result
   return boundary.redact(result) as WorkItemResult
 }
@@ -594,6 +605,8 @@ interface AgentSessionEventSink {
     readonly payload: Record<string, unknown>
   }): void
   observePiEvent(event: PiRuntimeEvent): void
+  observeCodexEvent(event: CodexRuntimeTurnEvent): void
+  observeCodexDiagnostic(diagnostic: CodexDiagnostic): void
   drain(): Promise<void>
 }
 
@@ -615,6 +628,7 @@ export function createAgentSessionEventSink(
   const deliverySignal = () => AbortSignal.any([signal, AbortSignal.timeout(AGENT_EVENT_DELIVERY_TIMEOUT_MS)])
   const projectId = work.projectId
   const agentTurnId = work.initialTurnId ?? null
+  let latestRuntimeSessionId = ''
   if (!agentSessionId || !projectId) {
     const noop = async () => undefined
     return {
@@ -622,11 +636,14 @@ export function createAgentSessionEventSink(
       publishSessionInput: noop,
       observeEvent: (event) => observation.observe(event),
       observePiEvent: (event) => observation.observe(event),
+      observeCodexEvent: (event) => observation.observe(event),
+      observeCodexDiagnostic: (diagnostic) => observation.observe({ type: 'diagnostic', payload: diagnostic }),
       drain: noop,
     }
   }
   return {
     async attachSession(runtimeSessionId, workDir, model) {
+      latestRuntimeSessionId = runtimeSessionId
       try {
         await connection.openAgentSession(projectId!, agentSessionId, { workDir }, signal)
         await connection.attachAgentSession(
@@ -753,6 +770,81 @@ export function createAgentSessionEventSink(
           })
         })
     },
+    observeCodexEvent(event) {
+      observation.observe(event)
+      pending = pending
+        .then(() =>
+          connection
+            .agentSessionRuntimeEvents(
+              projectId!,
+              agentSessionId,
+              {
+                workId: work.workId,
+                workType: work.workType,
+                stage: work.stage,
+                runtimeSessionId: event.runtimeSessionId,
+                agentTurnId,
+                runtimeEvents: [
+                  {
+                    type: event.type,
+                    payload: agentTurnId ? { ...event.payload, turnId: agentTurnId } : event.payload,
+                  },
+                ],
+              },
+              deliverySignal(),
+            )
+            .then(() => undefined),
+        )
+        .catch((error) => {
+          log.error('agent-session Codex runtime event failed', {
+            job: work.agentJobId,
+            session: agentSessionId,
+            exception: error,
+          })
+        })
+    },
+    observeCodexDiagnostic(diagnostic) {
+      const runtimeSessionId = latestRuntimeSessionId
+      observation.observe({ type: 'diagnostic', payload: diagnostic })
+      pending = pending
+        .then(() =>
+          connection
+            .agentSessionRuntimeEvents(
+              projectId!,
+              agentSessionId,
+              {
+                workId: work.workId,
+                workType: work.workType,
+                stage: work.stage,
+                runtimeSessionId,
+                agentTurnId,
+                runtimeEvents: [
+                  {
+                    type: 'session.activity',
+                    payload: {
+                      activity: 'runtime-diagnostic',
+                      status: 'diagnostic',
+                      code: diagnostic.code,
+                      severity: diagnostic.severity,
+                      message: diagnostic.message,
+                      ...(diagnostic.details ? { details: diagnostic.details } : {}),
+                      ...(agentTurnId ? { turnId: agentTurnId } : {}),
+                    },
+                  },
+                ],
+              },
+              deliverySignal(),
+            )
+            .then(() => undefined),
+        )
+        .catch((error) => {
+          log.error('agent-session Codex diagnostic event failed', {
+            job: work.agentJobId,
+            session: agentSessionId,
+            exception: error,
+          })
+        })
+    },
     async drain() {
       const completed = await boundedWait(() => pending, AGENT_EVENT_DRAIN_TIMEOUT_MS)
       if (!completed) {
@@ -769,7 +861,7 @@ export function createAgentSessionEventSink(
 export function failureResult(
   code: string,
   message: string,
-  runtime: 'opencode' | 'pi' = 'opencode',
+  runtime: 'opencode' | 'pi' | 'codex' = 'opencode',
   diagnostics?: readonly { code: string; message: string }[],
 ): WorkItemResult {
   return {
@@ -781,10 +873,10 @@ export function failureResult(
   }
 }
 
-function buildAgentJobOutput(
+export function buildAgentJobOutput(
   ok: boolean,
   runtimeSessionId: string | null,
-  runtime: 'opencode' | 'pi',
+  runtime: 'opencode' | 'pi' | 'codex',
   model: string | null,
   variant: string | null,
   text: string | null,

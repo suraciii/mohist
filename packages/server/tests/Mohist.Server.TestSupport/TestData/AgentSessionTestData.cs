@@ -52,6 +52,7 @@ public static class AgentSessionTestData
             .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, projectId)
             .WithLabel(AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString())
             .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+            .WithLabel(GenericAgentSessionMetadata.AgentId, "agent-test")
             .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId)
             .WithLabel(AgentSessionQueryMetadataKeys.SessionName, sessionName)
             .WithLabel(AgentSessionQueryMetadataKeys.WorkId, workId)

@@ -123,24 +123,37 @@ public sealed class TaskLogService : IScopedService
     }
 
     /// <summary>
-    /// Cursor-paginated query over a work item's captured lines,
-    /// resolved from a timeline task id (<c>WorkflowActionAttempt.Id</c>) to a
-    /// <c>WorkId</c> via the persisted workflow-run work projection
-    /// (no grain call). Returns <c>null</c> when the run, task, or work id
-    /// cannot be located — the API surfaces that as an empty page
-    /// (never an error, per the spec's no-log scenario).
+    /// Cursor-paginated query over a work item's captured lines, addressed by
+    /// the originating workflow run and the timeline task id
+    /// (<c>WorkflowActionAttempt.Id</c>) of that run. The run must belong to
+    /// the addressed project and issue, and the attempt must exist in that
+    /// run's persisted work mapping; otherwise there is nothing to read and
+    /// the result is <c>null</c> — never another run's or attempt's lines.
+    /// An attempt that is addressable but has no retained lines returns an
+    /// empty page, because "no lines were retained" is a different fact from
+    /// "this run does not own the attempt".
     /// </summary>
     public async Task<TaskLogPage?> QueryByTaskIdAsync(
+        string projectId,
+        int issueNumber,
         string workflowRunId,
         string taskId,
         long? afterSeq,
         int? limit,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(workflowRunId) || string.IsNullOrWhiteSpace(taskId))
+        if (string.IsNullOrWhiteSpace(projectId)
+            || string.IsNullOrWhiteSpace(workflowRunId)
+            || string.IsNullOrWhiteSpace(taskId))
             return null;
 
-        var workId = await ResolveWorkIdAsync(workflowRunId, taskId, ct);
+        var scope = await _workProjection.GetIssueScopeAsync(workflowRunId, ct);
+        if (scope is null
+            || !string.Equals(scope.ProjectId, projectId, StringComparison.Ordinal)
+            || scope.IssueNumber != issueNumber)
+            return null;
+
+        var workId = await _workProjection.ResolveWorkIdAsync(workflowRunId, taskId, ct);
         if (workId is null)
             return null;
 
@@ -151,11 +164,6 @@ public sealed class TaskLogService : IScopedService
             afterSeq,
             limit,
             ct);
-    }
-
-    private async Task<string?> ResolveWorkIdAsync(string workflowRunId, string taskId, CancellationToken ct)
-    {
-        return await _workProjection.ResolveWorkIdAsync(workflowRunId, taskId, ct);
     }
 
     private async Task<bool> IsAcceptedWorkAsync(
@@ -212,8 +220,8 @@ public sealed class TaskLogService : IScopedService
         if (taskId is null)
             return null;
 
-        var projectId = await _workProjection.GetProjectIdAsync(ownerId, ct);
-        return new TaskLogPublishScope(taskId, projectId);
+        var scope = await _workProjection.GetIssueScopeAsync(ownerId, ct);
+        return new TaskLogPublishScope(taskId, scope?.ProjectId);
     }
 
     private static void ValidateBatchCaps(IReadOnlyList<TaskLogLine> entries)

@@ -28,6 +28,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.Tests.Workflow.Workf
         await ClearGlobalRunnerRegistryAsync();
         var projectId = $"agent-poll-project-{Guid.NewGuid():N}";
         var runnerId = await RegisterRunnerForProjectAsync(projectId, $"agent-poll-runner-{Guid.NewGuid():N}");
+        await _fixture.SeedAgentAsync(projectId, "agent-test");
         var jobId = $"agent-poll-job-{Guid.NewGuid():N}";
         var job = Grains.GetGrain<IAgentJobGrain>(jobId);
 
@@ -98,6 +99,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.Tests.Workflow.Workf
                 RuntimeReadiness: [new RuntimeReadinessWitness("pi", Ready: true, Generation: 1)]));
 
         var job = Grains.GetGrain<IAgentJobGrain>(jobId);
+        await _fixture.SeedAgentAsync(projectId, "agent-test");
         await job.SubmitAsync(new AgentJobInput(
             Prompt: "reject stale capability",
             Model: "openai/model",
@@ -137,6 +139,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.Tests.Workflow.Workf
         await ClearGlobalRunnerRegistryAsync();
         var projectId = $"agent-recovery-project-{Guid.NewGuid():N}";
         var runnerId = await RegisterRunnerForProjectAsync(projectId, $"agent-recovery-runner-{Guid.NewGuid():N}");
+        await _fixture.SeedAgentAsync(projectId, "agent-test");
         var jobId = $"agent-recovery-job-{Guid.NewGuid():N}";
         var job = Grains.GetGrain<IAgentJobGrain>(jobId);
 
@@ -166,6 +169,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.Tests.Workflow.Workf
             maxWorkflowSlots: 2);
         var jobId = $"mixed-recovery-job-{Guid.NewGuid():N}";
         var job = Grains.GetGrain<IAgentJobGrain>(jobId);
+        await _fixture.SeedAgentAsync(projectId, "agent-test");
         await job.SubmitAsync(new AgentJobInput(
             "recover before workflow",
             WorkspacePath: "/tmp/mixed-recovery",
@@ -201,6 +205,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.Tests.Workflow.Workf
             projectId,
             $"mixed-order-runner-{Guid.NewGuid():N}",
             maxWorkflowSlots: 2);
+        await _fixture.SeedAgentAsync(projectId, "agent-test");
         var workflowId = $"mixed-order-workflow-{Guid.NewGuid():N}";
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
         await SeedWorkflowTemplateAsync(workflowId, SingleStage(checks: []), projectId);
@@ -249,6 +254,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.Tests.Workflow.Workf
 
         var jobId = $"bulk-generation-job-{Guid.NewGuid():N}";
         var job = Grains.GetGrain<IAgentJobGrain>(jobId);
+        await _fixture.SeedAgentAsync(projectId, "agent-test");
         await job.SubmitAsync(new AgentJobInput(
             "close out with workflow",
             WorkspacePath: "/tmp/bulk-generation",
@@ -304,13 +310,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.Tests.Workflow.Workf
             projectId,
             $"mixed-capacity-runner-{Guid.NewGuid():N}",
             maxWorkflowSlots: 1);
-        var jobId = $"mixed-capacity-job-{Guid.NewGuid():N}";
-        var job = Grains.GetGrain<IAgentJobGrain>(jobId);
-        await job.SubmitAsync(new AgentJobInput(
-            "wait for capacity",
-            WorkspacePath: "/tmp/mixed-capacity",
-            ProjectId: projectId,
-            AgentId: "agent-test"));
+        await _fixture.SeedAgentAsync(projectId, "agent-test");
 
         var workflowId = $"mixed-capacity-workflow-{Guid.NewGuid():N}";
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
@@ -318,11 +318,21 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.Tests.Workflow.Workf
         await workflow.StartAsync(TestInput(projectId));
         await workflow.AssignWorkerAsync(runnerId);
         Assert.NotNull(await workflow.ClaimNextAsync(runnerId, "test-generation"));
+        var workflowPoll = await Dispatch.PollAsync(runnerId, DispatchTestExtensions.ReadyPollRequest());
+        Assert.Single(workflowPoll.Dispatches);
+        Assert.Equal(workflowId, workflowPoll.Dispatches[0].WorkflowRunId);
 
+        var jobId = $"mixed-capacity-job-{Guid.NewGuid():N}";
+        var job = Grains.GetGrain<IAgentJobGrain>(jobId);
+        await job.SubmitAsync(new AgentJobInput(
+            "wait for capacity",
+            WorkspacePath: "/tmp/mixed-capacity",
+            ProjectId: projectId,
+            AgentId: "agent-test"));
         var response = await Dispatch.PollAsync(runnerId, DispatchTestExtensions.ReadyPollRequest());
 
-        Assert.Single(response.Dispatches);
-        Assert.Equal(workflowId, response.Dispatches[0].WorkflowRunId);
+        Assert.DoesNotContain(response.Dispatches, dispatch =>
+            dispatch.OwnerKind == WorkDispatchOwnerKinds.AgentJob && dispatch.AgentJobId == jobId);
         Assert.Equal(AgentJobStatus.Pending, await job.GetStatusAsync());
 
         var runtime = await Grains.GetGrain<IRunnerGrain>(runnerId).GetRuntimeStateAsync();
@@ -340,13 +350,12 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.Tests.Workflow.Workf
             projectId,
             $"mixed-capacity-timeout-runner-{Guid.NewGuid():N}",
             maxWorkflowSlots: 1);
-        var job = Grains.GetGrain<IAgentJobGrain>($"mixed-capacity-timeout-job-{Guid.NewGuid():N}");
-        await job.SubmitAsync(new AgentJobInput(
-            "expire after capacity race",
-            WorkspacePath: "/tmp/mixed-capacity-timeout",
-            ProjectId: projectId,
-            AgentId: "agent-test"));
+        await _fixture.SeedAgentAsync(projectId, "agent-test");
 
+        // The workflow must own the single Runner slot before the Job is
+        // submitted: the Job then really claims Agent capacity yet has no
+        // slot to dispatch into, which is the claimed-but-undispatched
+        // state the pending-work bound governs.
         var workflowId = $"mixed-capacity-timeout-workflow-{Guid.NewGuid():N}";
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
         await SeedWorkflowTemplateAsync(workflowId, SingleStage(checks: []), projectId);
@@ -354,6 +363,13 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.Tests.Workflow.Workf
         await workflow.AssignWorkerAsync(runnerId);
         Assert.NotNull(await workflow.ClaimNextAsync(runnerId, "test-generation"));
         await Dispatch.PollAsync(runnerId, DispatchTestExtensions.ReadyPollRequest());
+
+        var job = Grains.GetGrain<IAgentJobGrain>($"mixed-capacity-timeout-job-{Guid.NewGuid():N}");
+        await job.SubmitAsync(new AgentJobInput(
+            "expire after capacity race",
+            WorkspacePath: "/tmp/mixed-capacity-timeout",
+            ProjectId: projectId,
+            AgentId: "agent-test"));
 
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(11));
         var now = _fixture.TimeProvider.GetUtcNow().UtcDateTime;

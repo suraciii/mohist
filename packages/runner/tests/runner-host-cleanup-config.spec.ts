@@ -256,7 +256,7 @@ describe('RunnerHost idle-system cleanup', () => {
                 workspaceName: 'seeded',
                 workspacePath: join(state.root, 'workspaces', 'seeded'),
                 phase: 'eligible',
-                materializedAt: '2026-07-01T00:00:00.000Z',
+                provisionedAt: '2026-07-01T00:00:00.000Z',
                 terminalAt: '2026-07-01T00:00:00.000Z',
               },
             },

@@ -39,11 +39,24 @@ public partial class WorkflowGrain
         var key = WorkflowAgentHandoffCodec.KeyFor(command);
         var grain = GrainFactory.GetGrain<IWorkflowAgentHandoffGrain>(key);
         var prepared = await grain.PrepareAsync(command);
-        if (prepared.Disposition == WorkflowAgentHandoffDisposition.Rejected)
+        if (prepared.Disposition is WorkflowAgentHandoffDisposition.Rejected
+            or WorkflowAgentHandoffDisposition.Failed)
         {
-            var error = new ExecutionError(
-                prepared.Rejection?.Code ?? "agent_launch_rejected",
-                prepared.Rejection?.Message ?? "Workflow Agent launch was rejected.");
+            // A Failed handoff is a deterministic dead end from an earlier
+            // activation (e.g. the reused Session lost its runtime binding),
+            // so the same durable rejection path applies.
+            var failedPlan = prepared.Disposition == WorkflowAgentHandoffDisposition.Failed
+                ? await grain.GetPlanAsync()
+                : null;
+            var error = prepared.Disposition == WorkflowAgentHandoffDisposition.Failed
+                ? new ExecutionError(
+                    failedPlan?.Rejection?.Code ?? "agent_session_runtime_missing",
+                    failedPlan?.Rejection?.Message
+                    ?? failedPlan?.ActivationError
+                    ?? "The reused Workflow Agent Session has no runtime binding.")
+                : new ExecutionError(
+                    prepared.Rejection?.Code ?? "agent_launch_rejected",
+                    prepared.Rejection?.Message ?? "Workflow Agent launch was rejected.");
             await FailAgentAttemptAsync(command.ActionAttemptId, command.Completion!.WorkId, error);
             return true;
         }
@@ -121,6 +134,22 @@ public partial class WorkflowGrain
                 {
                     throw new InvalidOperationException(
                         $"Running Workflow Agent attempt '{attempt.Id}' has no persisted handoff.");
+                }
+
+                if (plan.Disposition == WorkflowAgentHandoffDisposition.Failed)
+                {
+                    // A deterministic activation dead end (e.g. the reused
+                    // Session lost its runtime binding) must surface as task
+                    // failure instead of silently re-driving the handoff.
+                    await FailAgentAttemptAsync(
+                        attempt.Id,
+                        attempt.WorkId,
+                        new ExecutionError(
+                            plan.Rejection?.Code ?? "agent_session_runtime_missing",
+                            plan.Rejection?.Message
+                            ?? plan.ActivationError
+                            ?? "The reused Workflow Agent Session has no runtime binding."));
+                    continue;
                 }
 
                 await handoff.AcceptAsync(new WorkflowAgentHandoffAcceptance(

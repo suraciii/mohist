@@ -55,7 +55,8 @@ public sealed class RunnerFollowupDeliveryDispatcher : IFollowupDeliveryDispatch
                     .ToArray()
                 : null,
             request.ManagerExecutionGrant,
-            request.OriginMarker);
+            request.OriginMarker,
+            request.RequiresBindingRecovery);
 
         try
         {

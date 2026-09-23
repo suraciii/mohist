@@ -31,11 +31,12 @@ public interface IWorkflowArtifactStorage
 
     /// <summary>
     /// Persists a directory artifact, rejecting symlinks, traversal, and
-    /// limit breaches.
+    /// limit breaches. The stream is pulled one entry at a time; each entry
+    /// is validated, copied, and recorded before the next is requested.
     /// </summary>
     Task<WorkflowArtifactStorageWriteResult> WriteDirectoryAsync(
         string storagePath,
-        IReadOnlyList<WorkflowArtifactDirectoryEntryInput> entries,
+        IAsyncEnumerable<WorkflowArtifactDirectoryEntryInput> entries,
         WorkflowArtifactFileWrite write,
         DateTimeOffset recordedAt,
         WorkflowArtifactDirectoryLimits? limits = null,

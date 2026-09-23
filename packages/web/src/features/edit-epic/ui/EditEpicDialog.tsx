@@ -1,17 +1,10 @@
 import { useEffect, useState } from 'react'
-import { useUpdateEpic, type EpicDetail } from '../../../entities/epic'
+import { EpicDescriptionField, useUpdateEpic, type EpicDetail } from '../../../entities/epic'
 import type { EpicPriority } from '../../../entities/epic'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/shared/ui/components/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/shared/ui/components/dialog'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
-import { EpicDescriptionField } from '@/shared/ui'
 import { cn } from '@/shared/lib/utils'
 
 interface EditEpicDialogProps {
@@ -29,12 +22,7 @@ const PRIORITIES: { value: EpicPriority; label: string }[] = [
   { value: 'p4', label: 'P4 - Nice to have' },
 ]
 
-export function EditEpicDialog({
-  open,
-  onClose,
-  epic,
-  updateHook = useUpdateEpic,
-}: EditEpicDialogProps) {
+export function EditEpicDialog({ open, onClose, epic, updateHook = useUpdateEpic }: EditEpicDialogProps) {
   const [title, setTitle] = useState(epic.title)
   const [description, setDescription] = useState(epic.description)
   const [priority, setPriority] = useState<EpicPriority>((epic.priority as EpicPriority) || 'p2')
@@ -83,17 +71,9 @@ export function EditEpicDialog({
         </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3" data-testid="edit-epic-scroll-region">
-          <form
-            id="edit-epic-form"
-            onSubmit={handleSubmit}
-            className="space-y-4"
-            data-testid="edit-epic-form"
-          >
+          <form id="edit-epic-form" onSubmit={handleSubmit} className="space-y-4" data-testid="edit-epic-form">
             <div>
-              <label
-                htmlFor="edit-epic-title"
-                className="block text-sm font-medium text-foreground mb-1"
-              >
+              <label htmlFor="edit-epic-title" className="block text-sm font-medium text-foreground mb-1">
                 Title
               </label>
               <Input
@@ -116,10 +96,7 @@ export function EditEpicDialog({
             />
 
             <div>
-              <label
-                htmlFor="edit-epic-priority"
-                className="block text-sm font-medium text-foreground mb-1"
-              >
+              <label htmlFor="edit-epic-priority" className="block text-sm font-medium text-foreground mb-1">
                 Priority
               </label>
               <Select value={priority} onValueChange={(value) => value && setPriority(value as EpicPriority)}>
@@ -137,10 +114,7 @@ export function EditEpicDialog({
             </div>
 
             {updateEpic.isError && (
-              <div
-                className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600"
-                data-testid="edit-epic-error"
-              >
+              <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600" data-testid="edit-epic-error">
                 {updateEpic.error?.message || 'Failed to update epic'}
               </div>
             )}
@@ -151,12 +125,7 @@ export function EditEpicDialog({
           className="mx-0 mb-0 border-t border-foreground/10 bg-muted/30 px-4 py-3"
           data-testid="edit-epic-footer"
         >
-          <Button
-            type="button"
-            variant="outline"
-            onClick={handleClose}
-            data-testid="edit-epic-cancel"
-          >
+          <Button type="button" variant="outline" onClick={handleClose} data-testid="edit-epic-cancel">
             Cancel
           </Button>
           <Button

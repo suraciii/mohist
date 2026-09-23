@@ -13,7 +13,7 @@ namespace Mohist.Server.Tests.Runner.Api;
 /// <summary>
 /// Runner-scoped reclaimability observation for the named-workspace
 /// cleanup guard: the runner asks the server whether a workspace it
-/// materialized may be reclaimed (archived, or no active bound session).
+/// provisioned may be reclaimed (archived, or no active bound session).
 /// </summary>
 [Trait("level", "L1")]
 public sealed class RunnerWorkspaceReclaimableApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>

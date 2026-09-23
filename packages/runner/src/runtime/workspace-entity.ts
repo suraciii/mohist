@@ -214,7 +214,7 @@ async function ensureIssueWorkspaceRepository(options: IssueWorkspaceRepositoryO
     }
     try {
       await validateWorkspaceOrigin(preparationPath, options.gitUrl, options.signal, options.log, displayRepositoryPath)
-      await restoreIssueWorkspaceBranch(
+      await ensureIssueWorkspaceBranch(
         preparationPath,
         displayRepositoryPath,
         options.baseBranch,
@@ -240,7 +240,7 @@ async function ensureIssueWorkspaceRepository(options: IssueWorkspaceRepositoryO
   await reenterIssueWorkspaceBranch(options, displayRepositoryPath)
 }
 
-async function restoreIssueWorkspaceBranch(
+async function ensureIssueWorkspaceBranch(
   repositoryPath: string,
   displayRepositoryPath: string,
   baseBranch: string,
@@ -544,10 +544,14 @@ export class NamedWorkspaceManager {
       now: this.now,
     })
     try {
-      if (workflowRunId && workId) {
+      // Bound artifacts are recovery inputs, not the source of truth for an
+      // active Home. Only a newly materialized Home needs restoration;
+      // comparing an existing Home with an older snapshot rejects valid edits
+      // made between workflow tasks.
+      if (workflowRunId && workId && result.created) {
         await provisionWorkspaceArtifacts(this.connection, workflowRunId, workId, result.path, signal)
       }
-      await this.connection.reportWorkspaceMaterialized(projectId, workspaceName, result.path, signal, result.created)
+      await this.connection.reportWorkspaceProvisioned(projectId, workspaceName, result.path, signal, result.created)
     } catch (error) {
       if (result.created) {
         await deleteDirectory(result.path).catch(() => {})
@@ -573,7 +577,7 @@ export class NamedWorkspaceManager {
       now: this.now,
     })
     try {
-      await this.connection.reportWorkspaceMaterialized(projectId, workspaceName, result.path, signal, result.created)
+      await this.connection.reportWorkspaceProvisioned(projectId, workspaceName, result.path, signal, result.created)
     } catch (error) {
       if (error instanceof WorkspaceHomeClaimedError) {
         if (result.created) {

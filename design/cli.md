@@ -121,7 +121,7 @@ that owns it instead of masquerading as a property of the referenced resource.
   `workspace repo add/remove` manage repository membership. `agent launch
   --workspace` is the explicit Workspace override. Without it, the entry point
   resolves the Workspace from Origin; CLI launch uses the Project's `cli-current`
-  Workspace. Origin and Materialization rules live in
+  Workspace. Origin and Provisioning rules live in
   [`workspaces.md`](workspaces.md).
 - `slack install-agent`, `list`, `view`, `claim-owner`, `edit`,
   `transfer-owner`, `enable`, `disable`, and `remove-binding` manage one
@@ -394,12 +394,58 @@ service changes. A source identity change or dirty worktree observed after
 staging rejects the candidate.
 
 Each installed runtime is an immutable release under the per-user Mohist
-runtime root. Its `runtime-identity.json`, `release.json`, and, for Runner,
-`dist/build-info.json` bind the component, source revision, source tree,
-artifact digest, release identity, monotonic generation, and Runner identity
-where applicable. Metadata files are excluded from the artifact digest. The
-service uses an absolute entry point inside that release; success never depends
-on the source checkout remaining present or writable.
+runtime root. Its identity is the versioned `RuntimeIdentity` v1 contract:
+`schemaVersion = 1` plus nine always-emitted keys with one fixed meaning each,
+identical for Server and Runner.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `schemaVersion` | integer | Contract version. Exactly `1`; readers reject any other non-null value. |
+| `component` | string | `server` or `runner`. The managed component this identity describes. |
+| `sourceRevision` | non-empty string | Git commit the release was built from. The single source authority for the release. |
+| `buildGitHash` | non-empty string | Git revision embedded in the built artifact. Equals `sourceRevision` for managed builds; kept distinct so a pinned or vendored build cannot masquerade as the source revision. |
+| `treeHash` | non-empty string | Hash of the source tree the release was built from. |
+| `artifactDigest` | non-empty string | Content digest of the release payload. Metadata files are excluded from the digest. |
+| `releaseId` | non-empty string | Stable identifier of the immutable release. |
+| `generation` | integer > 0 | Monotonic managed runtime generation for the update transaction. |
+| `runnerId` | string | Runner identity. Non-empty for `runner`; present and empty for `server`. |
+
+All nine keys are always emitted for both components, so the manifest key set
+is stable and directly testable. Two identities are equal only when all nine
+fields are byte-equal, with `runnerId` compared only for `runner`. Identities
+written by one update must agree on `sourceRevision`, `treeHash`, and
+`generation`; `component`, `artifactDigest`, `releaseId`, `buildGitHash`, and
+`runnerId` are per-component. `version` and `builtAt` are documented display
+metadata, not identity; they never satisfy a missing identity field.
+
+The canonical identity is written to three release manifest files:
+
+- `runtime-identity.json` — the file named by `MOHIST_RUNTIME_IDENTITY_PATH` /
+  `MOHIST_RUNTIME_IDENTITY_FILE`.
+- `release.json` — `{ "identity": <canonical>, ... }` plus source roots.
+- `dist/build-info.json` (Runner only) — canonical identity plus `builtAt`.
+
+A managed identity source that is present but fails the schema is malformed: an
+unknown `schemaVersion`, a wrong JSON type, an invalid `component`, a
+`generation` of zero or less, or any missing required field. Readers reject a
+malformed source and never fall back to the source checkout identity. A missing
+managed identity source yields a partial or null identity; that is tolerated
+for external Runner registration but is a hard failure for managed deployment
+preflight.
+
+During the bounded migration only, a payload **without** `schemaVersion` is
+legacy v0: `buildGitHash = buildGitHash ?? gitHash`, then
+`sourceRevision = sourceRevision ?? buildGitHash ?? gitHash`, with the other
+fields read when present. `gitHash` is accepted only as a read input at the
+file and health boundary and is never emitted by a writer. A payload **with**
+any other `schemaVersion` is malformed, not legacy. The v0 fallback is removed
+in the release immediately after the release that first writes and verifies
+`schemaVersion: 1` on every supported installation; at that point managed
+preflight requires `schemaVersion: 1` on the active and verified release
+manifest and the `gitHash` and v0 read paths are deleted.
+
+The service uses an absolute entry point inside that release; success never
+depends on the source checkout remaining present or writable.
 
 Activation is one serialized transaction. Before changing a service, the CLI
 captures its exact unit contents and active/enabled state. It changes only the

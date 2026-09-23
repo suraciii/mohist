@@ -6,6 +6,7 @@ public sealed record WorkflowAgentSessionContext(
     string ProjectId,
     string WorkflowRunId,
     string SessionName,
+    string AgentId,
     int? IssueNumber = null,
     string? WorkId = null,
     string? WorkType = null,
@@ -19,7 +20,13 @@ public static class WorkflowAgentSessionMetadata
         string projectId,
         string workflowRunId,
         string sessionName) =>
-        Labels(new WorkflowAgentSessionContext(projectId, workflowRunId, sessionName));
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+            [AgentSessionQueryMetadataKeys.WorkflowRunId] = workflowRunId,
+            [AgentSessionQueryMetadataKeys.SessionName] = sessionName,
+            [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
+        };
 
     public static IReadOnlyDictionary<string, string> Labels(WorkflowAgentSessionContext context)
     {
@@ -29,6 +36,7 @@ public static class WorkflowAgentSessionMetadata
             [AgentSessionQueryMetadataKeys.WorkflowRunId] = context.WorkflowRunId,
             [AgentSessionQueryMetadataKeys.SessionName] = context.SessionName,
             [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
+            [GenericAgentSessionMetadata.AgentId] = context.AgentId,
         };
         if (context.IssueNumber is > 0)
             labels[AgentSessionQueryMetadataKeys.IssueNumber] = context.IssueNumber.Value.ToString();

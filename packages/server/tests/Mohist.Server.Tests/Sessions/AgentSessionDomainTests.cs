@@ -12,6 +12,7 @@ public class AgentSessionDomainTests
         var metadata = new AgentSessionMetadata()
             .WithLabel("mohist.io/project-id", "proj")
             .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/agent-id", "workflow-agent")
             .WithLabel("mohist.io/source-id", "wf")
             .WithLabel("mohist.io/session-name", "session");
 
@@ -51,6 +52,7 @@ public class AgentSessionDomainTests
         var metadata = new AgentSessionMetadata()
             .WithLabel("mohist.io/project-id", "project-1")
             .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/agent-id", "workflow-agent")
             .WithLabel("mohist.io/source-id", "workflow-1")
             .WithLabel("mohist.io/session-name", "build");
 
@@ -72,6 +74,54 @@ public class AgentSessionDomainTests
             "/work",
             metadata: new AgentSessionMetadata(),
             now: new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc)));
+    }
+
+    [Fact]
+    public void Create_WorkflowSourceWithoutAgentIdentity_IsRejected()
+    {
+        var metadata = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "workflow-1")
+            .WithLabel("mohist.io/session-name", "build");
+
+        var exception = Assert.Throws<InvalidOperationException>(() => AgentSession.Create(
+            "workflow-without-agent",
+            "runner-1",
+            "/work",
+            metadata,
+            new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc)));
+
+        Assert.Contains("agent label", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PersistedWorkflowSourceWithoutAgentIdentity_RemainsStructurallyReadable()
+    {
+        var metadata = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "workflow-1")
+            .WithLabel("mohist.io/session-name", "build");
+
+        metadata.ValidateSource(allowLegacySource: true);
+        Assert.Throws<InvalidOperationException>(() => metadata.ValidateSource());
+    }
+
+    [Fact]
+    public void PersistedWorkflowSourceMissingRunOrName_StaysUnreadable()
+    {
+        var withoutRun = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/session-name", "build");
+        var withoutName = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "workflow-1");
+
+        Assert.Throws<InvalidOperationException>(() => withoutRun.ValidateSource(allowLegacySource: true));
+        Assert.Throws<InvalidOperationException>(() => withoutName.ValidateSource(allowLegacySource: true));
     }
 
     [Fact]
@@ -192,6 +242,35 @@ public class AgentSessionDomainTests
 
         Assert.Equal(0.003, Usage(session).CostAmount);
         Assert.Equal("EUR", Usage(session).CostCurrency);
+    }
+
+    [Fact]
+    public void ApplyUsage_FirstExplicitZeroCost_RecordsKnownZero()
+    {
+        var session = CreateSession();
+
+        session.ApplyUsage(null, null, null, null, null, 0d, "USD", null, null, new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(0d, Usage(session).CostAmount);
+        Assert.Equal("USD", Usage(session).CostCurrency);
+    }
+
+    [Fact]
+    public void ApplyUsage_OmittedAndRepeatedCostDeltas_KeepTheKnownAmount()
+    {
+        var session = CreateSession();
+        var now = new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc);
+
+        session.ApplyUsage(null, null, null, null, null, 1.20, "USD", null, null, now);
+        // An omitted amount is unknown, not a zero delta.
+        session.ApplyUsage(10, 5, 15, null, null, null, null, null, null, now.AddSeconds(1));
+        // A repeated cumulative amount adds no charge.
+        session.ApplyUsage(null, null, null, null, null, 0d, "USD", null, null, now.AddSeconds(2));
+        // A lower repeated snapshot is not a refund.
+        session.ApplyUsage(null, null, null, null, null, -0.30, "USD", null, null, now.AddSeconds(3));
+
+        Assert.Equal(1.20, Usage(session).CostAmount);
+        Assert.Equal(15, Usage(session).TotalTokens);
     }
 
     [Fact]

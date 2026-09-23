@@ -1,11 +1,8 @@
 import { projectApiPath, request } from '@/shared/api/client'
 import type {
-  AgentConnectionClaimOwnerResponse,
-  AgentConnectionConfigureRequest,
-  AgentConnectionCreateRequest,
-  AgentConnectionCreateResponse,
   AgentConnectionDetailResponse,
   AgentConnectionDto,
+  ManagedSlackSetupProgress,
   AccessPolicyManageRequest,
   AccessPolicyManageResponse,
   AccessPolicyState,
@@ -25,53 +22,20 @@ export function listAgentConnections(projectId: string | null | undefined) {
   return request<AgentConnectionDto[]>(projectApiPath(projectId, '/slack-connections'))
 }
 
-export function createAgentConnection(
-  projectId: string | null | undefined,
-  data: AgentConnectionCreateRequest,
-) {
-  return request<AgentConnectionCreateResponse>(projectApiPath(projectId, '/slack-connections'), {
+export function installManagedSlackAgent(projectId: string | null | undefined, agentId: string) {
+  return request<ManagedSlackSetupProgress>(projectApiPath(projectId, '/slack-manager/install-agent'), {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: JSON.stringify({ agentId }),
   })
 }
 
-export function getAgentConnection(
-  projectId: string | null | undefined,
-  connectionId: string,
-) {
+export function getAgentConnection(projectId: string | null | undefined, connectionId: string) {
   return request<AgentConnectionDetailResponse>(
     projectApiPath(projectId, `/slack-connections/${encodeURIComponent(connectionId)}`),
   )
 }
 
-export function configureAgentConnection(
-  projectId: string | null | undefined,
-  connectionId: string,
-  data: AgentConnectionConfigureRequest,
-) {
-  return request<AgentConnectionDto>(
-    projectApiPath(projectId, `/slack-connections/${encodeURIComponent(connectionId)}/configure`),
-    {
-      method: 'POST',
-      body: JSON.stringify(data),
-    },
-  )
-}
-
-export function claimAgentConnectionOwner(
-  projectId: string | null | undefined,
-  connectionId: string,
-) {
-  return request<AgentConnectionClaimOwnerResponse>(
-    projectApiPath(projectId, `/slack-connections/${encodeURIComponent(connectionId)}/claim-owner`),
-    { method: 'POST' },
-  )
-}
-
-export function getAgentConnectionAccess(
-  projectId: string | null | undefined,
-  connectionId: string,
-) {
+export function getAgentConnectionAccess(projectId: string | null | undefined, connectionId: string) {
   return request<AccessPolicyState>(
     projectApiPath(projectId, `/slack-connections/${encodeURIComponent(connectionId)}/access`),
   )
@@ -104,15 +68,9 @@ export function searchSlackConnectionMembers(
   )
 }
 
-export function listSlackOutboxDeliveries(
-  projectId: string | null | undefined,
-  connectionId: string,
-) {
+export function listSlackOutboxDeliveries(projectId: string | null | undefined, connectionId: string) {
   return request<SlackOutboxListResponse>(
-    projectApiPath(
-      projectId,
-      `/slack-connections/${encodeURIComponent(connectionId)}/deliveries`,
-    ),
+    projectApiPath(projectId, `/slack-connections/${encodeURIComponent(connectionId)}/deliveries`),
   )
 }
 
@@ -130,15 +88,9 @@ export function resendSlackOutboxDelivery(
   )
 }
 
-export function clearOfflineGap(
-  projectId: string | null | undefined,
-  connectionId: string,
-) {
+export function clearOfflineGap(projectId: string | null | undefined, connectionId: string) {
   return request<{ cleared: boolean }>(
-    projectApiPath(
-      projectId,
-      `/slack-connections/${encodeURIComponent(connectionId)}/clear-gap`,
-    ),
+    projectApiPath(projectId, `/slack-connections/${encodeURIComponent(connectionId)}/clear-gap`),
     { method: 'POST' },
   )
 }

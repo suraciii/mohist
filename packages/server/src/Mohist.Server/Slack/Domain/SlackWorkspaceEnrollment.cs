@@ -158,6 +158,31 @@ public sealed class SlackWorkspaceEnrollment
         UpdatedAt = now;
     }
 
+    public void RecordReconciledManagerApp(string appId, string installUrl, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(appId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(installUrl);
+        if (ManagerAppLifecycle != SlackManagerAppLifecycle.Created)
+            throw new InvalidOperationException("The Manager App must be reconciled as created before recording its identity.");
+        if (!string.IsNullOrWhiteSpace(ManagerAppId)
+            && !string.Equals(ManagerAppId, appId, StringComparison.Ordinal))
+            throw new InvalidOperationException("The Manager App identity cannot be changed after setup.");
+        ManagerAppId = appId.Trim();
+        ManagerAppInstallUrl = installUrl.Trim();
+        ManagerAppManifestHash = string.Empty;
+        UpdatedAt = now;
+    }
+
+    public void RecordManagerAppManifestApplied(string manifestHash, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(manifestHash);
+        if (ManagerAppLifecycle != SlackManagerAppLifecycle.Created
+            || string.IsNullOrWhiteSpace(ManagerAppId))
+            throw new InvalidOperationException("The Manager App must be created before applying its manifest.");
+        ManagerAppManifestHash = manifestHash.Trim();
+        UpdatedAt = now;
+    }
+
     public void RecordManagerAppIdentity(string appId, DateTimeOffset now)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(appId);

@@ -45,7 +45,7 @@ document records only where a schedule meets spawn, stop, or detach.
   membership. It does not become a second topology model.
 - `AgentSession.Source` explains why a Session was created and never changes.
   Parentage is separate and detach cannot rewrite Source.
-- Server resolves capability, identity, `Workspace`, `Materialization`, and
+- Server resolves capability, identity, `Workspace`, `Provisioning`, and
   Runner binding. The Runner executes only the resolved and pinned child work.
 - Parent-to-child and child-to-parent messages use ordinary `SessionInput` and
   `AgentTurn` paths. The tree adds no inbox, message aggregate, or transcript
@@ -72,7 +72,7 @@ document records only where a schedule meets spawn, stop, or detach.
   launch-plan recovery, and provisional artifact cancellation. It extends the
   existing Agent launch pipeline rather than creating a second launcher.
 - **Runner** receives a resolved prompt, WorkDir, Runtime, and binding
-  constraint. It does not select a parent, resolve capability, or materialize
+  constraint. It does not select a parent, resolve capability, or provision
   an arbitrary path.
 
 ## Model
@@ -580,9 +580,11 @@ separate queue, or Runtime protocol.
 ### Authoritative terminal trigger
 
 AgentSession never becomes terminal. A child delegation becomes terminal when
-its spawned `ChildLaunchJobId` enters `completed`, `failed`, or `cancelled`.
-`unknown` is not terminal. A terminal initial or later AgentTurn is not a report
-trigger.
+its spawned `ChildLaunchJobId` enters `completed`, `failed`, or `cancelled`, or
+when lifecycle evidence durably settles that Job as final `unknown`. Ordinary
+recoverable `unknown` is not terminal. A terminal initial or later AgentTurn is
+not itself a report trigger; activity convergence settles an owning initial
+Job through its durable event before that Job emits its terminal report.
 
 In that Job transition, AgentJob persists a terminal event with SpawnOrigin. It
 carries child Job, Session, status, initial Turn, result-observation reference,
@@ -782,4 +784,4 @@ schedule nor its delivery identity.
   variables, or Runtime Session, or select a child Runner different from the
   parent binding.
 - Do not claim that the tree replaces Issue, Workflow, Project, Workspace, or
-  Materialization ownership and isolation models.
+  Provisioning ownership and isolation models.

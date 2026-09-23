@@ -60,7 +60,9 @@ Both Profiles implement this path:
 - Check records independent review evidence and leaves the verdict to the approver. See
   [`plan-artifacts.md`](plan-artifacts.md).
 - Approval Feedback follows [`definition.md`](definition.md#approval-feedback). Built-in Agent Feedback Tasks explicitly use `mohist/agent`,
-  the `mohist/builder` Agent, and `feedback-${{ stage.name }}` as their Session name. Mechanical Feedback Tasks remain
+  the `mohist/builder` Agent, and `feedback-${{ stage.name }}` as their Session name. The Agent Feedback Task's final report
+  answers every request in the authoritative feedback, in original order, with the actual change, the verification result,
+  and any remaining or unresolved work; an unperformed check is named as not run. Mechanical Feedback Tasks remain
   ordinary explicit Tasks.
 - Agent work runs from the Workspace root so `PLANS/` and `REPOS/` remain in scope.
   Repository-only Actions select `REPOS/<repository-name>` explicitly. Runner enforces branch and clean-worktree

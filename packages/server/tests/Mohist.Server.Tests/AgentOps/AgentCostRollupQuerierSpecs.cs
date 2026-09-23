@@ -87,6 +87,25 @@ public class AgentCostRollupQuerierSpecs
     }
 
     [Fact]
+    public async Task GetCostRollupAsync_TokenOnlySessionsDoNotManufactureCostFigures()
+    {
+        // Tokens are not money: without a reported amount the total stays
+        // unknown, and a completed Issue does not supply a zero numerator.
+        var projectId = await CreateProjectAsync();
+        await InsertSessionAsync(projectId, Today.AddDays(-1).AddHours(8),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150);
+        await InsertIssueWithStatusAsync(projectId, 1, "d1", IssueStatus.Done);
+
+        var result = await ResolveQuerier().GetCostRollupAsync(projectId);
+
+        Assert.Null(result.TotalCost.Amount);
+        Assert.Equal(0, result.TotalCost.SampleCount);
+        Assert.Equal(1, result.DoneIssuesCount);
+        Assert.Null(result.CostPerShip.Amount);
+        Assert.Equal(0, result.CostPerShip.SampleCount);
+    }
+
+    [Fact]
     public async Task GetCostRollupAsync_FreeShippingIsRealZeroNotEmpty()
     {
         var projectId = await CreateProjectAsync();
@@ -213,7 +232,7 @@ public class AgentCostRollupQuerierSpecs
         long inputTokens = 0,
         long outputTokens = 0,
         long totalTokens = 0,
-        double costAmount = 0,
+        double? costAmount = null,
         string? costCurrency = null,
         string? agentSessionId = null)
     {

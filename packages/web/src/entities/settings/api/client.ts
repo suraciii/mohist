@@ -12,13 +12,14 @@ import type {
 
 export const AGENT_RUNTIME_OPENCODE = 'opencode'
 export const AGENT_RUNTIME_PI = 'pi'
+export const AGENT_RUNTIME_CODEX = 'codex'
 
-export const AGENT_RUNTIMES = [AGENT_RUNTIME_OPENCODE, AGENT_RUNTIME_PI] as const
+export const AGENT_RUNTIMES = [AGENT_RUNTIME_OPENCODE, AGENT_RUNTIME_PI, AGENT_RUNTIME_CODEX] as const
 
 export type { AgentRuntime } from '../model/types'
 
 export function isAgentRuntime(value: string | null | undefined): value is AgentRuntime {
-  return value === AGENT_RUNTIME_OPENCODE || value === AGENT_RUNTIME_PI
+  return value === AGENT_RUNTIME_OPENCODE || value === AGENT_RUNTIME_PI || value === AGENT_RUNTIME_CODEX
 }
 
 export const DEFAULT_AGENT_RUNTIME: AgentRuntime = AGENT_RUNTIME_PI

@@ -14,8 +14,8 @@ Host environment capture, refresh, and diagnostics are specified in
 - A Runner never decides workflow state, AgentJob result, Session state, or
   whether an uncertain external effect succeeded.
 - Server limits Runner capacity and dispatches work only to eligible capacity.
-- A named Workspace remains the product identity even when its materialization
-  moves or is rebuilt on a Runner.
+- A named Workspace remains the product identity even when it is provisioned
+  again or rebuilt on a Runner.
 - Runner manages every process it starts and does not leave child processes
   affecting later work.
 
@@ -146,14 +146,14 @@ Runner owns the complete process tree for every host command. A command result
 includes output produced before exit. A leftover subprocess cannot keep the
 result open or write into later work.
 
-When a Workflow Workspace is first materialized, Runner transfers only the
+When a Workflow Workspace is first provisioned, Runner transfers only the
 repository data needed to establish its base and run branches. Later Stages can
 rebase and integrate that branch. Transfers remain bounded, and failed
-materialization does not publish or retain a partial Workspace.
+provisioning does not publish or retain a partial Workspace.
 
 ## Workspace Location
 
-An Issue uses a named Workspace such as `issue-42`. Runner materializes it under
+An Issue uses a named Workspace such as `issue-42`. Runner provisions it under
 its configured root and records the home Runner and path. Inspect that binding
 instead of guessing an internal directory:
 
@@ -181,10 +181,10 @@ Workflow state remains in Server, not Runner.
 ## Multiple Runners
 
 Server registers multiple Runners and enforces each Runner's slots independently.
-New work uses eligible capacity. A materialized Workspace has a home Runner so
+New work uses eligible capacity. A provisioned Workspace has a home Runner so
 later Sessions can reuse its files.
 
-AgentJob scheduling may clear an offline home and rematerialize on another
+AgentJob scheduling may clear an offline home and reprovision on another
 Runner. A WorkflowRun remains assigned to its Runner and does not migrate
 automatically; restore that Runner before retrying the Workflow. Unpushed local
 files cannot move between hosts.

@@ -47,6 +47,42 @@ change record, and review happens on the Issue and the pull request. The
 repository must not grow an in-repo proposal, change-tracking, or planning
 format.
 
+## Levels of context
+
+Context connects four levels of reasoning:
+
+1. **Philosophy** examines the activity, purposes, and values that guide
+   product choices.
+2. **Product design** defines the capabilities, behavior, and experience that
+   serve those purposes.
+3. **Technical design** chooses the architecture, modules, and boundaries that
+   make the product behavior possible.
+4. **Implementation** makes those choices concrete in code and observable
+   behavior. Tests provide evidence about the behavior they exercise.
+
+Each level answers a problem posed by the preceding level and supplies
+problems and constraints to the next. A purpose can admit several product
+forms, and a product behavior can admit several technical designs. Documents
+must explain the relevant problem and chosen solution rather than imply that
+one uniquely determines the other.
+
+A lower-level document must identify the higher-level requirement it serves
+when that relationship explains a consequential choice. Link to the owning
+document instead of copying its rules. Not every document needs a direct link
+to philosophy, and the relationship requires no new metadata format.
+
+When evidence challenges a choice, identify which level needs revision. A
+code defect, an unsuitable architecture, and a misunderstood product goal
+require different corrections. A lower-level change must not silently alter
+an upstream requirement. Propose that change at its owning level and resolve
+it through the existing decision process.
+
+These levels organize the reasons for decisions and their expression in a
+product. They do not describe a one-way development process: practical
+experience can challenge any level, including its purposes and assumptions.
+They are not Workflow stages. `AGENTS.md` directs readers to the relevant
+context, and `eng/` governs how contributors maintain and verify it.
+
 ## Where context lives
 
 One fact has one home. Other documents link to the home; they never restate
@@ -54,10 +90,13 @@ the fact.
 
 The subject of a document fixes its layer:
 
-- **`docs/`** — the product specification: what the product must satisfy.
-  Written for users.
-- **`design/`** — the product design: why the system has its boundaries and
+- **`docs/`** — product foundations and product design.
+  [Philosophy](../docs/philosophy.md) owns the argument about development and
+  human agency. [Product Vision](../docs/vision.md) states Mohist's direction.
+  Other product documents define user-facing behavior.
+- **`design/`** — technical design: why the system has its boundaries and
   which contracts implementations must preserve. Written for developers.
+- **`packages/`** — product implementation and its tests.
 - **`eng/`** — repository engineering practices: how this repository itself
   is built, tested, and documented. Written for contributors and agents.
   These documents govern the repository, not the product.
@@ -79,10 +118,11 @@ Cross-cutting homes:
 
 ## Decision records
 
-A decision record is the only place that keeps why a boundary exists: the
-problem, the rejected alternatives, and the accepted trade-off. Specifications
-and `AGENTS.md` state the target state and never narrate history; a reader who
-needs the rationale follows the link to the record.
+A decision record preserves the problem, rejected alternatives, accepted
+trade-off, and consequences of a significant choice. Product and technical
+specifications explain their current requirements and design drivers; they
+link to the decision record when its fuller rationale is needed.
+Specifications and `AGENTS.md` must not become chronological change logs.
 
 Each record carries, in order:
 
@@ -131,8 +171,13 @@ These rules govern every specification document, in `docs/`, `design/`, and
   claim compliance. Keep domain identifiers, field names, API names, commands,
   serialized values, and code symbols in their exact spelling. Use `must`,
   `may`, and `must not` for requirements, options, and prohibitions.
-- Write only statements an implementation can be checked against. A sentence
-  that no implementation could violate is not a spec rule; delete it.
+- Product behavior and technical requirements must be checkable against the
+  implementation. Foundational philosophy must state its reasoning and
+  distinguish source arguments from Mohist's interpretation. Design rationale
+  must explain a choice and its consequences. Do not present values or
+  rationale as mechanically verified behavior.
+- Preserve attributed quotations accurately, including their original spelling.
+  Link to the source and identify the translation when relevant.
 - Keep terms consistent with [`CONTEXT.md`](../CONTEXT.md). Define a term
   once and link to it.
 - A document states its current gaps in its own Status or Implementation Gaps

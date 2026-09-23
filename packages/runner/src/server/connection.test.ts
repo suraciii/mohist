@@ -381,8 +381,8 @@ describe('ServerConnection agent-input attachments', () => {
   })
 })
 
-describe('ServerConnection named workspace materialization report', () => {
-  it('posts the materialized path and parses the recorded home', async () => {
+describe('ServerConnection named workspace provisioning report', () => {
+  it('posts the provisioned path and parses the recorded home', async () => {
     fetchSpy.mockResolvedValue(
       new Response(JSON.stringify({ success: true, data: { runnerId: 'runner-1', path: '/virtual/ws/pay' } }), {
         status: 200,
@@ -390,7 +390,7 @@ describe('ServerConnection named workspace materialization report', () => {
       }),
     )
 
-    const report = await new ServerConnection(options).reportWorkspaceMaterialized(
+    const report = await new ServerConnection(options).reportWorkspaceProvisioned(
       'project-1',
       'pay',
       '/virtual/ws/pay',
@@ -400,7 +400,7 @@ describe('ServerConnection named workspace materialization report', () => {
 
     expect(report).toEqual({ runnerId: 'runner-1', path: '/virtual/ws/pay' })
     expect(fetchSpy.mock.calls[0]?.[0]).toBe(
-      'https://runner.test/api/runner/runner-1/workspaces/project-1/pay/materialized',
+      'https://runner.test/api/runner/runner-1/workspaces/project-1/pay/provisioned',
     )
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined
     expect(init?.method).toBe('POST')
@@ -411,32 +411,32 @@ describe('ServerConnection named workspace materialization report', () => {
     fetchSpy.mockResolvedValue(new Response('not-json', { status: 200 }))
 
     await expect(
-      new ServerConnection(options).reportWorkspaceMaterialized('project-1', 'pay', '/virtual/ws/pay', signal),
+      new ServerConnection(options).reportWorkspaceProvisioned('project-1', 'pay', '/virtual/ws/pay', signal),
     ).rejects.toMatchObject({
-      operation: 'reportWorkspaceMaterialized',
+      operation: 'reportWorkspaceProvisioned',
       kind: 'protocol',
     } satisfies Partial<RunnerTransportError>)
   })
 
   it('throws WorkspaceHomeClaimedError on a 409 workspace_home_claimed answer', async () => {
     fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ ok: false, code: 'workspace_home_claimed', error: 'already materialized' }), {
+      new Response(JSON.stringify({ ok: false, code: 'workspace_home_claimed', error: 'already provisioned' }), {
         status: 409,
         headers: { 'content-type': 'application/json' },
       }),
     )
 
     await expect(
-      new ServerConnection(options).reportWorkspaceMaterialized('project-1', 'pay', '/virtual/ws/pay', signal),
+      new ServerConnection(options).reportWorkspaceProvisioned('project-1', 'pay', '/virtual/ws/pay', signal),
     ).rejects.toBeInstanceOf(WorkspaceHomeClaimedError)
   })
 
   it('preserves typed transport failures for other non-2xx answers', async () => {
     fetchSpy.mockResolvedValue(new Response('bad', { status: 400 }))
     await expect(
-      new ServerConnection(options).reportWorkspaceMaterialized('project-1', 'pay', '/virtual/ws/pay', signal),
+      new ServerConnection(options).reportWorkspaceProvisioned('project-1', 'pay', '/virtual/ws/pay', signal),
     ).rejects.toMatchObject({
-      operation: 'reportWorkspaceMaterialized',
+      operation: 'reportWorkspaceProvisioned',
       kind: 'http',
       httpStatus: 400,
     } satisfies Partial<RunnerTransportError>)

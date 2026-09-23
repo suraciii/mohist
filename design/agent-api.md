@@ -272,11 +272,18 @@ outcome-pending detail.
 - **unknown:** acceptance, dispatch, binding, stop, or outcome cannot be
   confirmed and no fenced terminal fact resolves the target. At least one
   applicable `jobStatus`, `sessionActivity`, `inputStatus`, or `turnStatus` is
-  unknown, and `admission=blocked` when a Session exists.
+  unknown, and `admission=blocked` when a Session exists — unless the only
+  unknown facts are settled terminal-`unknown` facts from Activity
+  convergence.
 
 An Input or Turn read remains terminal even when its Session has a later active
 Turn. An active Session does not turn a terminal Job or Turn into running.
 `sessionActivity` is context, not the requested Input/Turn outcome.
+
+A Turn settled terminal `unknown` by Activity convergence projects as
+`unknown` and never resolves to a terminal outcome; it is terminal for
+capacity and in-flight boundaries, and `admission` follows the converged
+Session Activity.
 
 Precedence is fixed:
 

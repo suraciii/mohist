@@ -232,7 +232,7 @@ func TestInstallRunnerEnabledAgentRuntimesValidation(t *testing.T) {
 	}{
 		{name: "empty", args: []string{"install", "runner", "--enabled-agent-runtimes", ""}, want: "must be a non-empty"},
 		{name: "empty member", args: []string{"install", "runner", "--enabled-agent-runtimes", "pi,"}, want: "must be a non-empty"},
-		{name: "unknown", args: []string{"install", "runner", "--enabled-agent-runtimes", "pi,codex"}, want: "unknown Runtime"},
+		{name: "unknown", args: []string{"install", "runner", "--enabled-agent-runtimes", "pi,mystery"}, want: "unknown Runtime"},
 		{name: "line injection", args: []string{"install", "runner", "--enabled-agent-runtimes", "pi\nINJECTED=value"}, want: "unknown Runtime"},
 		{name: "missing value", args: []string{"install", "runner", "--enabled-agent-runtimes"}, want: "requires a value"},
 		{name: "server scope", args: []string{"install", "server", "--enabled-agent-runtimes", "pi"}, want: "only valid with mo install runner"},
@@ -1054,5 +1054,66 @@ func assertInstallationPreserved(t *testing.T, binary, skills, skillName string)
 	}
 	if _, err := os.Stat(filepath.Join(skills, skillName, "SKILL.md")); err != nil {
 		t.Fatalf("managed skills changed: %v", err)
+	}
+}
+
+func TestInstallRunnerEnabledAgentRuntimesAcceptsCodex(t *testing.T) {
+	home := t.TempDir()
+	repoRoot := t.TempDir()
+	runnerRoot := filepath.Join(home, "custom runner")
+	files := map[string]string{}
+	var enrollmentRequests int
+	deps, out, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		enrollmentRequests++
+		if request.Method != http.MethodPost || request.URL.Path != "/api/runners/enrollment-tokens" {
+			t.Fatalf("unexpected enrollment request: %s %s", request.Method, request.URL.Path)
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"token":"enrollment-token"}}`), nil
+	}), map[string]string{"MOHIST_SERVER_URL": "http://server", "MOHIST_TOKEN": "operator-token"})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.CurrentDirectory = func() string { return repoRoot }
+	deps.WriteFile = func(path, value string, _ os.FileMode) error {
+		files[path] = value
+		return nil
+	}
+	deps.WriteFileAtomic = func(path string, value []byte, _ os.FileMode) error {
+		files[path] = string(value)
+		return nil
+	}
+	deps.Execute = func(_ context.Context, _ string, _ []string) error { return nil }
+
+	code := Run(context.Background(), []string{
+		"install", "runner", "--repo-root", repoRoot,
+		"--server-url", "https://managed-server", "--runner-root", runnerRoot,
+		"--enabled-agent-runtimes", "codex,pi,opencode",
+	}, deps)
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
+	}
+	if enrollmentRequests != 1 {
+		t.Fatalf("enrollment requests = %d", enrollmentRequests)
+	}
+	environmentPath := filepath.Join(home, ".config", "mohist", "runner.env")
+	if files[environmentPath] != "ENABLED_AGENT_RUNTIMES=pi,opencode,codex\n" {
+		t.Fatalf("environment file = %q", files[environmentPath])
+	}
+	if strings.Contains(out.String(), "unknown Runtime") || strings.Contains(errOut.String(), "unknown Runtime") {
+		t.Fatalf("help text rejected Codex: stdout=%q stderr=%q", out.String(), errOut.String())
+	}
+}
+
+func TestNormalizeEnabledAgentRuntimesOrdersCodex(t *testing.T) {
+	got, err := normalizeEnabledAgentRuntimes("codex,opencode,pi")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "pi,opencode,codex" {
+		t.Fatalf("normalised runtimes = %q, want %q", got, "pi,opencode,codex")
+	}
+	if _, err := normalizeEnabledAgentRuntimes("codex,CODEX"); err != nil {
+		t.Fatalf("case insensitive deduplication rejected codex: %v", err)
+	}
+	if _, err := normalizeEnabledAgentRuntimes("pi,codex,"); err == nil {
+		t.Fatalf("expected trailing comma to be rejected")
 	}
 }

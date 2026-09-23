@@ -53,6 +53,8 @@ internal sealed class PublicProjectionFacts
 
     public AgentSessionActivity? Activity { get; init; }
 
+    public long ContextGeneration { get; init; } = 1;
+
     public DateTimeOffset? SessionCreatedAt { get; init; }
 
     /// <summary>An unresolved stop claim is held against the Session.</summary>
@@ -95,7 +97,8 @@ internal sealed class PublicProjectionFacts
         string InputId,
         AgentSessionInputAcceptance Acceptance,
         DateTimeOffset? RecordedAt,
-        string? JobId);
+        string? JobId,
+        long ContextGeneration);
 
     /// <summary>The durable facts of one recorded Session turn.</summary>
     internal sealed record TurnFacts(
@@ -105,7 +108,9 @@ internal sealed class PublicProjectionFacts
         string? JobId,
         DateTimeOffset? RecordedAt,
         DateTimeOffset? UpdatedAt,
-        AgentTurnResult? Result);
+        AgentTurnResult? Result,
+        long ContextGeneration,
+        DateTimeOffset? SupersededAt);
 
     /// <summary>
     /// One consumed AgentSession journal row relevant to the public
@@ -201,8 +206,10 @@ internal static class PublicExecutionAggregator
             facts,
             jobStatus,
             turnStatus,
-            dispatchBlocked,
-            sessionExists: joined);
+            dispatchBlocked || IsDispatchPending(job),
+            sessionExists: joined,
+            jobUnknownSettled: job.TerminalAt is not null || launchTurn?.SupersededAt is not null,
+            turnSuperseded: launchTurn?.SupersededAt is not null);
 
         return new PublicAnchorComponents(
             JobId: job.JobKey,
@@ -248,7 +255,14 @@ internal static class PublicExecutionAggregator
             : turn is null ? null : MapTurnStatus(turn.Status, facts.PendingStopActive);
 
         var dispatchBlocked = job is not null && IsDispatchBlocked(job);
-        var admission = ResolveAdmission(facts, job is null ? null : MapJobStatus(job.Status), turnStatus, dispatchBlocked, sessionExists: true);
+        var admission = ResolveAdmission(
+            facts,
+            job is null ? null : MapJobStatus(job.Status),
+            turnStatus,
+            dispatchBlocked || (job is not null && IsDispatchPending(job)),
+            sessionExists: true,
+            jobUnknownSettled: job?.TerminalAt is not null || turn?.SupersededAt is not null,
+            turnSuperseded: turn?.SupersededAt is not null);
 
         return new PublicAnchorComponents(
             JobId: job?.JobKey,
@@ -288,7 +302,14 @@ internal static class PublicExecutionAggregator
             : null;
 
         var dispatchBlocked = job is not null && IsDispatchBlocked(job);
-        var admission = ResolveAdmission(facts, job is null ? null : MapJobStatus(job.Status), MapTurnStatus(turn.Status, facts.PendingStopActive), dispatchBlocked, sessionExists: true);
+        var admission = ResolveAdmission(
+            facts,
+            job is null ? null : MapJobStatus(job.Status),
+            MapTurnStatus(turn.Status, facts.PendingStopActive),
+            dispatchBlocked || (job is not null && IsDispatchPending(job)),
+            sessionExists: true,
+            jobUnknownSettled: job?.TerminalAt is not null || turn.SupersededAt is not null,
+            turnSuperseded: turn.SupersededAt is not null);
 
         return new PublicAnchorComponents(
             JobId: job?.JobKey,
@@ -320,9 +341,13 @@ internal static class PublicExecutionAggregator
     public static PublicAnchorComponents BuildSessionAnchor(
         PublicProjectionFacts facts)
     {
-        var contextTurn = facts.Turns.LastOrDefault();
+        var contextTurn = facts.Turns.LastOrDefault(turn =>
+                turn.SupersededAt is null
+                && turn.ContextGeneration == facts.ContextGeneration)
+            ?? facts.Turns.LastOrDefault();
         var contextInput = contextTurn is null
-            ? facts.Inputs.LastOrDefault()
+            ? facts.Inputs.LastOrDefault(input => input.ContextGeneration == facts.ContextGeneration)
+                ?? facts.Inputs.LastOrDefault()
             : contextTurn.InputIds.Count > 0 ? FindInput(facts, contextTurn.InputIds[0]) : null;
         var job = contextTurn?.JobId is not null
             ? FindJob(facts, contextTurn.JobId)
@@ -340,7 +365,14 @@ internal static class PublicExecutionAggregator
             TurnId: contextTurn?.TurnId,
             JobStatus: job is null ? null : MapJobStatus(job.Status),
             SessionActivity: MapActivity(facts.Activity),
-            Admission: ResolveAdmission(facts, job is null ? null : MapJobStatus(job.Status), turnStatus, dispatchBlocked, sessionExists: true),
+            Admission: ResolveAdmission(
+                facts,
+                job is null ? null : MapJobStatus(job.Status),
+                turnStatus,
+                dispatchBlocked || (job is not null && IsDispatchPending(job)),
+                sessionExists: true,
+                jobUnknownSettled: job?.TerminalAt is not null || contextTurn?.SupersededAt is not null,
+                turnSuperseded: contextTurn?.SupersededAt is not null),
             InputStatus: contextInput is null ? null : MapInputStatus(contextInput.Acceptance),
             TurnStatus: turnStatus,
             Outcome: null,
@@ -465,25 +497,28 @@ internal static class PublicExecutionAggregator
     /// The public admission component: blocked whenever an applicable
     /// fact is unknown, a stop outcome is unresolved
     /// (outcome_pending), a reset is in progress, or the launch Job is
-    /// queued behind a retryable dispatch block; ready otherwise when
-    /// a Session exists; null when no Session exists.
+    /// queued behind a retryable dispatch block or unresolved dispatch evidence;
+    /// ready otherwise when a Session exists; null when no Session exists.
     /// </summary>
     public static string? ResolveAdmission(
         PublicProjectionFacts facts,
         string? jobStatus,
         string? turnStatus,
         bool dispatchBlocked,
-        bool sessionExists)
+        bool sessionExists,
+        bool jobUnknownSettled = false,
+        bool turnSuperseded = false)
     {
         if (!sessionExists)
         {
             return null;
         }
 
-        var blocked = turnStatus == PublicExecutionFieldValues.TurnUnknown
+        var blocked = (turnStatus == PublicExecutionFieldValues.TurnUnknown && !turnSuperseded)
             || turnStatus == PublicExecutionFieldValues.TurnOutcomePending
-            || jobStatus == PublicExecutionFieldValues.JobUnknown
+            || (jobStatus == PublicExecutionFieldValues.JobUnknown && !jobUnknownSettled)
             || facts.Activity == AgentSessionActivity.Unknown
+            || HasUnresolvedCurrentUnknown(facts)
             || facts.PendingStopActive
             || facts.PendingResetActive
             || dispatchBlocked;
@@ -491,6 +526,12 @@ internal static class PublicExecutionAggregator
             ? PublicExecutionFieldValues.AdmissionBlocked
             : PublicExecutionFieldValues.AdmissionReady;
     }
+
+    private static bool HasUnresolvedCurrentUnknown(PublicProjectionFacts facts) =>
+        facts.Turns.Any(turn =>
+            turn.ContextGeneration == facts.ContextGeneration
+            && turn.SupersededAt is null
+            && turn.Status == AgentTurnStatus.Unknown);
 
     /// <summary>
     /// Derives the normalized source transitions a Session's public
@@ -746,6 +787,9 @@ internal static class PublicExecutionAggregator
         AgentJobStatus.Cancelled => PublicExecutionFieldValues.OutcomeCancelled,
         _ => PublicExecutionFieldValues.OutcomeFailed,
     };
+
+    private static bool IsDispatchPending(PublicProjectionFacts.JobFacts job) =>
+        job.Status == AgentJobStatus.Pending && job.WaitingReason == "dispatch-pending";
 
     private static bool IsDispatchBlocked(PublicProjectionFacts.JobFacts job) =>
         job.Status == AgentJobStatus.Pending

@@ -574,14 +574,15 @@ public static class AgentTaskRoutes
             return ("allowedSubagentAgentIds", "allowedSubagentAgentIds must contain non-empty Agent ids.");
         if (HasNonNullProperty(body.Raw, "runtime")
             && string.IsNullOrWhiteSpace(body.Runtime))
-            return ("runtime", "runtime must be one of opencode, pi.");
+            return ("runtime", "runtime must be one of opencode, pi, codex.");
         if (HasNonNullProperty(body.Raw, "runtime")
             && !AgentConfigSchema.AllowedRuntimes.Contains(body.Runtime!))
-            return ("runtime", $"runtime '{body.Runtime}' is not supported; choose opencode or pi.");
+            return ("runtime", $"runtime '{body.Runtime}' is not supported; choose opencode, pi, or codex.");
         if (HasNonNullProperty(body.Raw, "model")
             && string.IsNullOrWhiteSpace(body.Model))
             return ("model", "model must use the provider/model form.");
         if (HasNonNullProperty(body.Raw, "model")
+            && !string.Equals(body.Runtime, AgentConfigSchema.CodexRuntime, StringComparison.OrdinalIgnoreCase)
             && !AgentConfigSchema.HasProviderModelForm(body.Model))
             return ("model", "model must use the provider/model form.");
         if (HasNonNullProperty(body.Raw, "variant")

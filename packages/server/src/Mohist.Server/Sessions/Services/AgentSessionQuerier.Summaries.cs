@@ -75,13 +75,17 @@ public partial class AgentSessionQuerier
             summary.ToolErrorCount,
             BuildGenericSessionSummaryContextRefs(record),
             AgentSessionDtoMapper.ToUsageDto(usage),
-            session.Status.Activity == AgentSessionActivity.Idle,
+            IsRecoveryAvailable(session),
             CurrentTurnId(session),
             AgentSessionObservationMapper.Inputs(session.Status),
             AgentSessionObservationMapper.Turns(session.Status),
             Origin: record.Label(GenericAgentSessionMetadata.Origin),
             TargetId: record.Label(GenericAgentSessionMetadata.TargetId),
-            AppliedReasoningEffort: summary.AppliedReasoningEffort);
+            AppliedReasoningEffort: summary.AppliedReasoningEffort,
+            ContextGeneration: session.Status.ContextGeneration,
+            UnresolvedPrevious: AgentSessionObservationMapper.UnresolvedPrevious(session.Status),
+            UnresolvedPreviousCount: session.Status.UnresolvedPreviousCount,
+            NextAction: session.Status.NextAction);
     }
 
     /// <summary>
@@ -138,6 +142,10 @@ public partial class AgentSessionQuerier
             RecoveryHistory: transcriptSummary.RecoveryHistory,
             Origin: record.Label(GenericAgentSessionMetadata.Origin),
             TargetId: record.Label(GenericAgentSessionMetadata.TargetId),
-            AppliedReasoningEffort: transcriptSummary.AppliedReasoningEffort);
+            AppliedReasoningEffort: transcriptSummary.AppliedReasoningEffort,
+            ContextGeneration: session.Status.ContextGeneration,
+            UnresolvedPrevious: AgentSessionObservationMapper.UnresolvedPrevious(session.Status),
+            UnresolvedPreviousCount: session.Status.UnresolvedPreviousCount,
+            NextAction: session.Status.NextAction);
     }
 }

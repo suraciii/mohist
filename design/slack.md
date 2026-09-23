@@ -56,6 +56,16 @@ Each entry states one decision; the body below carries the rules.
 - **Installation DSL: `mo slack setup` / `mo slack install-agent <agent>`.**
   `setup-agent` conflicts with Agent Readiness setup; `create` falsely claims
   creation when the user is installing an Agent into Slack.
+- **A selector chooses a target; it never proves identity or grants
+  authority.** `--workspace-team` names an enrolled Workspace; provider
+  verification against Slack decides identity, and the management-authority
+  model decides permission.
+- **One primary action, computed by Server.** Terminal, Web, and Mohist App
+  conversation render the same progress projection; supporting facts never
+  compete as a second task.
+- **Owner claim is separate completion.** A ready App is a technical fact; the
+  Connection is complete only after a claimed Owner. The claim code is issued
+  explicitly, shown once, and never in status, logs, or diagnostics.
 - **Conversational creation asks at most for name and daily responsibility**,
   creates a real Agent with defaults, then guides Slack installation. A Mohist
   App DM is already an authorization boundary; no draft approval state.
@@ -133,8 +143,8 @@ Each entry states one decision; the body below carries the rules.
   App creation or installation.
 - **Server Connection boundary (data plane)** owns provider identity and
   access decisions, durable ingress, conversation mapping, pending delivery,
-  and Agent API calls. Not: Slack wire payloads, Agent execution, result
-  arbitration.
+  Agent API calls, and one normalized channel-thread read port. Not: Slack wire
+  payloads, Agent execution, result arbitration.
 - **Server Slack control plane** owns Workspace enrollment, external App
   lifecycle and authorization, manifests, credential references, and audit.
   Not: Agent execution, thread ownership, the wire protocol.
@@ -271,6 +281,32 @@ while its Agent is `needs-setup`, or the Agent `ready` while Slack is offline.
 Views may expose all four, but a summary highlights one current state and
 exactly one next action.
 
+### Owner Claim
+
+Binding the Owner is a separate act from every other installation step: the
+Connection has no Owner until a member claims it, and the claim code is what
+proves a Slack member controls the Bot's DM destination.
+
+- One code per Connection and claim kind is outstanding at a time. It is
+  short-lived, single-use, and stored only as a hash.
+- Issuing a code is an explicit operation and supersedes the outstanding code.
+  A superseded code can never be redeemed, so regeneration kills the earlier
+  code instead of leaving two live destinations.
+- Only an explicit issue touches a code. A status read, a page refresh, or
+  advancing an unrelated installation step neither issues nor invalidates one,
+  so an outstanding code stays claimable while other work proceeds.
+- The authorized claim response shows the plaintext code once, with its expiry
+  and the exact Bot DM destination. Status, logs, diagnostics, audit, and the
+  Mohist App conversation never carry it.
+- Only a current full Workspace member can claim. A successful claim also
+  proves the App receives and replies to DMs and completes Connection setup. It
+  grants no Mohist management permission and no execution capability.
+- Connection setup completion is a separate fact from App readiness, transport
+  health, and Agent execution availability. A ready App with an unclaimed Owner
+  projects Owner claim as the one next action and never presents setup as
+  complete; a claimed Connection whose Agent has no available Runtime projects
+  the Agent repair action instead.
+
 ## Slack Control Plane
 
 Two aggregates in Server's Slack integration context own durable product facts
@@ -328,11 +364,20 @@ Socket ready:   both credentials persisted, both identities verified,
                 adapter lease alive; missing either credential forbids ready
 ```
 
-An unknown state is left only through reconciliation or explicit human
-arbitration; a process restart never repeats create/delete automatically. A
+An unknown state is left only through a rerun: a recorded App identity is
+reconciled against the provider, and one without an identity is retried with a
+fresh create. A process restart never repeats create/delete automatically. A
 definite failure starts a new attempt on the same AgentApp, never a new
 Connection or Bot target. Cancelled installation, expired authorization, and
 pending approval all resume the same AgentApp.
+
+An unknown create result is recovered on the same AgentApp by a rerun: a
+recorded identity is reconciled by asking the provider about that operation,
+and one without an identity is retried with a fresh create. The operation fence
+is the only writer of the external create, so a restart and a concurrent rerun
+both read the fence and perform no second external write. If the interrupted
+create actually made an App, the fresh create leaves that half-configured App
+behind and the user removes it in Slack's app settings.
 
 ### Credential Ownership
 
@@ -342,7 +387,9 @@ copies Agent App runtime credentials:
 - Mohist App runtime credentials live at the Enrollment address as an opaque
   persisted reference. Bot token and App-level token are distinct secret kinds
   under one owner reference. `mo slack setup` is the only normal provision,
-  repair, and rotation entry point; repeated setup resumes one record.
+  repair, and rotation entry point; repeated setup resumes one record. Every
+  submission is verified against the resolved target before it is written, and
+  rotation requires an explicit replacement pair.
 - Agent App client/signing secret, App-level token (`xapp-`), and Bot token
   (`xoxb-`) live at the AgentApp address.
 - A Connection obtains data-plane credentials only through an active AgentApp
@@ -427,6 +474,79 @@ conversational operation performs only the non-secret steps and returns the
 same progress; at a secret step it provides the link and the local
 continuation command. Chat text is never a secret-input channel.
 
+### Workspace Selection
+
+Setup has three possible inputs: an explicit `--workspace-team <team-id>`
+selector, the authenticated conversation or continuation target, and a supplied
+Configuration pair. Resolution order is fixed: the conversation or continuation
+target first, then the explicit selector, then automatic selection only when
+exactly one Enrollment is eligible. Conflicting selectors fail. No fallback
+chooses the first Enrollment a list returns.
+
+First enrollment derives its identity from the provider. The successful
+Configuration rotation returns the provider-confirmed `team_id`, which becomes
+the Enrollment identity and the setup idempotency key. A non-interactive setup
+call that supplies a Configuration pair without a selector therefore carries
+enrollment intent: verify the pair, resolve its team, and create or resume that
+team's Enrollment. It must not first treat another configured Workspace as the
+repair target, because that would mutate a record the caller never selected.
+
+A continuation preserves its selected Workspace. The generated continuation
+command carries the stable selector, and only that Enrollment accepts the next
+write. A selector naming an unknown or ineligible Enrollment fails before any
+external write. A runtime credential pair carries no team identity of its own,
+so runtime-only input requires the selected Enrollment or exactly one eligible
+target before any write; it never selects a target by itself. Selecting an
+Enrollment grants no management permission.
+
+### Target-Bound Credential Verification
+
+Every credential write is bound to the resolved target before submission. A
+Configuration pair is accepted only when its verified `team_id` equals the
+selected Enrollment's team. A runtime pair is accepted only when it verifies as
+the selected Workspace's Mohist App Bot identity and App-level token. A mismatch
+rejects the submission and leaves the selected target, its stored credentials,
+and its binding unchanged; verification never redirects a write to another
+Enrollment, App, or Connection.
+
+The existing staged order still holds: Workspace and Bot verification succeed
+before any App-level token write, an App-level token is stored only as an
+unverified candidate, and a candidate for another team, App, or Bot is deleted
+and remains unusable. A candidate carries no business traffic before identity
+and Socket verification succeed, and a verification failure preserves or
+recovers the previously verified credentials instead of making the mismatched
+candidate usable.
+
+Replacement rotation is explicit and works on an installation already marked
+ready. Supplying a replacement pair is the only path that changes a verified
+pair; the replacement must resolve to the same team and Mohist App before stored
+credentials change. A rerun with no replacement input rotates nothing and never
+resubmits an already consumed Configuration pair. A replacement that fails
+verification leaves the previously verified credentials in place and returns the
+guide to the credential step.
+
+### Public Progress Projection
+
+Server owns progress. The projection is computed from the durable Enrollment,
+AgentApp, Connection, credential, and lease facts; terminal, Web, and Mohist App
+conversation render that same state and exactly one primary action. App-level
+progress such as create, manifest application, or unknown-outcome
+reconciliation is supporting evidence, and internal protocol actions such as
+reporting a Socket hello are never presented as human tasks.
+
+The one primary action must be executable by the caller: a Slack page link, a
+protected host command, an existing service action, or an explicit recovery
+operation. A Workspace choice is projected only together with actual readable
+choices. Reading status or refreshing a page performs no write and advances no
+state machine.
+
+Workspace `ready` is a technical fact - App, Bot, permissions, and Socket
+identity verified - not completion of the user journey. It is not Owner claim
+and not Agent execution availability. A remaining operator binding, an
+unavailable Runtime, or a Configuration-token outage is projected as the one
+next action with its own reason, while installed Bot traffic keeps its separate
+health fact.
+
 ### Canonical Manifests
 
 Manifests are canonical, versioned, and drift-detected: hashing covers
@@ -506,6 +626,24 @@ concurrent redelivery from overwriting a newer Session, and the follow-up's
 stable Slack idempotency key prevents duplicate SessionInput records after the
 migration. Different Mohist Servers never share thread routing.
 
+Accepting a DM follow-up requires a Runtime Session binding, with one bounded
+exemption: while a launched turn is still in flight — a turn that carries a
+launch job id and stands in `Queued`, `Executing`, or `Unknown` — a follow-up
+may be accepted and ordered behind it, because the Runner binding can
+legitimately appear only after the turn starts. Once no launched turn remains
+in flight (`Completed`, `Failed`, `Cancelled`), a missing binding fails at
+accept time with `RuntimeSessionMissing`, and the message takes the existing DM
+rejection path (one readable rejection reply, inbox row audited and
+dispatched). A Turn settled by Activity convergence is terminal and not in
+flight for this boundary. The reachable causes are a launch that failed
+before its Runner attached (the terminal turn never bound a runtime) or a
+lost binding. The boundary
+closes the acceptance-time black hole where a follow-up parked in an invisible
+queue with no user feedback, no reply, and no dispatch. The boundary is
+explicit: a follow-up accepted during the in-flight exemption whose launch then
+fails without ever binding stays queued; settling those parked follow-ups is
+deferred.
+
 ## Reliability Contract
 
 Slack-to-adapter transport is externally at-least-once; the system cannot
@@ -527,8 +665,9 @@ claim end-to-end exactly-once.
   a gap may exist.
 
 Control-plane create/delete is likewise at-least-once: a repeated attempt does
-not repeat App creation/deletion, and an unknown result converges only through
-reconciliation or human arbitration under Four-Axis State.
+not repeat App creation/deletion, and an unknown result converges only through a
+rerun — reconciliation for a recorded identity, a fresh create otherwise — under
+Four-Axis State.
 
 ### State Projection and Message Identity
 
@@ -640,6 +779,63 @@ card's provider message identity and never replaces its navigation surface.
   overflow posts. The invariant remains at most one final answer per input.
 - **Scope.** No broadcast across channels and no distinct message types.
   `mo slack message` is a command group; only `send` is implemented.
+
+### Channel-Thread Reads
+
+An Agent reads the discussion bound to its Session instead of receiving an
+imported transcript at launch. The channel-thread launch passes the task plus
+the existing conversation references and injects no thread background;
+caller-supplied background stays available to the other launch entry points.
+
+- **Route.** `GET /api/projects/{projectRef}/slack-connections/thread` with
+  `sessionId`, `limit` (default 15, accepted 1-100) and `continuation`. It is a
+  control-plane route like the other Connection routes: a Session id selects a
+  resource and is not an authorization credential. It adds no external
+  delegation route and exposes no arbitrary Slack API call.
+- **Binding.** Server resolves the recorded Slack provenance and thread mapping
+  of the selected Session to one `(Connection, Workspace, channel, root
+  message)` tuple and revalidates that tuple on every request. A missing,
+  conflicting, non-Slack, DM, or Manager association fails explicitly, and the
+  provider is never contacted first. A Session selected through a foreign
+  Project fails before any provider read.
+- **Credential.** The read uses the Connection's verified Agent App Bot identity
+  resolved through the lease target's protected address. HTTP read availability
+  is independent of Socket connection health: the read needs no active runtime
+  lease and no Agent Runtime, but it fails when the Connection is disabled or
+  removed, the target has no verified Bot credential, or Slack refuses the
+  token. No user token, broader scope, second credential path, or substitute
+  transcript is introduced.
+- **Conversation kinds.** The read holds no scope of its own: it returns only
+  what the installed Bot's granted permissions allow. Group DMs are not a
+  separate kind — the adapter classifies only `channel_type: "im"` and
+  `D`-prefixed conversations as direct messages, so a group-DM mention takes
+  the channel-thread path and the read addresses that conversation like any
+  channel thread. Without `mpim:history` on the installed Bot, Slack itself
+  rejects the read and it surfaces as `provider_rejected`. The resolver adds no
+  conversation-kind heuristic and the read never widens the granted scopes.
+- **Narrow port.** `ISlackThreadQueryPort` returns one normalized page; the
+  infrastructure adapter is the only component that knows
+  `conversations.replies` and the wire payload. Normalization keeps message
+  timestamps as strings, source order, author identity, and source-provided
+  edit, deletion, and unread-content facts, and drops tokens, internal URLs,
+  and raw JSON. It never filters a message out of the returned page.
+- **Pagination.** The adapter validates the provider's pagination metadata and
+  fails explicitly on contradictory facts (`has_more` without a cursor, a
+  cursor with `has_more` false). A short or empty page while the provider still
+  returns a continuation is not completion.
+- **Continuation.** The caller-visible token is opaque and bound to the resolved
+  Project, Session, Connection, Workspace, channel, and root message; Server
+  revalidates both the binding and the token before the provider call, so a
+  malformed, tampered, or differently scoped token fails as an invalid
+  continuation. Continuations are stateless: a fresh read starts a new
+  traversal.
+- **Rate limits.** The transport classifies a rate-limited response and carries
+  Slack's `Retry-After`. The route surfaces the delay as `retryAfterSeconds`
+  with HTTP 429; nothing sleeps through the limit, polls, starts a durable
+  query job, or replays the Agent task.
+- **No side effects.** A read creates no Job, Input, or Turn and sends no Slack
+  message. Provider failures are never empty histories. Thread text returned to
+  the Agent is background; it is never promoted to Instructions.
 
 ### Signed Action Buttons
 
@@ -833,6 +1029,12 @@ App-management calls reactively rotate an expired Configuration credential
 without changing the installed Bot data plane. The Agent-authored reply action
 owns reply content, and terminal handling owns only delivery liveness.
 
+On-demand channel-thread reads replace the earlier automatic first-mention
+history import: the channel-thread launch passes the task and conversation
+references, `mo slack thread view` reads one provider page through the narrow
+read port, and failures stay explicit. The retired empty thread reader and its
+startup-context budget are deleted rather than kept as compatibility.
+
 Manager sessions use these same boundaries: the operator-bound capability
 credential and the ordinary command surface replace server-side parsing of
 model output, and the standard liveness projection replaces acknowledgement
@@ -840,3 +1042,27 @@ messages. The interim model-output management protocol is deleted rather than
 preserved for compatibility. One gap remains: the running build still
 acknowledges Manager requests with a text message and executes management
 through that retired protocol.
+
+Workspace selection, target-bound credential verification, explicit replacement
+rotation, and the single primary action are implemented in the Server and at
+both entry points. The loopback setup routes accept a `workspaceTeamId`
+selector, an ambiguous selection fails with the enrolled Workspaces as readable
+choices instead of mutating the first listed record, and the public projection
+carries one primary action, the install URL, and one human summary; App create,
+manifest, and Socket hello work never surface as user steps. The terminal guide
+collects the pair the current step needs through hidden input, reads credentials
+only from one explicit protected file or that prompt, and carries the selected
+Workspace through every continuation command. The Agent installation write takes
+the same selector and resolves the target Workspace from it, so a selection never
+resumes the Agent's first existing Connection or the first enrolled record.
+
+Agent installation is the complete replacement journey across every surface. The Server
+projects the outstanding fact instead of App readiness, the Mohist App
+conversation and the terminal guide both end at Owner claim as the one next
+action, the CLI separates a truthfully incomplete installation from a definite
+failure in its exit code, and the Web installation view projects the same fact:
+at the claim it offers the protected `mo slack claim-owner <connection-id>`
+command and the Bot DM destination and renders no code, and a claimed Connection
+whose Agent cannot execute states that limitation separately with the existing
+Agent repair action. No surface issues, invalidates, or displays a claim code by
+reading status or refreshing a view.

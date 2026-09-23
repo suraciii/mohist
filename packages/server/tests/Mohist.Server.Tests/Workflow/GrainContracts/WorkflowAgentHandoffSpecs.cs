@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.TestSupport;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Grains;
@@ -255,7 +256,12 @@ public sealed class WorkflowAgentHandoffSpecs
     {
         var projectId = $"workflow-handoff-accept-replay-{Guid.NewGuid():N}";
         var agentId = $"agent_accept_replay_{Guid.NewGuid():N}";
-        _preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
+        var canonicalAgentId = $"canonical-agent-{Guid.NewGuid():N}";
+        _preflight.Set(
+            projectId,
+            agentId,
+            Definition(AgentConfigSchema.PiRuntime),
+            canonicalAgentId);
         var command = Command(projectId, agentId, "replay the acceptance receipt");
         var store = new ConcurrentDictionary<string, WorkflowAgentHandoffState>();
         var handoff = await ActivateAsync(Key(command), store);
@@ -266,18 +272,29 @@ public sealed class WorkflowAgentHandoffSpecs
 
         var accepted = await handoff.AcceptAsync(acceptance);
         var acceptedPlan = await handoff.GetPlanAsync();
+        _preflight.Set(
+            projectId,
+            agentId,
+            Definition(AgentConfigSchema.OpenCodeRuntime),
+            $"edited-agent-{Guid.NewGuid():N}");
         handoff = await ActivateAsync(Key(command), store);
 
+        var preparedReplay = await handoff.PrepareAsync(command);
         var replay = await handoff.AcceptAsync(acceptance);
         var replayPlan = await handoff.GetPlanAsync();
 
         Assert.Equal(WorkflowAgentHandoffDisposition.Prepared, prepared.Disposition);
         Assert.Equal(WorkflowAgentHandoffDisposition.Accepted, accepted.Disposition);
         Assert.False(accepted.AlreadyPersisted);
+        Assert.Equal(WorkflowAgentHandoffDisposition.Accepted, preparedReplay.Disposition);
+        Assert.True(preparedReplay.AlreadyPersisted);
         Assert.Equal(WorkflowAgentHandoffDisposition.Accepted, replay.Disposition);
         Assert.True(replay.AlreadyPersisted);
         Assert.Equal(accepted.Invocation, replay.Invocation);
         Assert.Equal(acceptedPlan!.AcceptedAt, replayPlan!.AcceptedAt);
+        Assert.Equal(canonicalAgentId, replayPlan.AgentId);
+        Assert.Equal(AgentConfigSchema.PiRuntime, replayPlan.ExecutionDefinition!.Runtime);
+        Assert.Equal(1, _preflight.ResolveCount(projectId, agentId));
         await AssertNoParticipantsAsync(projectId, prepared.Invocation!);
     }
 
@@ -330,6 +347,25 @@ public sealed class WorkflowAgentHandoffSpecs
 
         Assert.Contains("grain key does not match", error.Message, StringComparison.Ordinal);
         Assert.Equal(0, _preflight.ResolveCount(projectId, agentId));
+    }
+
+    [Fact]
+    public void WorkflowSessionMetadata_CreationCarriesCanonicalAgentButLookupDoesNot()
+    {
+        var metadata = WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext(
+            "project-1",
+            "workflow-run-1",
+            "delivery",
+            "canonical-agent-1"));
+        var lookup = WorkflowAgentSessionMetadata.LookupLabels(
+            "project-1",
+            "workflow-run-1",
+            "delivery");
+
+        Assert.Equal("canonical-agent-1", metadata.Label(GenericAgentSessionMetadata.AgentId));
+        Assert.Equal("project-1", metadata.Label(AgentSessionQueryMetadataKeys.ProjectId));
+        Assert.False(lookup.ContainsKey(GenericAgentSessionMetadata.AgentId));
+        Assert.Equal(4, lookup.Count);
     }
 
     [Fact]

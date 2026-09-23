@@ -4,6 +4,8 @@ using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
@@ -19,7 +21,7 @@ namespace Mohist.Server.Tests.Workflow;
 
 [Collection("WorkflowExecution")]
 [Trait("level", "L1")]
-public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
+public sealed partial class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
 {
     public WorkflowAgentJobExecutionSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
@@ -71,6 +73,15 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         Assert.Equal(attempt.AgentSessionId, jobSnapshot.AgentSessionId);
         Assert.Equal(run.Id, jobSnapshot.WorkflowOrigin?.WorkflowRunId);
         Assert.Equal(attempt.Id, jobSnapshot.WorkflowOrigin?.ActionAttemptId);
+        await using (var scope = Services.CreateAsyncScope())
+        {
+            var session = await scope.ServiceProvider.GetRequiredService<IAgentSessionStore>()
+                .LoadAsync(attempt.AgentSessionId!);
+            Assert.NotNull(session);
+            Assert.Equal(run.Metadata.ProjectId, session!.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId));
+            Assert.Equal(plan.AgentId, session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
+            Assert.NotEqual(plan.Command.AgentRef, session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
+        }
 
         await DeactivateWorkflowAsync(run.Id);
         workflow = Grains.GetGrain<IWorkflowGrain>(run.Id);
@@ -84,6 +95,49 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         run = await LoadRunAsync(run.Id);
         Assert.Equal(WorkflowActionAttemptStatus.Completed, run.CurrentStage().Tasks.Single().Status);
         Assert.Equal(WorkflowRunStatus.Completed, run.Status);
+    }
+
+    [Fact]
+    public async Task WorkflowAgentAction_FinalizedUnknownFailsTheOwningAttemptHonestly()
+    {
+        var definition = new WorkflowDefinition([
+            new StageDefinition("build", [AgentTask("build", "Build the change", "delivery")], [])
+        ]);
+        var workflow = await StartWorkflowAsync(
+            definition,
+            $"workflow-agent-unknown-{Guid.NewGuid():N}");
+        var runnerId = _runnerId!;
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, (await workflow.AssignWorkerAsync(runnerId)).Status);
+        Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
+        var run = await LoadRunAsync(_workflowId!);
+        var attempt = Assert.Single(run.CurrentStage().Tasks);
+        var handoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(WorkflowAgentHandoffCodec.KeyFor(
+            run.Metadata.ProjectId!,
+            run.Id,
+            run.CurrentStage().Id,
+            attempt.Id,
+            attempt.WorkId!));
+        await handoff.ActivateAsync();
+
+        var job = Grains.GetGrain<IAgentJobGrain>(attempt.AgentJobId!);
+        var snapshot = await job.GetRuntimeSnapshotAsync();
+        Assert.True(await job.ApplyActivityConvergenceAsync(new AgentJobActivityConvergence(
+            snapshot.AgentSessionId!,
+            "idle",
+            1,
+            1,
+            [snapshot.InitialTurnId!],
+            [attempt.AgentJobId!],
+            [],
+            _fixture.TimeProvider.GetUtcNow())));
+        await Services.GetRequiredService<IEventDispatcher>().DrainAsync();
+
+        run = await LoadRunAsync(run.Id);
+        var failed = Assert.Single(run.CurrentStage().Tasks);
+        Assert.Equal(WorkflowActionAttemptStatus.Failed, failed.Status);
+        Assert.Equal("unknown", failed.Error?.Code);
+        Assert.Equal(WorkflowRunStatus.Failed, run.Status);
+        Assert.Equal(AgentJobStatus.Unknown, await job.GetStatusAsync());
     }
 
     [Fact]
@@ -180,12 +234,20 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
         var first = await PollWorkAsync(runnerId);
         await ReportAsync(runnerId, first.Work, "completed");
+        await AttachRuntimeSessionAsync(first.Work.AgentSessionId!);
 
         Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
         var second = await PollWorkAsync(runnerId);
 
         Assert.NotEqual(first.Work.AgentJobId, second.Work.AgentJobId);
         Assert.Equal(first.Work.AgentSessionId, second.Work.AgentSessionId);
+        await using (var scope = Services.CreateAsyncScope())
+        {
+            var session = await scope.ServiceProvider.GetRequiredService<IAgentSessionStore>()
+                .LoadAsync(second.Work.AgentSessionId!);
+            Assert.Equal(first.Work.AgentId, session!.Metadata.Label(GenericAgentSessionMetadata.AgentId));
+            Assert.Equal(second.Work.AgentId, session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
+        }
         await ReportAsync(runnerId, second.Work, "completed");
         Assert.Equal(WorkflowRunStatus.Completed, (await LoadRunAsync(_workflowId!)).Status);
     }
@@ -208,6 +270,7 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         var firstRun = await LoadRunAsync(_workflowId!);
         var firstAttempt = Assert.Single(firstRun.Stages.Single(stage => stage.Id == "plan").Tasks);
         await ReportAsync(runnerId, firstDispatch, "completed");
+        await AttachRuntimeSessionAsync(firstDispatch.AgentSessionId!);
 
         Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
         var secondDispatch = (await PollWorkAsync(runnerId)).Work;
@@ -227,7 +290,7 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
             var secondInput = Assert.Single(
                 session!.Status.Inputs!,
                 input => string.Equals(input.Id, secondDispatch.InitialInputId, StringComparison.Ordinal));
-            Assert.Equal(secondAttempt.AgentInvocationId, secondInput.IdempotencyKey);
+            Assert.Equal(secondDispatch.AgentJobId, secondInput.JobId);
         }
 
         await ReportAsync(runnerId, secondDispatch, "completed");
@@ -235,7 +298,7 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task WorkflowAgentHandoffs_SameExactWorkIdentityAcrossStages_AppendsDistinctNamedSessionFollowups()
+    public async Task WorkflowAgentHandoffs_SameExactWorkIdentityAcrossStages_AppendsDistinctJobOwnedLaunchTurns()
     {
         var definition = new WorkflowDefinition([
             new StageDefinition("bootstrap", [AgentTask("bootstrap", "Bootstrap", "delivery")], [])
@@ -258,7 +321,9 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         await bootstrapHandoff.ActivateAsync();
         var bootstrapPlan = await bootstrapHandoff.GetPlanAsync();
         Assert.NotNull(bootstrapPlan?.Invocation);
-        await ReportAsync(runnerId, (await PollWorkAsync(runnerId)).Work, "completed");
+        var bootstrapWork = (await PollWorkAsync(runnerId)).Work;
+        await ReportAsync(runnerId, bootstrapWork, "completed");
+        await AttachRuntimeSessionAsync(bootstrapWork.AgentSessionId!);
 
         const string sharedIdentity = "apply-feedback.1";
         var planCommand = bootstrapPlan!.Command with
@@ -325,8 +390,137 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         var checkInput = Assert.Single(
             session.Status.Inputs!,
             input => string.Equals(input.Id, preparedCheck.Invocation.InputId, StringComparison.Ordinal));
-        Assert.Equal(preparedPlan.Invocation.InvocationId, planInput.IdempotencyKey);
-        Assert.Equal(preparedCheck.Invocation.InvocationId, checkInput.IdempotencyKey);
+        Assert.Equal(preparedPlan.Invocation.JobKey, planInput.JobId);
+        Assert.Equal(preparedCheck.Invocation.JobKey, checkInput.JobId);
+        var planTurn = Assert.Single(
+            session.Status.Turns!,
+            turn => string.Equals(turn.Id, preparedPlan.Invocation.TurnId, StringComparison.Ordinal));
+        var checkTurn = Assert.Single(
+            session.Status.Turns!,
+            turn => string.Equals(turn.Id, preparedCheck.Invocation.TurnId, StringComparison.Ordinal));
+        Assert.Equal(preparedPlan.Invocation.JobKey, planTurn.JobId);
+        Assert.Equal(preparedCheck.Invocation.JobKey, checkTurn.JobId);
+    }
+
+    [Fact]
+    public async Task WorkflowAgentHandoff_ReuseOfTerminalUnboundSession_FailsDeterministically()
+    {
+        var definition = new WorkflowDefinition([
+            new StageDefinition("bootstrap", [AgentTask("bootstrap", "Bootstrap", "delivery")], [])
+        ]);
+        var workflow = await StartWorkflowAsync(
+            definition,
+            $"workflow-agent-unbound-reuse-{Guid.NewGuid():N}");
+        var runnerId = _runnerId!;
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, (await workflow.AssignWorkerAsync(runnerId)).Status);
+        Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
+        var run = await LoadRunAsync(_workflowId!);
+        var attempt = Assert.Single(run.CurrentStage().Tasks);
+        var bootstrapKey = WorkflowAgentHandoffCodec.KeyFor(
+            run.Metadata.ProjectId!,
+            run.Id,
+            run.CurrentStage().Id,
+            attempt.Id,
+            attempt.WorkId!);
+        var bootstrapHandoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(bootstrapKey);
+        await bootstrapHandoff.ActivateAsync();
+        var bootstrapPlan = await bootstrapHandoff.GetPlanAsync();
+        Assert.NotNull(bootstrapPlan?.Invocation);
+        var bootstrapWork = (await PollWorkAsync(runnerId)).Work;
+        // The Runner dies before attaching a physical runtime session, so the
+        // launch turn goes terminal with no binding: the reused Session can
+        // never accept a follow-up, and retrying activation cannot converge.
+        var bootstrapJob = Grains.GetGrain<IAgentJobGrain>(bootstrapWork.AgentJobId!);
+        var failedResult = await bootstrapJob.ReportResultAsync(
+            runnerId,
+            bootstrapWork.WorkId,
+            new WorkResult("failed", "The bound runtime is disabled on the Runner."));
+        Assert.True(failedResult.Accepted, failedResult.Reason);
+
+        const string reuseIdentity = "apply-feedback.1";
+        var reuseCommand = bootstrapPlan!.Command with
+        {
+            CommandId = reuseIdentity,
+            ActionAttemptId = reuseIdentity,
+            Prompt = "Apply the feedback",
+            ReuseSessionId = bootstrapPlan.Invocation!.SessionId,
+            Completion = bootstrapPlan.Command.Completion! with { WorkId = reuseIdentity },
+        };
+        var reuseHandoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(
+            WorkflowAgentHandoffCodec.KeyFor(reuseCommand));
+        await reuseHandoff.PrepareAsync(reuseCommand);
+        await reuseHandoff.AcceptAsync(new WorkflowAgentHandoffAcceptance(
+            reuseIdentity,
+            WorkflowAgentHandoffCodec.Fingerprint(reuseCommand)));
+        await reuseHandoff.ActivateAsync();
+
+        var failedPlan = await reuseHandoff.GetPlanAsync();
+        Assert.Equal(WorkflowAgentHandoffDisposition.Failed, failedPlan!.Disposition);
+        Assert.Contains(bootstrapPlan.Invocation.SessionId, failedPlan.ActivationError, StringComparison.Ordinal);
+
+        // A deterministic dead end arms no reminder: a repeat activation of
+        // the Failed plan is a no-op that cannot revive the retry loop.
+        await reuseHandoff.TriggerActivationAsync();
+        var repeat = await reuseHandoff.ActivateAsync();
+        Assert.Equal(WorkflowAgentHandoffDisposition.Failed, repeat.Disposition);
+        Assert.Equal(WorkflowAgentHandoffDisposition.Failed, (await reuseHandoff.GetPlanAsync())!.Disposition);
+    }
+
+    [Fact]
+    public async Task WorkflowAgentReconcile_FailedHandoffFailsTheRunningAttempt()
+    {
+        var definition = new WorkflowDefinition([
+            new StageDefinition("build", [AgentTask("build", "Build the change", "delivery")], [])
+        ]);
+        var workflow = await StartWorkflowAsync(
+            definition,
+            $"workflow-agent-failed-handoff-{Guid.NewGuid():N}");
+        var runnerId = _runnerId!;
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, (await workflow.AssignWorkerAsync(runnerId)).Status);
+        Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
+        var run = await LoadRunAsync(_workflowId!);
+        var attempt = Assert.Single(run.CurrentStage().Tasks);
+        Assert.Equal(WorkflowActionAttemptStatus.Running, attempt.Status);
+
+        var stageKey = WorkflowAgentHandoffCodec.KeyFor(
+            run.Metadata.ProjectId!,
+            run.Id,
+            run.CurrentStage().Id,
+            attempt.Id,
+            attempt.WorkId!);
+        var handoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(stageKey);
+
+        // Seed the durable state an activation leaves behind when the reused
+        // Session lost its runtime binding, mirroring how the legacy-key
+        // recovery seeds storage above.
+        await TestLifecycle.DeactivateAndWait(handoff, Grains);
+        var storage = Services.GetRequiredService<IGrainStorage>();
+        var stored = new GrainState<WorkflowAgentHandoffState>();
+        await storage.ReadStateAsync("workflow-agent-handoff", handoff.GetGrainId(), stored);
+        var failedPlan = stored.State.Plan! with
+        {
+            Disposition = WorkflowAgentHandoffDisposition.Failed,
+            ActivationError = $"AgentSession {attempt.AgentSessionId} has no runtime binding.",
+        };
+        await storage.WriteStateAsync(
+            "workflow-agent-handoff",
+            handoff.GetGrainId(),
+            new GrainState<WorkflowAgentHandoffState>
+            {
+                State = new WorkflowAgentHandoffState { Plan = failedPlan },
+                ETag = stored.ETag,
+            });
+
+        // Reconcile runs on Workflow activation.
+        await DeactivateWorkflowAsync(run.Id);
+        var reactivated = Grains.GetGrain<IWorkflowGrain>(run.Id);
+        await reactivated.GetRunStatusAsync();
+
+        var failedRun = await LoadRunAsync(run.Id);
+        var failedAttempt = failedRun.CurrentStage().Tasks.Single();
+        Assert.Equal(WorkflowActionAttemptStatus.Failed, failedAttempt.Status);
+        Assert.Equal("agent_session_runtime_missing", failedAttempt.Error?.Code);
+        Assert.Contains(attempt.AgentSessionId!, failedAttempt.Error?.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -775,4 +969,13 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
 
     private static System.Text.Json.JsonElement Json(string value) =>
         System.Text.Json.JsonSerializer.SerializeToElement(value);
+
+    private async Task AttachRuntimeSessionAsync(string sessionId)
+    {
+        // The Runner attaches a physical session when it starts executing a
+        // job; a reused Session must therefore present a runtime binding at
+        // the next stage's follow-up acceptance.
+        await Grains.GetGrain<IAgentSessionGrain>(sessionId)
+            .AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand($"runtime-{sessionId}"));
+    }
 }

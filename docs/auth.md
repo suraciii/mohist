@@ -164,8 +164,15 @@ Runner exchanges it for a Credential bound to that Runner identity and uses the
 Credential for later connections and reports. This prevents another machine
 from presenting the same Runner name to gain access.
 
-Revocation invalidates the Runner Credential immediately. Repeat the
-installation registration flow to recover. Do not reuse the revoked secret.
+Revocation invalidates the Runner Credential immediately. Registration and
+control admission use the exact credential identity resolved from the presented
+Bearer token, not merely the presence of some active Credential for the same
+Runner. A request authenticated before replacement cannot borrow the replacement
+Credential. Once administrative removal intent is durable, registration and
+control authority are closed immediately—even if credential-store revocation is
+still retrying—and operator Scope does not bypass that execution fence. Repeat
+the installation registration flow to recover, and do not reuse the revoked
+secret.
 
 ## Integrations Keep Independent Boundaries
 

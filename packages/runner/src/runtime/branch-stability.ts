@@ -131,7 +131,7 @@ function legacyBranchInvariantMessage(evidence: BranchInvariantViolationEvidence
  *
  * When no expected workspace branch is defined the boundary probe is
  * observational only — a non-Git directory is treated as clean so
- * actions outside a materialized Git workspace keep working.
+ * actions outside a provisioned Git workspace keep working.
  *
  * When an expected branch IS defined the boundary is judged with the
  * shared workspace-health semantics: a detached `HEAD`, a mismatched

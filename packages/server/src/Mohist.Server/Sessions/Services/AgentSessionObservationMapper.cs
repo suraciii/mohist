@@ -19,7 +19,8 @@ internal static class AgentSessionObservationMapper
                 attachment.Source,
                 attachment.Availability)).ToArray(),
             input.Provenance,
-            StartupContextObservation(input.StartupContext))).ToArray();
+            StartupContextObservation(input.StartupContext),
+            input.ContextGeneration)).ToArray();
 
     private static AgentStartupContextObservationDto? StartupContextObservation(AgentStartupContext? context) =>
         context is null
@@ -31,7 +32,13 @@ internal static class AgentSessionObservationMapper
                 OmittedOldestMessageCount: context.Provenance.OmittedOldestMessageCount);
 
     public static IReadOnlyList<AgentTurnObservationDto>? Turns(AgentSessionStatusSnapshot status) =>
-        status.Turns?.Select(turn => new AgentTurnObservationDto(
+        status.Turns?.Select(Turn).ToArray();
+
+    public static IReadOnlyList<AgentTurnObservationDto>? UnresolvedPrevious(AgentSessionStatusSnapshot status) =>
+        status.Turns?.Where(turn => turn.SupersededAt is not null).Select(Turn).ToArray();
+
+    private static AgentTurnObservationDto Turn(AgentTurnRecord turn) =>
+        new(
             turn.Id,
             turn.Sequence,
             turn.InputIds,
@@ -43,7 +50,9 @@ internal static class AgentSessionObservationMapper
                     turn.Result.Output,
                     turn.Result.FailureReason,
                     turn.Result.FailureCategory,
-                    turn.Result.ExitCode))).ToArray();
+                    turn.Result.ExitCode),
+            turn.ContextGeneration,
+            turn.SupersededAt?.ToString("o"));
 
     public static string InputAcceptance(AgentSessionInputAcceptance acceptance) => acceptance switch
     {

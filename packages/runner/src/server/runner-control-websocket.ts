@@ -471,11 +471,11 @@ export function buildControlUrl(
   url.pathname = `${url.pathname.replace(/\/$/, '')}/api/runner/${encodeURIComponent(runnerId)}/control`
   url.search = ''
   url.searchParams.set('processGeneration', processGeneration)
+  if (buildInfo?.schemaVersion != null) url.searchParams.set('schemaVersion', String(buildInfo.schemaVersion))
   if (buildGitHash) url.searchParams.set('buildGitHash', buildGitHash)
   if (buildInfo?.component) url.searchParams.set('component', buildInfo.component)
   if (buildInfo?.version) url.searchParams.set('version', buildInfo.version)
-  if (buildInfo?.sourceRevision ?? buildInfo?.gitHash)
-    url.searchParams.set('sourceRevision', buildInfo.sourceRevision ?? buildInfo.gitHash!)
+  if (buildInfo?.sourceRevision) url.searchParams.set('sourceRevision', buildInfo.sourceRevision)
   if (buildInfo?.treeHash) url.searchParams.set('treeHash', buildInfo.treeHash)
   if (buildInfo?.artifactDigest) url.searchParams.set('artifactDigest', buildInfo.artifactDigest)
   if (buildInfo?.releaseId) url.searchParams.set('releaseId', buildInfo.releaseId)

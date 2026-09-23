@@ -23,125 +23,60 @@ public static class SlackManagerRoutes
             ApiResults.Ok(await service.ListAgentOptionsAsync(
                 context.GetResolvedProject().Id, workspaceTeamId ?? string.Empty, ct)));
 
-        manager.MapPost("/apps", async (
-            HttpContext context,
-            SlackManagerCreateBody body,
-            SlackManagerApplicationService service,
-            ManagerActorAccessDecider access,
-            CancellationToken ct) =>
-        {
-            if (body is null || string.IsNullOrWhiteSpace(body.AgentId)
-                || string.IsNullOrWhiteSpace(body.WorkspaceTeamId))
-                return ApiResults.BadRequest("agentId and workspaceTeamId are required.");
-
-            if (context.Items[ManagerExecutionCredentialContext.HttpContextItemKey]
-                is ManagerExecutionCredentialContext credential)
-            {
-                if (!string.Equals(body.WorkspaceTeamId.Trim(), credential.Lease.Origin.WorkspaceId, StringComparison.Ordinal))
-                    return ApiResults.Fail(
-                        "The requested workspace is outside this Manager execution.",
-                        StatusCodes.Status403Forbidden,
-                        "manager_workspace_not_authorized");
-
-                var actor = await access.AuthenticateAsync(
-                    credential.Lease.Origin.WorkspaceId,
-                    credential.Lease.Origin.ActorId,
-                    ct);
-                if (!actor.Allowed || actor.Actor is null)
-                    return ApiResults.Fail(
-                        "Manager authorization is no longer active; start a fresh turn.",
-                        StatusCodes.Status403Forbidden,
-                        "manager_actor_not_authorized");
-                var target = await access.AuthorizeAsync(
-                    actor.Actor,
-                    new ManagerResourceTarget(
-                        ManagerResourceKinds.Agent,
-                        context.GetResolvedProject().Id,
-                        body.AgentId.Trim()),
-                    ct);
-                if (!target.Allowed)
-                    return ApiResults.Fail(
-                        "The requested Agent is outside this Manager execution.",
-                        StatusCodes.Status403Forbidden,
-                        target.Reason ?? "manager_resource_not_found");
-            }
-
-            var identityError = RejectClientIdentity(context, body.ExtensionData);
-            if (identityError is not null) return identityError;
-            try
-            {
-                var result = await service.CreateAsync(new SlackManagerCreateRequest(
-                    context.GetResolvedProject().Id,
-                    body.AgentId,
-                    body.WorkspaceTeamId,
-                    body.AccessPolicy ?? AccessPolicyKind.OwnerOnly,
-                    body.OwnerSlackUserId,
-                    body.BotName,
-                    body.AvatarHash), ct);
-                return Results.Json(new ApiResponse<object>(true, result), statusCode: result.Created ? 201 : 200);
-            }
-            catch (SlackManagerConflictException ex)
-            {
-                return ApiResults.Conflict(ex.Message, ex.Code);
-            }
-            catch (SlackManagerValidationException ex)
-            {
-                return ApiResults.BadRequest(ex.Message, ex.Code);
-            }
-            catch (AgentConnectionDuplicateException ex)
-            {
-                return ApiResults.Conflict(ex.Message, "connection_duplicate");
-            }
-        });
-
         manager.MapPost("/install-agent", async (
             HttpContext context,
+            string? workspaceTeamId,
             SlackControlInstallAgentBody body,
             SlackInstallAgentService service,
             CancellationToken ct) =>
         {
-            if (body is null
-                || string.IsNullOrWhiteSpace(body.EnrollmentId)
-                || string.IsNullOrWhiteSpace(body.AgentId))
-                return ApiResults.BadRequest("enrollmentId and agentId are required.");
-            var identityError = RejectClientIdentity(context, body.ExtensionData);
-            if (identityError is not null) return identityError;
-            if (HasCredentialAddressOverride(body.ExtensionData))
+            if (body is not null && HasCredentialAddressOverride(body.ExtensionData))
                 return ApiResults.BadRequest(
                     "Credential address fields are not supported by the control-plane API.",
                     "credential_address_not_supported");
+            if (body is null || string.IsNullOrWhiteSpace(body.AgentId))
+                return ApiResults.BadRequest("agentId is required.");
+            var identityError = RejectClientIdentity(context, body.ExtensionData);
+            if (identityError is not null) return identityError;
             try
             {
                 var projectId = context.GetResolvedProject().Id;
-                return ApiResults.Ok(await service.InstallAsync(projectId, body.AgentId, body.EnrollmentId, ct));
+                var progress = await service.InstallAsync(projectId, body.AgentId, workspaceTeamId, ct);
+                return ApiResults.Ok(PublicInstallProgress(progress));
             }
             catch (SlackManagerConflictException ex)
             {
-                return ApiResults.Conflict(ex.Message, ex.Code);
+                return ApiResults.Conflict(ex.Message, ex.Code, ex.Details);
             }
         });
 
         manager.MapPost("/install-agent/credentials", async (
             HttpContext context,
+            string? workspaceTeamId,
             SlackControlInstallAgentCredentialsBody body,
             SlackInstallAgentService service,
             CancellationToken ct) =>
         {
             var guard = RequireLoopback(context);
             if (guard is not null) return guard;
-            if (body is null
-                || string.IsNullOrWhiteSpace(body.AgentAppId)
-                || string.IsNullOrWhiteSpace(body.BotToken)
-                || string.IsNullOrWhiteSpace(body.AppLevelToken))
-                return ApiResults.BadRequest("agentAppId, botToken, and appLevelToken are required.");
-            if (HasCredentialAddressOverride(body.ExtensionData))
+            if (body is not null && HasCredentialAddressOverride(body.ExtensionData))
                 return ApiResults.BadRequest(
                     "Credential address fields are not supported by the control-plane API.",
                     "credential_address_not_supported");
+            if (body is null
+                || string.IsNullOrWhiteSpace(body.AgentId)
+                || string.IsNullOrWhiteSpace(body.BotToken)
+                || string.IsNullOrWhiteSpace(body.AppLevelToken))
+                return ApiResults.BadRequest("agentId, botToken, and appLevelToken are required.");
             try
             {
                 return ApiResults.Ok(await service.ProvisionCredentialsAsync(
-                    body.AgentAppId, body.BotToken, body.AppLevelToken, ct));
+                    context.GetResolvedProject().Id,
+                    body.AgentId,
+                    body.BotToken,
+                    body.AppLevelToken,
+                    workspaceTeamId,
+                    ct));
             }
             catch (SlackManagerConflictException ex)
             {
@@ -162,24 +97,8 @@ public static class SlackManagerRoutes
             var result = await service.GetAsync(context.GetResolvedProject().Id, connectionId, ct);
             return result is null
                 ? ApiResults.NotFound("The managed Agent App was not found.")
-                : ApiResults.Ok(result);
+                : ApiResults.Ok(PublicManagedApp(result));
         });
-
-        manager.MapPost("/connections/{connectionId}/create", async (
-            HttpContext context,
-            string connectionId,
-            SlackManagerApplicationService service,
-            CancellationToken ct) =>
-            OperationResult(await service.CreateAgentAppAsync(
-                context.GetResolvedProject().Id, connectionId, ct)));
-
-        manager.MapPost("/connections/{connectionId}/reconcile-create", async (
-            HttpContext context,
-            string connectionId,
-            SlackManagerApplicationService service,
-            CancellationToken ct) =>
-            OperationResult(await service.ReconcileCreateAsync(
-                context.GetResolvedProject().Id, connectionId, ct)));
 
         manager.MapPost("/connections/{connectionId}/disable", async (
             HttpContext context,
@@ -271,6 +190,33 @@ public static class SlackManagerRoutes
             ? ApiResults.NotFound("The managed Agent App was not found.")
             : ApiResults.Ok(result);
 
+    private static object PublicInstallProgress(SlackInstallAgentProgress progress) =>
+        SlackInstallAgentProjections.Public(progress);
+
+    /// <summary>
+    /// One user-facing primary action. Server-internal App steps project as a
+    /// rerun of the guide, and the two remaining facts that end the journey -
+    /// the Owner claim and an Agent that cannot execute - keep their own
+    /// executable action instead of hiding behind a technical `ready`.
+    /// </summary>
+    private static string PublicInstallNextAction(string nextAction) =>
+        SlackInstallAgentActions.UserFacing(nextAction);
+
+    private static object PublicManagedApp(SlackManagerAppProjection app) => new
+    {
+        app.AppLifecycle,
+        app.Authorization,
+        app.ManifestState,
+        app.TransportKind,
+        app.TransportReadiness,
+        NextAction = PublicInstallNextAction(app.NextAction),
+        app.BindingState,
+        app.InstallUrl,
+        app.UnknownOutcome,
+        app.ErrorClass,
+        app.DeletedAt,
+    };
+
     private static IResult? RequireLoopback(HttpContext context)
     {
         if (context.Connection.RemoteIpAddress is not { } remoteAddress
@@ -285,6 +231,8 @@ public static class SlackManagerRoutes
         extensionData?.Keys.Any(key =>
             key.Equals("projectId", StringComparison.OrdinalIgnoreCase)
             || key.Equals("connectionId", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("enrollmentId", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("agentAppId", StringComparison.OrdinalIgnoreCase)
             || key.Equals("managerCredentialRef", StringComparison.OrdinalIgnoreCase)
             || key.Equals("secretAddress", StringComparison.OrdinalIgnoreCase)
             || key.Equals("secretKind", StringComparison.OrdinalIgnoreCase)) == true;
@@ -306,19 +254,6 @@ public static class SlackManagerRoutes
         || name.Equals("actor", StringComparison.OrdinalIgnoreCase);
 }
 
-public sealed class SlackManagerCreateBody
-{
-    public string AgentId { get; init; } = string.Empty;
-    public string WorkspaceTeamId { get; init; } = string.Empty;
-    public string? AccessPolicy { get; init; }
-    public string? OwnerSlackUserId { get; init; }
-    public string? BotName { get; init; }
-    public string? AvatarHash { get; init; }
-
-    [JsonExtensionData]
-    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
-}
-
 public sealed class PermanentDeleteBody
 {
     public string Confirmation { get; init; } = string.Empty;
@@ -329,7 +264,6 @@ public sealed class PermanentDeleteBody
 
 public sealed class SlackControlInstallAgentBody
 {
-    public string EnrollmentId { get; init; } = string.Empty;
     public string AgentId { get; init; } = string.Empty;
 
     [JsonExtensionData]
@@ -338,7 +272,7 @@ public sealed class SlackControlInstallAgentBody
 
 public sealed class SlackControlInstallAgentCredentialsBody
 {
-    public string AgentAppId { get; init; } = string.Empty;
+    public string AgentId { get; init; } = string.Empty;
     public string BotToken { get; init; } = string.Empty;
     public string AppLevelToken { get; init; } = string.Empty;
 

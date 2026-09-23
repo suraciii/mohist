@@ -14,6 +14,6 @@ public interface IWorkspaceGrain : IGrainWithStringKey
     Task ArchiveByIssueAsync(int issueNumber, DateTimeOffset now);
     Task ArchiveByOriginAsync(WorkspaceOrigin origin, DateTimeOffset now);
     Task<WorkspaceHome?> GetHomeAsync();
-    Task<WorkspaceHome?> EnsureMaterializedOnAsync(string runnerId, string path, DateTimeOffset now);
+    Task<WorkspaceHome?> EnsureProvisionedOnAsync(string runnerId, string path, DateTimeOffset now);
     Task ClearHomeIfAsync(string runnerId);
 }

@@ -140,7 +140,7 @@ export interface ReceiveFollowupPayload {
   executionSource?: unknown
   /**
    * Issue-513 T-003: accepted attachment descriptors for this
-   * follow-up turn. The Runner uses these to materialize the
+   * follow-up turn. The Runner uses these to provision the
    * workspace, build the system-attributed manifest block, and pass
    * native image parts on OpenCode. Bytes are NEVER carried on the
    * wire; the Runner fetches content through the owning-input
@@ -155,6 +155,8 @@ export interface ReceiveFollowupPayload {
   slackExecutionContext?: unknown
   managerExecutionGrant?: ManagerExecutionGrantResponse | null
   originMarker?: string | null
+  /** Durable Server evidence requires a fresh physical binding before this Input. */
+  requiresBindingRecovery?: boolean
 }
 
 /**

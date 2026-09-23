@@ -64,4 +64,7 @@ public sealed class FailingAgentSessionStore : IAgentSessionStore
     }
 
     public Task DeleteAsync(string key) => _inner.DeleteAsync(key);
+
+    public Task<string?> ReadStateJsonAsync(string key, CancellationToken ct = default) =>
+        _inner.ReadStateJsonAsync(key, ct);
 }

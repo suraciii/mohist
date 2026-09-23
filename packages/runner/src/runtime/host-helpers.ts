@@ -9,6 +9,7 @@ import type { ManagerExecutionGrantResponse } from '../core/types.js'
 import { ManagerExecutionBoundary, type ManagerExecutionBoundaryOptions } from './manager-execution-boundary.js'
 import type { OpenCodeRuntime } from './opencode/index.js'
 import type { PiRuntime } from './pi/index.js'
+import type { CodexRuntime } from './codex/index.js'
 import type { FollowupTarget, FollowupTargetResolution, SessionTarget } from '../server/session-target.js'
 import type { ServerConnection } from '../server/connection.js'
 import type { HostTaskLogDeps } from './host-task-log.js'
@@ -16,7 +17,7 @@ import type { TaskLogDeliveryQueue } from './task-log-delivery-queue.js'
 import type { AwaitingAckEntry, InFlightEntry } from './host-state.js'
 import { workKey } from './work-key.js'
 
-export type RuntimeKind = 'opencode' | 'pi'
+export type RuntimeKind = 'opencode' | 'pi' | 'codex'
 
 export const MANAGER_PI_CAPABILITIES = [
   'manager-execution-grant-v1',
@@ -53,7 +54,7 @@ export async function createManagerExecutionBoundary(
 
 export function gateManagerCapabilities(
   state: RunnerRegistration,
-  readiness: { pi: boolean; opencode: boolean },
+  readiness: { pi: boolean; opencode: boolean; codex?: boolean },
 ): RunnerRegistration {
   return {
     ...state,
@@ -99,6 +100,7 @@ export function runtimeReadinessWitnesses(
   openCodeRuntime: OpenCodeRuntime | null,
   piRuntime: PiRuntime | null,
   piRuntimeGeneration: number,
+  codexRuntime: CodexRuntime | null = null,
 ): RuntimeReadinessWitness[] {
   return [
     ...(openCodeRuntime
@@ -116,6 +118,15 @@ export function runtimeReadinessWitnesses(
             runtime: 'pi',
             ready: piRuntime.ready(),
             generation: piRuntimeGeneration > 0 ? piRuntimeGeneration : null,
+          },
+        ]
+      : []),
+    ...(codexRuntime
+      ? [
+          {
+            runtime: 'codex',
+            ready: codexRuntime.ready(),
+            generation: codexRuntime.generation(),
           },
         ]
       : []),
@@ -182,7 +193,7 @@ export function resolveFollowupTarget(options: RunnerOptions, target: SessionTar
   const binding = target.binding ?? null
   if (!binding) return null
   const runtime = binding.runtime.toLowerCase()
-  if (runtime !== 'opencode' && runtime !== 'pi') return null
+  if (runtime !== 'opencode' && runtime !== 'pi' && runtime !== 'codex') return null
   if (binding.runnerId !== options.runnerId) return null
   if (!binding.runtimeSessionId) return null
   if (!binding.workDir) return null
@@ -220,6 +231,7 @@ export function runtimeKindForWork(work: DispatchWorkItem): RuntimeKind | null {
   const candidate = (declared ?? work.uses ?? '').trim().toLowerCase()
   if (candidate === 'opencode' || candidate === 'mohist/opencode') return 'opencode'
   if (candidate === 'pi' || candidate === 'mohist/pi') return 'pi'
+  if (candidate === 'codex' || candidate === 'mohist/codex') return 'codex'
   return null
 }
 

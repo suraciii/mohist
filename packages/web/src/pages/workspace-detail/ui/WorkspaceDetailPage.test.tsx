@@ -53,19 +53,25 @@ let workspaceData: Record<string, unknown> = {}
 function mockWorkspace(workspace: Record<string, unknown>) {
   workspaceData = workspace
   server.use(
-    http.get('*/api/projects/:projectId/workspaces/:name', () => HttpResponse.json({
-      success: true,
-      data: workspaceData,
-    })),
+    http.get('*/api/projects/:projectId/workspaces/:name', () =>
+      HttpResponse.json({
+        success: true,
+        data: workspaceData,
+      }),
+    ),
   )
 }
 
 function mockClose(response: { status?: number; body: Record<string, unknown> }) {
   server.use(
     http.post('*/api/projects/:projectId/workspaces/:name/close', () => {
-      const archived = response.body.success ? { ...workspaceData, status: 'archived', archivedAt: '2026-01-02T00:00:00Z' } : workspaceData
+      const archived = response.body.success
+        ? { ...workspaceData, status: 'archived', archivedAt: '2026-01-02T00:00:00Z' }
+        : workspaceData
       if (response.body.success) workspaceData = archived
-      return HttpResponse.json(response.body.success ? { success: true, data: archived } : response.body, { status: response.status ?? 200 })
+      return HttpResponse.json(response.body.success ? { success: true, data: archived } : response.body, {
+        status: response.status ?? 200,
+      })
     }),
   )
 }
@@ -98,7 +104,7 @@ describe('WorkspaceDetailPage', () => {
     expect(await screen.findByTestId('workspace-detail-name')).toHaveTextContent('pay-refactor')
     expect(screen.getByTestId('workspace-detail-home')).toHaveTextContent('runner-a')
     expect(screen.getByTestId('workspace-detail-home')).toHaveTextContent('/ws/pay')
-    expect(screen.getAllByTestId('workspace-repository').map(node => node.textContent)).toEqual(['server', 'web'])
+    expect(screen.getAllByTestId('workspace-repository').map((node) => node.textContent)).toEqual(['server', 'web'])
     expect(screen.getByTestId('workspace-detail-created-at')).toHaveTextContent('2026-01-01')
 
     const sessionLink = screen.getByTestId('workspace-session-session-1')
@@ -109,9 +115,19 @@ describe('WorkspaceDetailPage', () => {
     expect(await screen.findByTestId('session-target')).toBeInTheDocument()
   })
 
+  it('renders the empty Home state as not provisioned', async () => {
+    mockWorkspace(baseWorkspace({ home: null }))
+
+    renderPage()
+
+    expect(await screen.findByTestId('workspace-detail-home-empty')).toHaveTextContent('Not provisioned on any runner')
+  })
+
   it('archives the workspace after confirming close', async () => {
     mockWorkspace(baseWorkspace())
-    mockClose({ body: { success: true, data: baseWorkspace({ status: 'archived', archivedAt: '2026-01-02T00:00:00Z' }) } })
+    mockClose({
+      body: { success: true, data: baseWorkspace({ status: 'archived', archivedAt: '2026-01-02T00:00:00Z' }) },
+    })
 
     renderPage()
 
@@ -133,7 +149,9 @@ describe('WorkspaceDetailPage', () => {
         success: false,
         error: "Workspace 'pay-refactor' has 2 active bound session(s).",
         code: 'workspace_has_active_sessions',
-        details: { hint: 'Stop or wait for the bound sessions to finish, then retry. List them with \'mo session list --workspace <name>\'.' },
+        details: {
+          hint: "Stop or wait for the bound sessions to finish, then retry. List them with 'mo session list --workspace <name>'.",
+        },
       },
     })
 
@@ -144,7 +162,9 @@ describe('WorkspaceDetailPage', () => {
 
     const error = await screen.findByTestId('workspace-close-error')
     expect(error).toHaveTextContent("Workspace 'pay-refactor' has 2 active bound session(s).")
-    expect(screen.getByTestId('workspace-close-error-hint')).toHaveTextContent('Stop or wait for the bound sessions to finish, then retry')
+    expect(screen.getByTestId('workspace-close-error-hint')).toHaveTextContent(
+      'Stop or wait for the bound sessions to finish, then retry',
+    )
     expect(screen.getByTestId('workspace-close-trigger')).toBeInTheDocument()
   })
 

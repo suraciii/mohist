@@ -22,7 +22,7 @@ var observationFields = []string{"jobId", "jobStatus", "jobMessage", "jobOutput"
 var subscriptionFields = []string{"id", "projectId", "agentId", "name", "match", "responsePrompt", "continue", "position", "status", "createdAt", "updatedAt"}
 var subscriptionListFields = []string{"subscriptions", "state", "agentStatus", "executability", "connection"}
 var sessionListFields = []string{"id", "source", "runtimeSessionId", "runtime", "activity", "createdAt", "lastActivityAt", "model", "agentId", "agentName", "workflowRunId", "sessionName", "origin", "targetId", "contextRefs"}
-var sessionFields = []string{"id", "source", "runtimeSessionId", "runtime", "activity", "createdAt", "lastActivityAt", "model", "resolvedModel", "appliedReasoningEffort", "failureCategory", "failureReason", "toolCallCount", "toolErrorCount", "agentId", "agentName", "workflowRunId", "sessionName", "origin", "targetId", "contextRefs", "usage", "recoveryAvailable", "currentTurnId", "inputs", "turns", "recoveryHistory"}
+var sessionFields = []string{"id", "source", "runtimeSessionId", "runtime", "activity", "createdAt", "lastActivityAt", "model", "resolvedModel", "appliedReasoningEffort", "failureCategory", "failureReason", "toolCallCount", "toolErrorCount", "agentId", "agentName", "workflowRunId", "sessionName", "origin", "targetId", "contextRefs", "usage", "recoveryAvailable", "currentTurnId", "inputs", "turns", "recoveryHistory", "contextGeneration", "unresolvedPrevious", "unresolvedPreviousCount", "nextAction"}
 var sessionTreeFields = []string{"root", "revision", "nodes", "edges", "continuation"}
 var transcriptFields = []string{"turns", "partCount", "lastActivityAt", "activity", "status"}
 var followupFields = []string{"sessionId", "status", "inputId", "turnId", "inputAcceptance", "turnStatus", "error", "code", "attachments", "rejectedAttachments"}
@@ -198,6 +198,11 @@ func parseAgentFlags(c command, action string, args []string) (command, error) {
 			if hasArg(c.args, key) && hasArg(c.args, "clear-"+key) {
 				return command{}, usage("--" + key + " cannot be used with --clear-" + key)
 			}
+		}
+	}
+	if hasArg(c.args, "runtime") {
+		if err := validateAgentRuntimeValue(argValue(c.args, "runtime", "")); err != nil {
+			return command{}, usage(err.Error())
 		}
 	}
 	if action == "start" && !hasArg(c.args, "prompt") && !hasArg(c.args, "prompt-file") {
@@ -395,7 +400,7 @@ func parseSchedule(args []string) (command, error) {
 }
 
 func agentHelp() string {
-	return "USAGE\n    mo agent <action> [flags]\n\nManage Agents, AgentJobs, and launches.\n\nActions: list, view, create, edit, archive, restore, start, launch, spawn, install, job, subscription, model"
+	return "USAGE\n    mo agent <action> [flags]\n\nManage Agents, AgentJobs, and launches.\n\nActions: list, view, create, edit, archive, restore, start, launch, spawn, install, job, subscription, model\n\nAgent Runtime values are pi, opencode, and codex."
 }
 func sessionHelp() string {
 	return "USAGE\n    mo session <action> [flags]\n\nManage AgentSessions by stable Session ID.\n\nActions: list, tree, view, transcript, followup, compact, reset, stop, detach, schedule"
@@ -669,6 +674,21 @@ func agentBody(args []string, currentConfig map[string]any) map[string]any {
 		}
 	}
 	return body
+}
+
+// validateAgentRuntimeValue enforces the canonical Agent Runtime value
+// space at the CLI boundary so an unsupported value cannot reach the
+// server. Callers must surface the returned error via the usage error path
+// (the existing parse flow already does so). Returns nil when the value is
+// one of the recognised Agent Runtimes; an empty string is treated as
+// "no override" and accepted.
+func validateAgentRuntimeValue(value string) error {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "pi", "opencode", "codex":
+		return nil
+	default:
+		return fmt.Errorf("--runtime %q is not supported; allowed values are pi, opencode, and codex", value)
+	}
 }
 
 func agentConfig(agent map[string]any) map[string]any {
@@ -1058,7 +1078,20 @@ func runLaunch(ctx context.Context, deps Dependencies, c *client, project string
 	}
 	body := map[string]any{"prompt": prompt}
 	if hasArg(cmd.args, "workspace") || hasArg(cmd.args, "issue") || hasArg(cmd.args, "epic") || hasArg(cmd.args, "repo") {
-		body["context"] = map[string]any{"workspace": argValue(cmd.args, "workspace", ""), "issueNumber": argValue(cmd.args, "issue", ""), "epicNumber": argValue(cmd.args, "epic", ""), "repository": argValue(cmd.args, "repo", "")}
+		context := map[string]any{}
+		if hasArg(cmd.args, "workspace") {
+			context["workspace"] = argValue(cmd.args, "workspace", "")
+		}
+		if hasArg(cmd.args, "issue") {
+			context["issueNumber"] = integerValue(argValue(cmd.args, "issue", ""))
+		}
+		if hasArg(cmd.args, "epic") {
+			context["epicNumber"] = integerValue(argValue(cmd.args, "epic", ""))
+		}
+		if hasArg(cmd.args, "repo") {
+			context["repository"] = argValue(cmd.args, "repo", "")
+		}
+		body["context"] = context
 	}
 	// Task-first creation accepts the effort hint and freezes it on the
 	// created Agent definition. Definition-first launch takes no execution

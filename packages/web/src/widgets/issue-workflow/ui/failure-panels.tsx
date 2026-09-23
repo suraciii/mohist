@@ -11,7 +11,7 @@ import {
 } from '../../../entities/issue'
 import type { Issue } from '../../../entities/issue'
 import { useProject } from '../../../entities/project'
-import { type DeliveryFailureKind } from '../../../shared/lib/delivery-failure'
+import { type DeliveryFailureKind } from '../model/delivery-failure'
 import { CrossIcon } from './StageStatusIcons'
 
 export function DeliveryFailureBanner({

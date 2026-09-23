@@ -15,26 +15,9 @@ public sealed class SlackManagerIngressSpecs : IClassFixture<DefaultMohistIntegr
     public SlackManagerIngressSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
-    public async Task Setup_identity_conflict_is_a_conflict_response()
+    public async Task Legacy_manual_setup_route_is_removed()
     {
-        var team = $"T_MANAGER_SETUP_CONFLICT_{Guid.NewGuid():N}";
-        using var first = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/setup", new
-        {
-            workspaceTeamId = team,
-            managerAppId = "A_MANAGER_SETUP_CONFLICT",
-            managerBotUserId = "U_MANAGER_SETUP_CONFLICT",
-        });
-        first.EnsureSuccessStatusCode();
-
-        using var conflicting = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/setup", new
-        {
-            workspaceTeamId = team,
-            managerAppId = "A_MANAGER_SETUP_CONFLICT_OTHER",
-            managerBotUserId = "U_MANAGER_SETUP_CONFLICT_OTHER",
-        });
-
-        Assert.Equal(HttpStatusCode.Conflict, conflicting.StatusCode);
-        using var document = JsonDocument.Parse(await conflicting.Content.ReadAsStringAsync());
-        Assert.Equal("manager_identity_conflict", document.RootElement.GetProperty("code").GetString());
+        using var response = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/setup", new { });
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 }

@@ -45,6 +45,16 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         return row is null ? null : ToDomain(row);
     }
 
+    public async Task<IReadOnlyList<SlackWorkspaceEnrollment>> ListActiveAsync(CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.SlackWorkspaceEnrollments.AsNoTracking()
+            .Where(item => item.Lifecycle == SlackEnrollmentLifecycle.Active && item.DeletedAt == null)
+            .ToListAsync(ct);
+        rows.Sort((left, right) => left.CreatedAt.CompareTo(right.CreatedAt));
+        return rows.Select(ToDomain).ToList();
+    }
+
     public async Task<SlackWorkspaceEnrollment> CreateAsync(SlackWorkspaceEnrollment enrollment, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(enrollment);
@@ -191,6 +201,21 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         CancellationToken ct = default) =>
         UpdateAsync(id, enrollment => enrollment.RecordManagerAppCreated(
             appId, manifestHash, installUrl, _timeProvider.GetUtcNow()), ct);
+
+    public Task<SlackWorkspaceEnrollment?> RecordReconciledManagerAppAsync(
+        string id,
+        string appId,
+        string installUrl,
+        CancellationToken ct = default) =>
+        UpdateAsync(id, enrollment => enrollment.RecordReconciledManagerApp(
+            appId, installUrl, _timeProvider.GetUtcNow()), ct);
+
+    public Task<SlackWorkspaceEnrollment?> RecordManagerAppManifestAppliedAsync(
+        string id,
+        string manifestHash,
+        CancellationToken ct = default) =>
+        UpdateAsync(id, enrollment => enrollment.RecordManagerAppManifestApplied(
+            manifestHash, _timeProvider.GetUtcNow()), ct);
 
     public Task<SlackWorkspaceEnrollment?> RecordManagerAppIdentityAsync(
         string id,

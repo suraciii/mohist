@@ -46,12 +46,27 @@ public sealed class SlackManagerManagementBridgeSpecs : IClassFixture<DefaultMoh
         Assert.Equal(HttpStatusCode.OK, view.StatusCode);
         Assert.Equal(seeded.AgentId, (await DataAsync(view)).GetProperty("state").GetProperty("id").GetString());
 
+        // A conversation install request enters the same managed operation as
+        // the Web and CLI guides, and it cannot widen the access policy.
         var create = await SendAsync(grant, new
         {
             operation = "create",
-            args = new { projectId = seeded.ProjectId, agentId = seeded.AgentId, accessPolicy = "owner_only" },
+            args = new { projectId = seeded.ProjectId, agentId = seeded.AgentId },
         });
         Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+        var createData = await DataAsync(create);
+        // The conversation reads the same managed operation the Web and CLI
+        // guides run, so it names the same target and the same projected action.
+        Assert.Equal(seeded.AgentId, createData.GetProperty("state").GetProperty("connection").GetProperty("agentId").GetString());
+        Assert.Equal("rerun_install", createData.GetProperty("nextAction").GetString());
+
+        var widened = await SendAsync(grant, new
+        {
+            operation = "create",
+            args = new { projectId = seeded.ProjectId, agentId = seeded.AgentId, accessPolicy = "anyone" },
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, widened.StatusCode);
+        Assert.Equal("manager_arguments_invalid", (await CodeAsync(widened)));
 
         var edit = await SendAsync(grant, new
         {
@@ -86,8 +101,18 @@ public sealed class SlackManagerManagementBridgeSpecs : IClassFixture<DefaultMoh
         });
         Assert.Equal(HttpStatusCode.OK, claim.StatusCode);
         var claimData = await DataAsync(claim);
+        // The conversation hands off the explicit host command and the Bot DM
+        // destination; it never generates or carries a claim code.
         Assert.False(claimData.GetProperty("state").TryGetProperty("code", out _));
-        Assert.True(claimData.GetProperty("state").TryGetProperty("expiresAt", out _));
+        Assert.True(claimData.GetProperty("state").TryGetProperty("hostCommand", out _));
+        Assert.True(claimData.GetProperty("state").TryGetProperty("dmDestination", out _));
+        // The conversation claim never generates a code, so it cannot supersede
+        // an outstanding one: no claim-code row exists for the connection.
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            Assert.False(await db.SlackOwnerClaimCodes.AnyAsync(row => row.ConnectionId == seeded.ClaimConnectionId));
+        }
 
         var transfer = await SendAsync(grant, new
         {
@@ -260,6 +285,12 @@ public sealed class SlackManagerManagementBridgeSpecs : IClassFixture<DefaultMoh
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", grant.ManagementCredential);
         request.Headers.TryAddWithoutValidation("X-Mohist-Manager-Mode", "1");
         return await _fixture.Client.SendAsync(request);
+    }
+
+    private static async Task<string> CodeAsync(HttpResponseMessage response)
+    {
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return document.RootElement.GetProperty("code").GetString()!;
     }
 
     private static async Task<JsonElement> DataAsync(HttpResponseMessage response)

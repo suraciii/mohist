@@ -545,7 +545,8 @@ public partial class RunnerGrain
     private void RefreshDurableDrainFlag()
     {
         var state = _state.State;
-        _draining = !string.IsNullOrWhiteSpace(state?.PendingProcessGeneration)
+        _draining = state?.AdministrativeRemoval is not null
+            || !string.IsNullOrWhiteSpace(state?.PendingProcessGeneration)
             || !string.IsNullOrWhiteSpace(state?.ClosingProcessGeneration)
             || !string.IsNullOrWhiteSpace(state?.UpdateInterruptFence?.PendingId);
     }

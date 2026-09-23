@@ -37,10 +37,12 @@ function baseWorkspace(overrides: Record<string, unknown> = {}) {
 
 function mockWorkspaces(...workspaces: Record<string, unknown>[]) {
   server.use(
-    http.get('*/api/projects/:projectId/workspaces', () => HttpResponse.json({
-      success: true,
-      data: workspaces,
-    })),
+    http.get('*/api/projects/:projectId/workspaces', () =>
+      HttpResponse.json({
+        success: true,
+        data: workspaces,
+      }),
+    ),
   )
 }
 
@@ -65,7 +67,12 @@ describe('WorkspacesPage', () => {
 
   it('renders active workspaces with origin, status, bound session count, and home', async () => {
     mockWorkspaces(
-      baseWorkspace({ name: 'pay-refactor', origin: { kind: 'manual' }, home: { runnerId: 'runner-a', path: '/ws/pay' }, boundSessionCount: 2 }),
+      baseWorkspace({
+        name: 'pay-refactor',
+        origin: { kind: 'manual' },
+        home: { runnerId: 'runner-a', path: '/ws/pay' },
+        boundSessionCount: 2,
+      }),
       baseWorkspace({ name: 'issue-14', origin: { kind: 'issue', issueNumber: 14 }, boundSessionCount: 0 }),
     )
 
@@ -82,7 +89,7 @@ describe('WorkspacesPage', () => {
     expect(within(card).getByTestId('workspace-bound-sessions')).toHaveTextContent('2 bound sessions')
     expect(within(card).getByTestId('workspace-home')).toHaveTextContent('runner-a')
     expect(within(card).getByTestId('workspace-home')).toHaveTextContent('/ws/pay')
-    expect(screen.getByText('Not materialized')).toBeInTheDocument()
+    expect(screen.getByText('Not provisioned')).toBeInTheDocument()
     expect(within(card).getByTestId('workspace-created-at')).toHaveTextContent('2026-01-01')
   })
 

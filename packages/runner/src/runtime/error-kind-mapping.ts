@@ -52,7 +52,7 @@ export function mapOpenCodeErrorKind(kind: string, diagnostics: readonly { reado
 }
 
 export function mapRuntimeErrorKind(
-  _runtime: 'opencode' | 'pi',
+  _runtime: 'opencode' | 'pi' | 'codex',
   kind: string,
   diagnostics: readonly { readonly code: string }[] = [],
 ): string {

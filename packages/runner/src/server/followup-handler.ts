@@ -43,6 +43,7 @@ import {
   type CommandRuntimeAccessors,
 } from './command-runtime.js'
 import type { PiRuntimeEvent, PiTurnObserver } from '../runtime/pi/index.js'
+import type { CodexRuntimeTurnEvent, CodexTurnEventObserver } from '../runtime/codex/index.js'
 import type { RuntimeTurnEvent, RuntimeTurnObserver } from '../runtime/opencode/index.js'
 import type { ServerConnection } from './connection.js'
 import { SkillResolver } from '../runtime/skill-resolver.js'
@@ -72,6 +73,7 @@ export interface FollowupHandlerDeps {
   agentSessionRuntimeEventQueue?: AgentSessionRuntimeEventQueue | null
   openCodeRuntime?: CommandRuntimeAccessors['openCode']
   piRuntime?: CommandRuntimeAccessors['pi']
+  codexRuntime?: CommandRuntimeAccessors['codex']
   connection?: ServerConnection | null
   runnerId?: string | null
   runnerRoot?: string
@@ -120,6 +122,10 @@ async function handleFollowup(
   deps: FollowupHandlerDeps,
 ): Promise<FollowupDeliveryResult> {
   if (!payload) return unavailable()
+  if (payload.requiresBindingRecovery !== undefined && typeof payload.requiresBindingRecovery !== 'boolean')
+    return unavailable()
+  const requiresBindingRecovery = payload.requiresBindingRecovery === true
+  if (requiresBindingRecovery && (!deps.connection || !deps.runnerId)) return unavailable()
   const sourceContext = readExecutionSourceContext(payload)
   if (sourceContext.kind === 'invalid') return unavailable()
   const slackContext = sourceContext.slackExecutionContext
@@ -157,6 +163,7 @@ async function handleFollowup(
   let handle = resolveCommandRuntime(binding, {
     openCode: deps.openCodeRuntime,
     pi: deps.piRuntime,
+    codex: deps.codexRuntime,
   })
   if (managerContext) {
     if (!deps.runnerRoot) return unavailable()
@@ -172,7 +179,7 @@ async function handleFollowup(
         const sharedOpenCode = resolveAccessor(deps.openCodeRuntime)
         if (!sharedOpenCode) {
           await managerExecution.dispose()
-          return runtimeUnavailable()
+          return requiresBindingRecovery ? unavailable() : runtimeUnavailable()
         }
         if (!sharedOpenCode.ready()) {
           await managerExecution.dispose()
@@ -203,9 +210,13 @@ async function handleFollowup(
   }
   if (!handle) {
     await managerExecution?.dispose().catch(() => undefined)
-    return runtimeUnavailable()
+    return requiresBindingRecovery ? unavailable() : runtimeUnavailable()
   }
   if (!(await ensureCommandRuntimeReady(handle))) {
+    await managerExecution?.dispose().catch(() => undefined)
+    return unavailable()
+  }
+  if (handle.kind === 'codex' && (!payload.inputId || payload.inputId.trim().length === 0)) {
     await managerExecution?.dispose().catch(() => undefined)
     return unavailable()
   }
@@ -213,10 +224,10 @@ async function handleFollowup(
   let selectedTarget = target
   const connection = deps.connection ?? null
   const runnerId = deps.runnerId ?? null
-  if (!managerContext && connection && runnerId) {
+  if (connection && runnerId && (!managerContext || requiresBindingRecovery)) {
     const expected = {
       runnerId: binding.runnerId,
-      runtime: binding.runtime as 'opencode' | 'pi',
+      runtime: binding.runtime as 'opencode' | 'pi' | 'codex',
       runtimeSessionId: target.runtimeSessionId,
       workDir: target.workDir,
     } as const
@@ -228,6 +239,7 @@ async function handleFollowup(
         const candidateHandle = resolveCommandRuntime(candidate, {
           openCode: deps.openCodeRuntime,
           pi: deps.piRuntime,
+          codex: deps.codexRuntime,
         })
         if (!candidateHandle) return { ok: false, kind: 'unavailable-runtime', message: 'runtime is unavailable' }
         const result =
@@ -239,9 +251,16 @@ async function handleFollowup(
                   workDir: candidate.workDir,
                 },
               })
-            : await candidateHandle.runtime.resolveSession({
-                target: { runtime: 'pi', runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir },
-              })
+            : candidateHandle.kind === 'codex'
+              ? await candidateHandle.runtime.resolveSession({
+                  target: {
+                    runtimeSessionId: candidate.runtimeSessionId ?? '',
+                    workDir: candidate.workDir,
+                  },
+                })
+              : await candidateHandle.runtime.resolveSession({
+                  target: { runtime: 'pi', runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir },
+                })
         return result.ok
           ? { ok: true, activeTurn: result.value.activeTurn }
           : { ok: false, kind: result.error.kind, message: result.error.message }
@@ -256,23 +275,22 @@ async function handleFollowup(
           expectedQueuedTurnId: payload.turnId,
         }
         const signal = new AbortController().signal
-        if (sessionTarget.kind === 'workflow') {
-          await connection.recoverMissingWorkflowAgentSession(
-            sessionTarget.projectId,
-            sessionTarget.workflowRunId,
-            sessionTarget.sessionName,
-            body,
-            signal,
-          )
-        } else {
-          await connection.recoverMissingAgentSession(sessionTarget.projectId, sessionTarget.sessionId, body, signal)
-        }
+        await connection.recoverMissingAgentSession(
+          sessionTarget.projectId,
+          sessionTargetId(sessionTarget),
+          body,
+          signal,
+        )
       },
       recoveryKey: `${sessionTargetId(sessionTarget)}:${expected.runtimeSessionId ?? 'unbound'}`,
       coordinator: deps.bindingRecoveryCoordinator ?? undefined,
       allowRuntimeReplacement,
+      requiresBindingRecovery,
     })
-    if (!recovery.ok || !recovery.binding.runtimeSessionId) return unavailable()
+    if (!recovery.ok || !recovery.binding.runtimeSessionId) {
+      await managerExecution?.dispose().catch(() => undefined)
+      return unavailable()
+    }
     selectedTarget = { ...target, runtimeSessionId: recovery.binding.runtimeSessionId }
   }
 
@@ -333,6 +351,7 @@ async function handleFollowup(
       runtimeSessionId: selectedTarget.runtimeSessionId,
       workDir: selectedTarget.workDir,
     },
+    inputId: payload.inputId ?? null,
     prompt: composedPrompt,
     ...(fileParts.length > 0 ? { fileParts } : {}),
     ...(definition
@@ -583,7 +602,7 @@ function buildFollowupObserver(
   turnId: string | undefined,
   managerExecution: ManagerExecutionBoundary | null = null,
 ): {
-  observer: PiTurnObserver | RuntimeTurnObserver | null
+  observer: PiTurnObserver | RuntimeTurnObserver | CodexTurnEventObserver | null
   observation: ReplyActionObservationTracker
   flush: () => Promise<unknown>
 } {
@@ -592,14 +611,14 @@ function buildFollowupObserver(
   let observerError: unknown = null
   let openCodeEventOrdinal = 0
   if (!operationId) {
-    const observer: PiTurnObserver | RuntimeTurnObserver = {
-      onEvent: (event: PiRuntimeEvent | RuntimeTurnEvent) => observation.observe(event),
+    const observer: PiTurnObserver | RuntimeTurnObserver | CodexTurnEventObserver = {
+      onEvent: (event: PiRuntimeEvent | RuntimeTurnEvent | CodexRuntimeTurnEvent) => observation.observe(event),
     }
     return { observer, observation, flush: async () => null }
   }
   const completedAt = new Date().toISOString()
-  const observer: PiTurnObserver | RuntimeTurnObserver = {
-    onEvent: (event: PiRuntimeEvent | RuntimeTurnEvent) => {
+  const observer: PiTurnObserver | RuntimeTurnObserver | CodexTurnEventObserver = {
+    onEvent: (event: PiRuntimeEvent | RuntimeTurnEvent | CodexRuntimeTurnEvent) => {
       observation.observe(event)
       const ordinal = 'id' in event ? 0 : ++openCodeEventOrdinal
       const eventPayload = {
@@ -644,7 +663,7 @@ function buildFollowupObserver(
   }
 }
 
-function followupEventId(event: PiRuntimeEvent | RuntimeTurnEvent, ordinal: number): string {
+function followupEventId(event: PiRuntimeEvent | RuntimeTurnEvent | CodexRuntimeTurnEvent, ordinal: number): string {
   if ('id' in event && typeof event.id === 'string') return event.id
   return `ordinal-${ordinal}`
 }
@@ -667,7 +686,7 @@ function readErrorKind(result: { readonly error?: { readonly kind?: string } }):
 }
 
 function readRuntimeErrorCategory(
-  runtime: 'opencode' | 'pi',
+  runtime: 'opencode' | 'pi' | 'codex',
   result: { readonly ok: boolean; readonly error?: { readonly kind?: string } },
 ): string | undefined {
   if (result.ok) return undefined

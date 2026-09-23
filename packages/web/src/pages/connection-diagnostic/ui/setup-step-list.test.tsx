@@ -9,9 +9,7 @@ describe('SetupStepList', () => {
 
     const list = screen.getByTestId('connection-setup-step-list')
     const renderedKeys = Array.from(list.querySelectorAll('li')).map((node) => node.getAttribute('data-testid'))
-    expect(renderedKeys).toEqual(
-      SETUP_STEPS.map((step) => `connection-setup-step-${step.key}`),
-    )
+    expect(renderedKeys).toEqual(SETUP_STEPS.map((step) => `connection-setup-step-${step.key}`))
   })
 
   it('marks only the current step as current and prior steps as done', () => {
@@ -20,7 +18,9 @@ describe('SetupStepList', () => {
     for (const step of SETUP_STEPS) {
       const node = screen.getByTestId(`connection-setup-step-${step.key}`)
       const state =
-        step.key === 'create_app_credentials' || step.key === 'waiting_for_slack_service' || step.key === 'fix_slack_setup'
+        step.key === 'create_app_credentials' ||
+        step.key === 'waiting_for_slack_service' ||
+        step.key === 'fix_slack_setup'
           ? 'done'
           : step.key === 'claim_owner'
             ? 'current'
@@ -34,8 +34,7 @@ describe('SetupStepList', () => {
 
     for (const step of SETUP_STEPS) {
       const node = screen.getByTestId(`connection-setup-step-${step.key}`)
-      const expected =
-        step.key === 'complete' ? 'current' : 'done'
+      const expected = step.key === 'complete' ? 'current' : 'done'
       expect(node).toHaveAttribute('data-state', expected)
     }
   })
@@ -48,5 +47,14 @@ describe('SetupStepList', () => {
       if (step.key === 'create_app_credentials') continue
       expect(screen.getByTestId(`connection-setup-step-${step.key}`)).toHaveAttribute('data-state', 'pending')
     }
+  })
+})
+
+describe('SetupStepList labels', () => {
+  it('names the human steps and never Server work or credential entry', () => {
+    const labels = SETUP_STEPS.map((step) => step.label)
+
+    expect(labels).toContain('Approve install in Slack')
+    expect(labels.join(' | ')).not.toMatch(/credential|create app|socket hello|reconcile/i)
   })
 })

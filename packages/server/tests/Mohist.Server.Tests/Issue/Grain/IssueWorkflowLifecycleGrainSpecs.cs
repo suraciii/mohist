@@ -149,7 +149,7 @@ public sealed class IssueWorkflowLifecycleGrainSpecs
         Assert.NotNull(run!.Workspace);
         // The Server no longer computes a canonical, WorkflowRun-derived
         // Workspace path: the Named Workspace name/branch identify the
-        // directory and the Runner materializes it. The Run must never carry
+        // directory and the Runner provisions it. The Run must never carry
         // a workspaces/run-* path or a mohist/run-* branch.
         Assert.Equal(string.Empty, run.Workspace.Path);
         Assert.Equal($"mohist/ws-issue-{issueNumber}", run.Workspace.Branch);

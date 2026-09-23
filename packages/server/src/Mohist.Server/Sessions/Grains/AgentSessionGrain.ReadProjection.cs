@@ -41,7 +41,10 @@ public sealed partial class AgentSessionGrain
             usage.CachedWriteTokens,
             s.BindingEpoch,
             s.ActivitySummary.LastTerminalStatus ?? eventSummary.LastTerminalStatus,
-            eventSummary.AppliedReasoningEffort);
+            eventSummary.AppliedReasoningEffort,
+            s.Status.ContextGeneration,
+            s.Status.UnresolvedPreviousCount,
+            s.Status.NextAction);
     }
 
     private async Task<AgentSessionTranscriptSummary> LoadEventSummaryAsync(string sessionId)

@@ -4,12 +4,17 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Api;
+using AgentDomain = Mohist.Server.Agent.Domain.Agent;
+using AgentStatusDomain = Mohist.Server.Agent.Domain.AgentStatus;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Data.Agent;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Project.Domain;
@@ -56,6 +61,7 @@ public class RunnerConfigApiSpecs : IAsyncLifetime
     {
         var projectId = $"runner-update-drain-{Guid.NewGuid():N}";
         var runnerId = await _fixture.RegisterRunnerAsync(projectId, maxWorkflowSlots: 2);
+        await _fixture.SeedAgentAsync(projectId, "agent-test");
         var jobId = $"runner-update-drain-job-{Guid.NewGuid():N}";
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -406,7 +412,9 @@ public class RunnerConfigApiSpecs : IAsyncLifetime
                 jobId = jobKey,
                 workspace = new { path = "/tmp/runner-config-poll", projectId },
             });
-        await _fixture.WaitForAgentJobAssignmentPreparedAsync(jobKey);
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
+            jobKey,
+            TimeSpan.FromSeconds(5));
 
         using var response = await _fixture.Client.PostRunnerPollAsync(
             runnerId,
@@ -477,6 +485,7 @@ public class RunnerConfigApiSpecs : IAsyncLifetime
 public class RunnerConfigFixture : IAsyncLifetime
 {
     private SqliteConnection _keeper = null!;
+    private string _connectionString = null!;
     private ConfigWebApplicationFactory _factory = null!;
     private readonly List<string> _registeredRunnerIds = [];
 
@@ -484,6 +493,7 @@ public class RunnerConfigFixture : IAsyncLifetime
     public HttpClient Client { get; private set; } = null!;
     public IServiceProvider Services => _factory.Services;
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
+    public AgentJobDispatchProbe AgentJobDispatches => _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
     public IEventStore EventStore => _factory.Services.GetRequiredService<IEventStore>();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
 
@@ -491,6 +501,7 @@ public class RunnerConfigFixture : IAsyncLifetime
     {
         var dbName = $"runner-config-{Guid.NewGuid():N}";
         var connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
+        _connectionString = connectionString;
         _keeper = new SqliteConnection(connectionString);
         await _keeper.OpenAsync();
         MigratedSqliteTemplate.CopyTo(_keeper);
@@ -555,6 +566,54 @@ public class RunnerConfigFixture : IAsyncLifetime
             AdmissionReady: true,
             AdmissionReasonCodes: [],
             ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration);
+    }
+
+    /// <summary>
+    /// Persists a stored Project Agent so a launched Job's derived capacity
+    /// claim can read a real definition. Unlimited (a null
+    /// <c>MaxConcurrentRuns</c>) keeps the claim free of an artificial
+    /// bound: the runner-slot layer still gates dispatch on its own.
+    /// </summary>
+    public async Task SeedAgentAsync(string projectId, string agentId)
+    {
+        var agent = new AgentDomain
+        {
+            Id = agentId,
+            ProjectId = projectId,
+            Name = agentId,
+            Description = "spec",
+            Instructions = "spec",
+            Skills = [],
+            MaxConcurrentRuns = null,
+            Status = AgentStatusDomain.Active,
+            CreatedAt = TimeProvider.GetUtcNow(),
+            UpdatedAt = TimeProvider.GetUtcNow(),
+        };
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options;
+        await using var db = new MohistDbContext(options);
+        var id = GrainKey.Agent(projectId, agentId);
+        var row = await db.Agents.FindAsync(id);
+        if (row is null)
+        {
+            db.Agents.Add(new AgentRow
+            {
+                Id = id,
+                ProjectId = projectId,
+                Name = agent.Name,
+                Status = agent.Status,
+                State = AgentStore.Serialize(agent),
+            });
+        }
+        else
+        {
+            row.ProjectId = projectId;
+            row.Name = agent.Name;
+            row.Status = agent.Status;
+            row.State = AgentStore.Serialize(agent);
+        }
+        await db.SaveChangesAsync();
     }
 
     public async Task<(string ProjectId, string AgentId)> CreateProjectAndAgentAsync(string prefix)

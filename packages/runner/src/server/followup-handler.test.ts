@@ -6,6 +6,7 @@ import { createFollowupHandler } from './followup-handler.js'
 import { createAgentSessionRuntimeEventQueue } from './runtime-event-queue.js'
 import { MemoryFileSystem } from '../../tests/support/memory-filesystem.js'
 import { withTestRunnerResources } from '../../tests/support/test-resources.js'
+import { makeFakeCodexRuntime } from '../../tests/support/codex-runtime-fixture.js'
 
 function it(name: string, body: (fileSystem: MemoryFileSystem) => Promise<void>): void {
   vitestIt(name, async () => {
@@ -612,11 +613,135 @@ describe('follow-up attachment delivery', () => {
   })
 })
 
+it('replaces a removed Manager binding on the same Runtime before the accepted Input', async () => {
+  const runtime = {
+    ready: () => true,
+    resolveSession: vi.fn(),
+    createSession: vi.fn(async () => ({
+      ok: true as const,
+      value: { runtimeSessionId: 'manager-new', workDir: '/work' },
+      diagnostics: [],
+    })),
+    followup: vi.fn(async () => ({ ok: true as const, value: { facts: {} }, diagnostics: [] })),
+  }
+  const boundary = {
+    hasExpired: () => false,
+    mask: (value: string) => value,
+    redact: (value: unknown) => value,
+    dispose: vi.fn(async () => undefined),
+  }
+  const outbox = {
+    ready: () => true,
+    awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
+    enqueueBeforeExecution: vi.fn(async () => undefined),
+    enqueueProducedFact: vi.fn(async () => undefined),
+  }
+  const recover = vi.fn(async () => undefined)
+  const receive = createFollowupHandler({
+    followupTargetResolver: () => ({
+      runtimeSessionId: 'runtime-1',
+      workDir: '/work',
+      projectId: '__mohist_slack_manager__',
+    }),
+    agentSessionRuntimeEventQueue: outbox as never,
+    piRuntime: runtime as never,
+    runnerRoot: '/virtual/runner',
+    runnerId: 'runner-1',
+    connection: { recoverMissingAgentSession: recover } as never,
+    createManagerExecutionBoundary: vi.fn(async () => boundary as never) as never,
+  })
+
+  await expect(receive({ ...managerFollowupPayload(), requiresBindingRecovery: true })).resolves.toEqual({
+    accepted: true,
+  })
+  await flushMicrotasks()
+
+  expect(runtime.resolveSession).not.toHaveBeenCalled()
+  expect(recover).toHaveBeenCalledWith(
+    '__mohist_slack_manager__',
+    'session-1',
+    expect.objectContaining({ expectedRuntime: 'pi', replacementRuntimeSessionId: 'manager-new' }),
+    expect.any(AbortSignal),
+  )
+  expect(runtime.followup).toHaveBeenCalledWith(
+    expect.objectContaining({ target: expect.objectContaining({ runtimeSessionId: 'manager-new' }) }),
+    expect.anything(),
+  )
+})
+
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
   await Promise.resolve()
 }
+
+function codexFollowupPayload(overrides: { readonly inputId?: string } = {}) {
+  return {
+    target: {
+      kind: 'generic',
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      binding: {
+        runtime: 'codex',
+        runtimeSessionId: 'thread_fixture',
+        runnerId: 'runner-1',
+        workDir: '/workspace',
+      },
+    },
+    text: 'continue',
+    operationId: 'operation-1',
+    turnId: 'turn-1',
+    executionSource: 'non-slack',
+    ...(overrides.inputId ? { inputId: overrides.inputId } : {}),
+  } as never
+}
+
+describe('Codex follow-up admission', () => {
+  it('rejects a codex follow-up without a caller inputId before invoking the runtime', async () => {
+    const fixture = makeFakeCodexRuntime()
+    const enqueueBeforeExecution = vi.fn()
+    const receive = createFollowupHandler({
+      followupTargetResolver: () => ({
+        runtimeSessionId: 'thread_fixture',
+        workDir: '/workspace',
+        projectId: 'project-1',
+      }),
+      agentSessionRuntimeEventQueue: { ready: () => true, enqueueBeforeExecution } as never,
+      codexRuntime: fixture.runtime,
+    })
+
+    await expect(receive(codexFollowupPayload())).resolves.toEqual({ accepted: false, error: 'unavailable' })
+    expect(fixture.followupCalls).toHaveLength(0)
+    expect(enqueueBeforeExecution).not.toHaveBeenCalled()
+  })
+
+  it('routes an admitted codex follow-up to the codex runtime with the caller inputId', async () => {
+    const fixture = makeFakeCodexRuntime()
+    const outbox = {
+      ready: () => true,
+      awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
+      enqueueBeforeExecution: vi.fn(async () => undefined),
+      enqueueProducedFact: vi.fn(async () => undefined),
+    }
+    const receive = createFollowupHandler({
+      followupTargetResolver: () => ({
+        runtimeSessionId: 'thread_fixture',
+        workDir: '/workspace',
+        projectId: 'project-1',
+      }),
+      agentSessionRuntimeEventQueue: outbox as never,
+      codexRuntime: fixture.runtime,
+    })
+
+    await expect(receive(codexFollowupPayload({ inputId: 'input-1' }))).resolves.toEqual({ accepted: true })
+    await flushMicrotasks()
+    expect(fixture.followupCalls).toHaveLength(1)
+    expect(fixture.followupCalls[0]).toMatchObject({
+      clientUserMessageId: 'input-1',
+      prompt: expect.stringContaining('continue'),
+    })
+  })
+})
 
 function genericFollowupPayload(runtime: 'opencode' | 'pi') {
   return {
@@ -678,7 +803,7 @@ function managerFollowupPayload(runtime: 'opencode' | 'pi' = 'pi') {
       },
       collaborationSkill: {
         name: 'mohist-slack-collaboration',
-        version: '1.0.4',
+        version: '1.0.6',
         instructions,
         contentHash: createHash('sha256').update(instructions, 'utf8').digest('hex'),
       },

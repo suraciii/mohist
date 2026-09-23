@@ -73,6 +73,15 @@ type Dependencies struct {
 	ManagedUpdate           ManagedUpdateRuntime
 	OpenManagedLock         func(string) (io.Closer, error)
 	ManagedPathExists       func(string) bool
+	// TerminalInteractive reports whether a person is present at a terminal, so
+	// a guide can prompt instead of failing closed. It is injected in tests.
+	TerminalInteractive func() bool
+	// ReadSecretLine reads one hidden line for a secret prompt. It is injected
+	// in tests so no test depends on a terminal.
+	ReadSecretLine func(prompt string) (string, error)
+	// StatFile exposes file metadata, which the protected credentials-file
+	// check reads before any content is read.
+	StatFile func(string) (os.FileInfo, error)
 }
 
 type Config struct {
@@ -151,6 +160,10 @@ func defaultDependencies() Dependencies {
 		},
 		Executable:       currentExecutablePath,
 		CurrentDirectory: func() string { value, _ := os.Getwd(); return value },
+
+		TerminalInteractive: defaultTerminalInteractive,
+		ReadSecretLine:      defaultReadSecretLine,
+		StatFile:            os.Stat,
 	}
 }
 
@@ -401,6 +414,15 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if deps.CurrentDirectory == nil {
 		deps.CurrentDirectory = defaults.CurrentDirectory
 	}
+	if deps.TerminalInteractive == nil {
+		deps.TerminalInteractive = defaults.TerminalInteractive
+	}
+	if deps.ReadSecretLine == nil {
+		deps.ReadSecretLine = defaults.ReadSecretLine
+	}
+	if deps.StatFile == nil {
+		deps.StatFile = defaults.StatFile
+	}
 	if deps.HealthProbe == nil {
 		deps.HealthProbe = func(ctx context.Context, address string) error {
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(address, "/")+"/health", nil)
@@ -439,7 +461,7 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if command.kind == "info" {
 		return runInfo(deps, command)
 	}
-	if (command.kind == "runner-environment-capture" || command.kind == "runner-environment-check") && !command.environmentReport {
+	if (command.kind == "runner-environment-capture" || command.kind == "runner-environment-initialize" || command.kind == "runner-environment-check") && !command.environmentReport {
 		return runRunnerEnvironment(ctx, deps, nil, command)
 	}
 	if strings.HasPrefix(command.kind, "skill-") || strings.HasPrefix(command.kind, "install-") || strings.HasPrefix(command.kind, "update-") {
@@ -622,6 +644,7 @@ func parse(args []string) (command, error) {
 func parseLeaf(kind string, args []string, path string, catalog []string, usage string) (command, error) {
 	c := command{kind: kind, path: path, catalog: catalog}
 	positionals := []string{}
+	strict := false
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--help", "-h":
@@ -633,6 +656,11 @@ func parseLeaf(kind string, args []string, path string, catalog []string, usage 
 				c.fields = strings.Split(args[i+1], ",")
 				i++
 			}
+		case "--strict":
+			if kind != "doctor" {
+				return command{}, &usageError{message: "error: unknown option " + args[i] + "\nusage: " + usage}
+			}
+			strict = true
 		default:
 			if strings.HasPrefix(args[i], "-") {
 				return command{}, &usageError{message: "error: unknown option " + args[i] + "\nusage: " + usage}
@@ -651,6 +679,9 @@ func parseLeaf(kind string, args []string, path string, catalog []string, usage 
 		c.path = "/api/runs/" + url.PathEscape(positionals[0]) + "/diagnosis"
 	} else if len(positionals) != 0 {
 		return command{}, &usageError{message: "error: doctor does not accept positional arguments\nusage: " + usage}
+	}
+	if kind == "doctor" && strict {
+		c.path = path + "?strict=true"
 	}
 	if len(c.fields) > 0 {
 		for _, field := range c.fields {
@@ -794,7 +825,7 @@ func runGroupHelp() string {
 }
 
 func doctorHelp() string {
-	return "USAGE\n    mo doctor\n\nCheck Server readiness and show the next action for failed checks.\n\nJSON FIELDS\n" + strings.Join(doctorFields, "\n")
+	return "USAGE\n    mo doctor [--strict] [--json [fields]]\n\nCheck Server readiness and show the next action for failed checks.\n\nFLAGS\n    --strict  Fail on every Project with an invalid verification configuration, not only required Projects\n\nJSON FIELDS\n" + strings.Join(doctorFields, "\n")
 }
 
 type client struct {
@@ -989,7 +1020,7 @@ func renderDoctor(out io.Writer, data json.RawMessage) error {
 	}
 	for _, check := range checks {
 		fmt.Fprintf(out, "name: %s\nstatus: %s\ndetail: %s\n", check.Name, check.Status, check.Detail)
-		if check.Status == "fail" && check.NextAction != nil && *check.NextAction != "" {
+		if check.Status != "ok" && check.NextAction != nil && *check.NextAction != "" {
 			fmt.Fprintln(out, "next action: "+*check.NextAction)
 		}
 		fmt.Fprintln(out)
@@ -1022,7 +1053,7 @@ func decodeDoctorChecks(data json.RawMessage) ([]doctorCheck, error) {
 			return nil, errors.New("error: Doctor response has an invalid shape [invalid_response]")
 		}
 		status, ok := doctorStringField(fields, "status")
-		if !ok || (status != "ok" && status != "fail") {
+		if !ok || (status != "ok" && status != "warn" && status != "fail") {
 			return nil, errors.New("error: Doctor response has an invalid shape [invalid_response]")
 		}
 		detail, ok := doctorStringField(fields, "detail")

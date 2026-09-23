@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { isAbsolute, normalize, relative, resolve, sep } from 'node:path'
-import type { ArtifactUploadRequest, ArtifactUploadResponse } from '../server/connection.js'
+import type { ArtifactUploadRequest, ArtifactUploadResponse } from '../server/connection-upload-models.js'
 import type { ActionResult, JsonObject, JsonValue, DispatchWorkItem } from '../core/types.js'
 import { isObject } from '../core/json.js'
 import { currentRunnerFileSystem } from '../system/filesystem.js'
@@ -218,6 +218,7 @@ interface DirectoryFileEntry {
   relativePath: string
   size: number
   contentHash: string
+  contentType: string
   data: Uint8Array
 }
 
@@ -267,10 +268,12 @@ async function collectDirectoryFiles(
         throw new Error(`artifact directory '${sourceLabel}' exceeds the ${limits.maxDirectoryFileCount}-file limit`)
       }
       const content = new Uint8Array(data)
+      const relativePath = relative(absoluteRoot, entryAbsolute).split(sep).join('/')
       out.push({
-        relativePath: relative(absoluteRoot, entryAbsolute).split(sep).join('/'),
+        relativePath,
         size: content.byteLength,
         contentHash: `sha256:${createHash('sha256').update(content).digest('hex')}`,
+        contentType: guessContentType(relativePath),
         data: content,
       })
     }
@@ -280,16 +283,22 @@ async function collectDirectoryFiles(
 }
 
 function encodeDirectoryArchive(entries: DirectoryFileEntry[]): Uint8Array {
-  const json = JSON.stringify({
-    kind: 'directory',
-    files: entries.map((entry) => ({
-      path: entry.relativePath,
-      size: entry.size,
-      contentHash: entry.contentHash,
-      data: Buffer.from(entry.data).toString('base64'),
-    })),
-  })
-  return new TextEncoder().encode(json)
+  // Newline-delimited top-level JSON values: the header followed by one
+  // value per contained file. The Server streams the sequence so it never
+  // retains every entry's payload at once.
+  const values: string[] = [JSON.stringify({ kind: 'directory' })]
+  for (const entry of entries) {
+    values.push(
+      JSON.stringify({
+        path: entry.relativePath,
+        size: entry.size,
+        contentHash: entry.contentHash,
+        contentType: entry.contentType,
+        data: Buffer.from(entry.data).toString('base64'),
+      }),
+    )
+  }
+  return new TextEncoder().encode(`${values.join('\n')}\n`)
 }
 
 async function resolveArtifactPath(workDir: string, rawPath: string): Promise<string> {
@@ -378,6 +387,7 @@ export async function uploadCapturedArtifacts(
   for (const capture of captures) {
     const request: ArtifactUploadRequest = {
       path: capture.path,
+      kind: capture.kind,
       contentType: capture.contentType,
       contentHash: capture.contentHash,
       size: capture.size,

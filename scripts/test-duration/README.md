@@ -13,11 +13,13 @@ explicit artifact root is only a parent; every scope still creates a unique
 child. Gate reads completed scope evidence and never creates, removes, or
 refreshes a producer report.
 
-The executor records the exact `HEAD`, plan identity, and selected scope. A
-local `verify` run requires a clean index and worktree. A CI producer records the
-checked-out revision. Each producer checks source identity before and after its
-build and after Spec execution. Every report, log, and temporary directory
-belongs to the same scope run. Before a lane starts, the executor creates its
+The executor records the exact `HEAD`, executable plan identity, and selected
+scope. The plan identity covers suite deadlines, canonical resource limits,
+resource lanes, build commands, track declarations, resources, reports, and
+budget rules. A local `verify` run requires a clean index and worktree. A CI
+producer records the checked-out revision. Each producer checks source identity
+before and after its build and after Spec execution. Every report, log, and
+temporary directory belongs to the same scope run. Before a lane starts, the executor creates its
 report parent and removes the declared report target. A passing lane exits zero
 and writes a fresh, non-empty report at that path.
 
@@ -102,9 +104,10 @@ warm-up is setup evidence, while the track still reports its wall time and the
 complete Server L0 population.
 
 Duration-measurement tracks claim an exclusive measurement Resource on their
-host and run in deterministic order. Throughput lanes begin after the
-measurement barrier. CI selects only a complete application or Repository
-scope. It cannot select a project, track, class, or test case.
+host and run in deterministic order. Other lanes begin after the measurement
+barrier and may overlap when their explicit Resource claims allow it. CI
+selects only a complete application or Repository scope. It cannot select a
+project, track, class, or test case.
 
 ## Host-Exclusive Duration Evidence
 

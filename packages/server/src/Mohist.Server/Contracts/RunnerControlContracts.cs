@@ -84,7 +84,9 @@ public sealed record FollowupParams(
     [property: JsonPropertyName("slackExecutionContext")] AgentSlackExecutionContext? SlackExecutionContext,
     [property: JsonPropertyName("attachments")] IReadOnlyList<FollowupAttachmentDescriptor>? Attachments,
     [property: JsonPropertyName("managerExecutionGrant")] ManagerExecutionGrant? ManagerExecutionGrant = null,
-    [property: JsonPropertyName("originMarker")] string? OriginMarker = null);
+    [property: JsonPropertyName("originMarker")] string? OriginMarker = null,
+    [property: JsonPropertyName("requiresBindingRecovery"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    bool RequiresBindingRecovery = false);
 
 public sealed record SessionStopParams(
     [property: JsonPropertyName("target")] RunnerSessionTarget Target,

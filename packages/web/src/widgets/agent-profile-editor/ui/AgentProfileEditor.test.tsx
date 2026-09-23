@@ -240,6 +240,12 @@ describe('AgentProfileEditor', () => {
       )
     })
 
+    it('offers Codex alongside OpenCode and Pi in the Runtime select', () => {
+      renderEditor()
+      const runtimeSelect = screen.getByTestId('agent-runtime') as HTMLSelectElement
+      expect(Array.from(runtimeSelect.options).map((option) => option.value)).toEqual(['opencode', 'pi', 'codex'])
+    })
+
     it('navigates to the new agent detail page on success', async () => {
       const onClose = vi.fn()
       renderEditor({ onClose })

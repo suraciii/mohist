@@ -15,7 +15,8 @@ public sealed partial class AgentJobGrain
         var fingerprint = WorkResultFingerprint.For(result);
         if (IsTerminal)
         {
-            if (WorkReportStatus.IsCompleted(result.Status) && !HasCompleteExecutionBinding(result))
+            if ((WorkReportStatus.IsCompleted(result.Status) || RecoveryRequiresCompleteReportBinding())
+                && !HasCompleteExecutionBinding(result))
                 return new AgentJobReportResult(WorkReportVerdict.Refused, "execution-binding-required");
             var exactReplay = string.Equals(State.AcceptedReportRunnerId, runnerId, StringComparison.Ordinal)
                 && string.Equals(State.AcceptedReportWorkId, workId, StringComparison.Ordinal)
@@ -56,8 +57,11 @@ public sealed partial class AgentJobGrain
                 Key, runnerId, workId, State.RunnerId, State.WorkId);
             return new AgentJobReportResult(WorkReportVerdict.Refused, "runner-or-work-mismatch");
         }
-        if (WorkReportStatus.IsCompleted(result.Status) && !HasCompleteExecutionBinding(result))
+        if ((WorkReportStatus.IsCompleted(result.Status) || RecoveryRequiresCompleteReportBinding())
+            && !HasCompleteExecutionBinding(result))
             return new AgentJobReportResult(WorkReportVerdict.Refused, "execution-binding-required");
+        if (State.InitialInputSubmission?.Phase is "creating" or "candidate")
+            return new AgentJobReportResult(WorkReportVerdict.Refused, "initial-input-recovery-in-progress");
         if (!MatchesCurrentExecutionBinding(result))
             return new AgentJobReportResult(WorkReportVerdict.Refused, "execution-binding-mismatch");
         if (await FailRecoveringJobIfDueAsync())
@@ -101,6 +105,9 @@ public sealed partial class AgentJobGrain
         return new AgentJobReportResult(WorkReportVerdict.Accepted);
     }
 
+    private bool RecoveryRequiresCompleteReportBinding() =>
+        AgentJobInitialRecoveryReasons.IsDefined(State.InitialInputSubmission?.RecoveryReason);
+
     private bool MatchesCurrentExecutionBinding(WorkResult result)
     {
         var carriesBinding = result.AgentSessionId is not null
@@ -110,7 +117,8 @@ public sealed partial class AgentJobGrain
         if (!carriesBinding)
             return true;
 
-        var expectedRuntime = ExecutionDefinitionFrom(State.Input)?.Runtime;
+        var expectedRuntime = State.InitialInputSubmission?.ReplacementRuntime
+            ?? ExecutionDefinitionFrom(State.Input)?.Runtime;
         return HasCompleteExecutionBinding(result)
             && string.Equals(State.Input?.AgentSessionId, result.AgentSessionId, StringComparison.Ordinal)
             && string.Equals(State.Input?.InitialTurnId, result.AgentTurnId, StringComparison.Ordinal)

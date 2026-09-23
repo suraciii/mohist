@@ -37,7 +37,6 @@ public sealed partial class AgentJobGrain
                 || State.PendingSubagentTerminalEvent is not null)
                 await EnsureRecoveryReminderAsync();
             await PersistAsync();
-            await TryReleaseConcurrencyPermitAsync();
             if (State.PendingSessionClose is not null)
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
             if (State.PendingFailureEvent is not null)
@@ -108,15 +107,8 @@ public sealed partial class AgentJobGrain
 
         DisposeJobTimeoutTimer();
 
-        State.ConcurrencyGateStatus = terminalStatus == AgentJobStatus.Cancelled
-            ? AgentConcurrencyPermitStatus.Cancelled
-            : AgentConcurrencyPermitStatus.Terminal;
-        State.ConcurrencyReleasePending = State.ConcurrencyPermitId is not null
-            || State.ConcurrencyPermitHeld
-            || State.ConcurrencyWaiterId is not null;
         await EnsureRecoveryReminderAsync();
         await PersistAsync();
-        await TryReleaseConcurrencyPermitAsync();
         _terminalCompletion.TrySetResult(State.TerminalResult);
 
         _log.LogInformation(

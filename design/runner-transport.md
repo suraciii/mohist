@@ -51,10 +51,45 @@ each connection attempt, Runner generates a new UUID and sends it in
 `X-Runner-Connection-Id`. The identifier is not a credential; it names this
 physical connection for replacement and poll readiness fencing. The header must
 be the canonical lowercase D-format UUID string produced by `Guid.ToString("D")`
-and must not equal any active WebSocket connection ID. Runner's
-existing `buildGitHash`, `component`, `version`, `sourceRevision`, `treeHash`,
-`artifactDigest`, `releaseId`, and `generation` query fields remain handshake
-metadata on this endpoint.
+and must not equal any active WebSocket connection ID. HTTP registration and
+the control handshake both carry the canonical `RuntimeIdentity` v1 fields
+defined in
+[`cli.md#managed-runtime-updates`](cli.md#managed-runtime-updates):
+`schemaVersion`, `component`, `sourceRevision`, `buildGitHash`, `treeHash`,
+`artifactDigest`, `releaseId`, `generation`, and `runnerId`. On this endpoint
+they are query parameters; the handshake and registration name `buildGitHash`
+as its own field instead of collapsing it into the source revision. `version`
+may also appear as display metadata and is never identity.
+
+Authentication also resolves the exact issued credential ID as a Server-side
+request fact; it is never accepted from the registration body, control query,
+or an initial-input mutation body. Registration admits a Runner credential only
+while that exact ID is the active authority and binds it to the admitted process
+generation. A control upgrade and every AgentJob initial recovery or start HTTP
+mutation must present the same still-active registration authority and the
+current online, non-draining process generation. A request authenticated before
+credential replacement cannot borrow the replacement credential merely because
+both credentials belong to the same Runner. The initial-input route performs
+this admission before calling AgentJob; AgentJob never calls back into Runner.
+An explicit operator Scope override remains distinct from issued Runner
+credential authority and cannot release an administrative-removal fence. Server
+durably arms the removal wake before recording pending intent. It then closes
+existing control transport and all control admission before persisting that
+intent or attempting fallible credential-store work. A wake that finds no
+committed intent removes itself. If intent persistence is known not to have
+committed after transport teardown, the suppressed connection-finalizer
+observations are delivered as ordinary Runner disconnects. A local authority
+epoch also invalidates any installation that passed admission before that
+intent, even when its process generation differs from the generation recorded
+by removal.
+
+Registration and the handshake read a payload **without** `schemaVersion` as
+legacy v0: `buildGitHash` then falls back to `gitHash` and `sourceRevision` to
+`buildGitHash` or `gitHash`. `gitHash` is accepted only as a read input and is
+never emitted. A payload carrying any other `schemaVersion` is malformed and is
+rejected without a source-identity fallback. This fallback is bounded and is
+removed under the condition recorded in
+[`cli.md#managed-runtime-updates`](cli.md#managed-runtime-updates).
 
 Server keeps one current control connection for each Runner. A new connection
 replaces the old connection. Request correlation belongs to one connection and
@@ -218,6 +253,7 @@ The request methods are:
 - `session.followup`
 - `session.stop`
 - `session.command`
+- `session.probe`
 
 No Server-to-Runner notification method is currently defined.
 
@@ -232,6 +268,31 @@ Every method has one named `params` object:
 - `session.followup` takes `FollowupParams` and returns `RunnerFollowupDeliveryResult`.
 - `session.stop` takes `SessionStopParams` and returns `RunnerStopReply`.
 - `session.command` takes `SessionCommandRequest` and returns `SessionCommandResult`.
+- `session.probe` takes `RunnerSessionActivityProbeRequest` and returns
+  `RunnerSessionActivityProbeResult`.
+
+The activity probe is a read owned by the Session's
+[Activity convergence](agent-execution.md#activity-convergence). Its request
+carries `sessionId`, `observationId`, `runnerId`, `runtime`, `runtimeSessionId`,
+`workDir`, `bindingEpoch`, and `contextGeneration`. All identities and the work
+directory are nonempty. The binding epoch is nonnegative; the context generation
+is positive. The target Runner must match the connected Runner. The reply
+contains the complete examined request as `probe` and one `observation`:
+`executing`, `idle`, or `unknown-to-runner`.
+
+The Runner resolves the named physical Session without submitting Input or
+creating or replacing a Session. Provider-confirmed absence and an explicitly
+disabled Runtime produce `unknown-to-runner`. A cache miss, invalid binding,
+failed Runtime startup, an enabled but unavailable Runtime, or a failed provider
+read produces a request error. It supplies no convergence evidence. A resolved
+Session identity or work directory that differs from the request also fails
+closed.
+
+Server sends the probe only after the control connection is published and its
+receive loop runs. Installation never waits for a probe. The existing process
+generation checks fence the request and response; the Session then validates
+its captured observation before applying the result. A reconnect does not replay
+an expired probe on a new connection.
 
 JSON `null` is a valid result only for `workspace.diff`, `workspace.commits`,
 and `workspace.commit-diff`. Every other request method requires a non-null
@@ -242,8 +303,16 @@ member; omission is a malformed result rather than `exists: false`.
 `WorkspaceCommitDiffParams` contains `query` and `hash`.
 `WorkspaceFileContentParams` contains `query` and `path`. `FollowupParams`
 contains the current `target`, `text`, `operationId`, `inputId`, `turnId`,
-`slackExecutionContext`, and attachment descriptor fields. `SessionStopParams`
-contains the current `target`, `sessionId`, `turnId`, and `operationId` fields.
+`slackExecutionContext`, and attachment descriptor fields. A true
+`requiresBindingRecovery` means Server has durable missing evidence for this
+exact current binding. Before submitting the accepted Input, Runner creates
+and confirms a replacement through canonical missing recovery. It cannot reuse
+the old physical Session merely because that Session is locally readable.
+The flag authorizes no Runtime switch beyond the configured fallback policy;
+Manager recovery stays on its bound Runtime. Missing recovery authority or an
+unavailable required Runtime retains the accepted work for retry.
+`SessionStopParams` contains the current `target`, `sessionId`, `turnId`, and
+`operationId` fields.
 
 The nested wire values are:
 
@@ -269,9 +338,10 @@ missing operation identities.
 
 ### Read requests
 
-The five Workspace read methods are connection-scoped observations. Server
-applies a timeout. A disconnect or lost response returns unavailable. Server
-does not replay a read automatically; a caller may issue a new read.
+The five Workspace read methods and `session.probe` are connection-scoped
+observations. Server applies a timeout. A disconnect or lost response returns
+unavailable. Server does not replay a read automatically; a caller may issue a
+new read.
 
 Read handlers retain their existing path, Git argument, and process timeout
 rules. The control connection applies one response-size limit and returns a

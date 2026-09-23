@@ -13,6 +13,11 @@ public static class HealthRoutes
                 status = "ok",
                 timestamp = DateTime.UtcNow.ToString("o"),
                 version = buildInfo.Version,
+                component = buildInfo.Component,
+                sourceRevision = buildInfo.SourceRevision,
+                buildGitHash = buildInfo.BuildGitHash,
+                schemaVersion = buildInfo.SchemaVersion,
+                // gitHash is the bounded legacy alias for pre-migration CLI probes.
                 gitHash = buildInfo.GitHash,
                 treeHash = buildInfo.TreeHash,
                 artifactDigest = buildInfo.ArtifactDigest,

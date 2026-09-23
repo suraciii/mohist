@@ -36,8 +36,7 @@ func issue680OpsLeaves() []issue680OpsLeaf {
 		{area: "github", action: "disable", base: []string{"github", "disable", "gh-1"}},
 		{area: "slack", action: "setup", base: []string{"slack", "setup"}},
 		{area: "slack", action: "status", base: []string{"slack", "status"}},
-		{area: "slack", action: "install-agent", base: []string{"slack", "install-agent"}},
-		{area: "slack", action: "create", base: []string{"slack", "create"}},
+		{area: "slack", action: "install-agent", base: []string{"slack", "install-agent", "agent-1"}},
 		{area: "slack", action: "list", base: []string{"slack", "list"}},
 		{area: "slack", action: "view", base: []string{"slack", "view", "s1"}},
 		{area: "slack", action: "diagnostics", base: []string{"slack", "diagnostics", "s1"}},
@@ -51,9 +50,8 @@ func issue680OpsLeaves() []issue680OpsLeaf {
 		{area: "slack", action: "deliveries", base: []string{"slack", "deliveries", "s1"}},
 		{area: "slack", action: "resend-delivery", base: []string{"slack", "resend-delivery", "s1"}},
 		{area: "slack", action: "clear-gap", base: []string{"slack", "clear-gap", "s1"}},
-		{area: "slack", action: "reconcile-create", base: []string{"slack", "reconcile-create", "s1"}},
-		{area: "slack", action: "reconcile-delete", base: []string{"slack", "reconcile-delete", "s1"}},
 		{area: "slack", action: "message-send", base: []string{"slack", "message", "send"}},
+		{area: "slack", action: "thread-view", base: []string{"slack", "thread", "view"}},
 	}
 }
 
@@ -72,9 +70,9 @@ func issue680ValidArgs(leaf issue680OpsLeaf) []string {
 		"github.update":          {"--project", "proj", "--approver", "alice"},
 		"github.enable":          {"--project", "proj"},
 		"github.disable":         {"--project", "proj"},
-		"slack.status":           {"--workspace-team", "T1"},
-		"slack.install-agent":    {"--project", "proj"},
-		"slack.create":           {"--project", "proj"},
+		"slack.setup":            {"--credentials-file", "/tmp/slack.json"},
+		"slack.status":           {},
+		"slack.install-agent":    {"--project", "proj", "--credentials-file", "/tmp/slack.json"},
 		"slack.list":             {"--project", "proj"},
 		"slack.view":             {"--project", "proj"},
 		"slack.diagnostics":      {"--project", "proj"},
@@ -88,8 +86,9 @@ func issue680ValidArgs(leaf issue680OpsLeaf) []string {
 		"slack.deliveries":       {"--project", "proj"},
 		"slack.resend-delivery":  {"--project", "proj"},
 		"slack.clear-gap":        {"--project", "proj"},
-		"slack.reconcile-create": {"--project", "proj"},
-		"slack.reconcile-delete": {"--project", "proj"},
+		"slack.thread-view": {
+			"--project", "proj", "--session", "S1", "--limit", "20", "--continuation", "opaque",
+		},
 		"slack.message-send": {
 			"--project", "proj", "--workspace", "W1", "--conversation", "C1",
 			"--reply-to", "R1", "--connection", "K1", "--session", "S1",
@@ -281,11 +280,10 @@ func TestIssue680OperationsLeavesAcceptDocumentedFlags(t *testing.T) {
 			body:   `{"approvers":["alice","bob"]}`,
 		},
 		{
-			name:   "slack.status workspace",
-			args:   []string{"slack", "status", "--workspace-team", "T1"},
+			name:   "slack.status",
+			args:   []string{"slack", "status"},
 			method: http.MethodGet,
-			path:   "/api/slack-manager/status",
-			query:  map[string]string{"workspaceTeamId": "T1"},
+			path:   "/api/slack-manager/setup/progress",
 		},
 		{
 			name:   "slack.permanent-delete yes",

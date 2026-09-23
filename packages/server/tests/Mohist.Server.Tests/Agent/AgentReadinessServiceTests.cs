@@ -216,6 +216,16 @@ public sealed class AgentReadinessServiceTests
         Assert.Empty(result.Gaps);
     }
 
+    [Fact]
+    public void CodexModelIdsRemainOpaqueInReadinessValidation()
+    {
+        var result = AgentReadinessService.Evaluate(
+            Agent(config: "{\"runtime\":\"codex\",\"model\":\"gpt-5-codex\"}"),
+            null);
+
+        Assert.DoesNotContain(result.Gaps, gap => gap.Code == "model-reference-malformed");
+    }
+
     private static AgentInfo Agent(
         string config = "{\"model\":\"provider/model\"}",
         string instructions = "Do the work") => new(

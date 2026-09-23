@@ -1,7 +1,17 @@
 # Agents: Writing Product Docs
 
-`docs/` is the product specification layer. It defines what the product must
-satisfy. Write for users and Agents who do not read the source code.
+`docs/` holds product foundations and product specifications. Write for users
+and Agents who do not read the source code. `philosophy.md` examines general
+relationships, assumptions, and tensions in software development. `vision.md`
+owns Mohist's product positioning and choices. Keep Mohist-specific
+commitments out of philosophical arguments. Reasoning and attributed source
+material follow the shared writing rules. The behavior specification rules
+and template below apply to product behavior, not to philosophical argument.
+
+Philosophical prose develops connected arguments from actual activities,
+conditions, and tensions. Derive practical consequences through stated reasons.
+Use `humans` for human actors, `human` as an adjective, and `a person` for a
+concrete delegation relationship. Preserve the original wording of quotations.
 
 Shared writing rules (language, diagrams, fences, tables, examples) live in
 [`../eng/context-management.md`](../eng/context-management.md#writing-rules).

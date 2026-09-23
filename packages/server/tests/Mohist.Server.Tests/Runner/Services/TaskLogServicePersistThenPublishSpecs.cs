@@ -391,7 +391,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
     [InlineData("unmapped-work")]
     public async Task AppendAsync_UnmappableWorkflowWork_PersistsWithoutPublishScope(string workId)
     {
-        _workProjection.SetActiveWorkflow("wf-unmapped", workId, "runner-A", "proj-1");
+        _workProjection.SetActiveWorkflow("wf-unmapped", workId, "runner-A", "proj-1", 1);
         var publisher = new RecordingPublisher();
         var service = NewService(publisher);
 
@@ -403,7 +403,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
         var envelope = Assert.Single(publisher.Published);
         Assert.Null(envelope.TaskId);
         Assert.Null(envelope.ProjectId);
-        Assert.Equal(0, _workProjection.ProjectIdLookups);
+        Assert.Equal(0, _workProjection.IssueScopeLookups);
 
         var page = await _store.QueryAsync(
             TaskLogOwnershipKinds.Workflow, "wf-unmapped", workId,
@@ -412,7 +412,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task QueryByTaskIdAsync_UsesWorkProjection_AndReturnsNullForMiss()
+    public async Task QueryByTaskIdAsync_ResolvesOnlyWithinTheAddressedRunScope()
     {
         await SeedWorkflowRunAsync("wf-query", "task-query", "work-query");
         var publisher = new RecordingPublisher();
@@ -422,13 +422,32 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
             "runner-A", TaskLogOwnershipKinds.Workflow, "wf-query", "work-query",
             NewEntries(1, 2), truncated: true);
 
-        var page = await service.QueryByTaskIdAsync("wf-query", "task-query", null, null);
+        var page = await service.QueryByTaskIdAsync("proj-1", 1, "wf-query", "task-query", null, null);
         Assert.NotNull(page);
         Assert.Equal(2, page.Lines.Count);
         Assert.True(page.Truncated);
 
-        Assert.Null(await service.QueryByTaskIdAsync("wf-query", "missing-task", null, null));
-        Assert.Null(await service.QueryByTaskIdAsync("missing-run", "task-query", null, null));
+        // An attempt outside the run, an unknown run, or a run bound to a
+        // different project or issue has nothing to read; none of them may
+        // fall back to the addressed attempt or to another run.
+        Assert.Null(await service.QueryByTaskIdAsync("proj-1", 1, "wf-query", "missing-task", null, null));
+        Assert.Null(await service.QueryByTaskIdAsync("proj-1", 1, "missing-run", "task-query", null, null));
+        Assert.Null(await service.QueryByTaskIdAsync("proj-other", 1, "wf-query", "task-query", null, null));
+        Assert.Null(await service.QueryByTaskIdAsync("proj-1", 2, "wf-query", "task-query", null, null));
+    }
+
+    [Fact]
+    public async Task QueryByTaskIdAsync_AddressableAttemptWithoutRetainedLinesReturnsEmptyPage()
+    {
+        await SeedWorkflowRunAsync("wf-empty", "task-empty", "work-empty");
+        var service = NewService(new RecordingPublisher());
+
+        var page = await service.QueryByTaskIdAsync("proj-1", 1, "wf-empty", "task-empty", null, null);
+
+        Assert.NotNull(page);
+        Assert.Empty(page.Lines);
+        Assert.Null(page.NextCursor);
+        Assert.False(page.Truncated);
     }
 
     [Fact]
@@ -486,7 +505,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
 
     private Task SeedWorkflowRunAsync(string workflowRunId, string taskId, string workId)
     {
-        _workProjection.SetWorkflow(workflowRunId, taskId, workId, "runner-A", "proj-1");
+        _workProjection.SetWorkflow(workflowRunId, taskId, workId, "runner-A", "proj-1", 1);
         return Task.CompletedTask;
     }
 
@@ -517,11 +536,11 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
         private readonly Dictionary<(string RunId, string TaskId), string> _taskToWork = [];
         private readonly Dictionary<(string RunId, string WorkId), string> _workToTask = [];
         private readonly Dictionary<string, (string WorkId, string RunnerId)> _active = [];
-        private readonly Dictionary<string, string?> _projectIds = [];
+        private readonly Dictionary<string, WorkflowRunIssueScope> _issueScopes = [];
 
-        public int ProjectIdLookups { get; private set; }
+        public int IssueScopeLookups { get; private set; }
 
-        public void SetWorkflow(string runId, string taskId, string workId, string runnerId, string projectId)
+        public void SetWorkflow(string runId, string taskId, string workId, string runnerId, string projectId, int issueNumber)
         {
             foreach (var key in _taskToWork.Keys.Where(key => key.RunId == runId).ToList())
                 _taskToWork.Remove(key);
@@ -530,13 +549,13 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
 
             _taskToWork[(runId, taskId)] = workId;
             _workToTask[(runId, workId)] = taskId;
-            SetActiveWorkflow(runId, workId, runnerId, projectId);
+            SetActiveWorkflow(runId, workId, runnerId, projectId, issueNumber);
         }
 
-        public void SetActiveWorkflow(string runId, string workId, string runnerId, string projectId)
+        public void SetActiveWorkflow(string runId, string workId, string runnerId, string projectId, int issueNumber)
         {
             _active[runId] = (workId, runnerId);
-            _projectIds[runId] = projectId;
+            _issueScopes[runId] = new WorkflowRunIssueScope(projectId, issueNumber);
         }
 
         public Task<string?> ResolveWorkIdAsync(string workflowRunId, string taskId, CancellationToken ct = default) =>
@@ -553,10 +572,10 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
         public Task<bool> IsTerminalWorkAsync(string workflowRunId, string workId, string runnerId, CancellationToken ct = default) =>
             Task.FromResult(false);
 
-        public Task<string?> GetProjectIdAsync(string workflowRunId, CancellationToken ct = default)
+        public Task<WorkflowRunIssueScope?> GetIssueScopeAsync(string workflowRunId, CancellationToken ct = default)
         {
-            ProjectIdLookups++;
-            return Task.FromResult(_projectIds.TryGetValue(workflowRunId, out var projectId) ? projectId : null);
+            IssueScopeLookups++;
+            return Task.FromResult(_issueScopes.TryGetValue(workflowRunId, out var scope) ? scope : null);
         }
 
     }

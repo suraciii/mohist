@@ -42,6 +42,12 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
 
     Task<bool> RecordRuntimeSessionBindingAsync(string runnerId, string workId, string sessionId, string runtimeSessionId) =>
         Task.FromResult(false);
+    Task<AgentJobInitialRecoveryReceipt> PrepareInitialInputRecoveryAsync(PrepareAgentJobInitialRecovery command) =>
+        Task.FromResult(new AgentJobInitialRecoveryReceipt("refused", false, null, null));
+    Task<AgentJobInitialRecoveryReceipt> CompleteInitialInputRecoveryAsync(CompleteAgentJobInitialRecovery command) =>
+        Task.FromResult(new AgentJobInitialRecoveryReceipt("refused", false, null, null));
+    Task<AgentJobInitialStartReceipt> StartInitialInputAsync(StartAgentJobInitialInput command) =>
+        Task.FromResult(new AgentJobInitialStartReceipt(false, false, null, null));
     Task SubmitAsync(AgentJobInput input);
     Task EnsureSubmittedAsync(AgentJobInput input);
     Task CheckTimeoutsAsync();
@@ -135,10 +141,13 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// </summary>
     Task MarkUnknownAsync(string reason, DateTimeOffset recoveryDeadlineAt) => MarkUnknownAsync(reason);
 
-    Task ConcurrencyPermitGrantedAsync(
-        string? token = null,
-        string? permitId = null,
-        string? dispatchId = null) => Task.CompletedTask;
+    /// <summary>
+    /// Applies a durable Session activity-convergence fact to this Job. The
+    /// Job validates its immutable Session/Input/initial-Turn ownership and
+    /// records Unknown as lifecycle-final without calling back into Session.
+    /// </summary>
+    Task<bool> ApplyActivityConvergenceAsync(AgentJobActivityConvergence command) =>
+        Task.FromResult(false);
 }
 
 /// <summary>
@@ -160,6 +169,62 @@ public sealed record AgentJobPendingDispatch(
     [property: Id(0)] string AgentJobId,
     [property: Id(1)] string WorkId,
     [property: Id(2)] WorkDispatch Dispatch);
+
+public static class AgentJobInitialRecoveryReasons
+{
+    public const string SameRuntimeMissing = "same-runtime-missing";
+    public const string ConfiguredFallback = "configured-fallback";
+
+    public static bool IsDefined(string? reason) =>
+        reason is SameRuntimeMissing or ConfiguredFallback;
+}
+
+[GenerateSerializer]
+public sealed record PrepareAgentJobInitialRecovery(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string RunnerId,
+    [property: Id(2)] string WorkId,
+    [property: Id(3)] string ProcessGeneration,
+    [property: Id(4)] string SessionId,
+    [property: Id(5)] string InputId,
+    [property: Id(6)] string TurnId,
+    [property: Id(7)] string ExpectedRuntime,
+    [property: Id(8)] string ExpectedRuntimeSessionId,
+    [property: Id(9)] string CreationAttemptId,
+    [property: Id(10)] string RecoveryReason);
+
+[GenerateSerializer]
+public sealed record CompleteAgentJobInitialRecovery(
+    [property: Id(0)] PrepareAgentJobInitialRecovery Recovery,
+    [property: Id(1)] string ReplacementRuntime,
+    [property: Id(2)] string ReplacementRuntimeSessionId);
+
+[GenerateSerializer]
+public sealed record StartAgentJobInitialInput(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string SubmissionAttemptId,
+    [property: Id(2)] string RunnerId,
+    [property: Id(3)] string WorkId,
+    [property: Id(4)] string ProcessGeneration,
+    [property: Id(5)] string SessionId,
+    [property: Id(6)] string InputId,
+    [property: Id(7)] string TurnId,
+    [property: Id(8)] string Runtime,
+    [property: Id(9)] string RuntimeSessionId);
+
+[GenerateSerializer]
+public sealed record AgentJobInitialRecoveryReceipt(
+    [property: Id(0)] string Phase,
+    [property: Id(1)] bool CandidateCreationAuthorized,
+    [property: Id(2)] string? Runtime,
+    [property: Id(3)] string? RuntimeSessionId);
+
+[GenerateSerializer]
+public sealed record AgentJobInitialStartReceipt(
+    [property: Id(0)] bool EffectAdmitted,
+    [property: Id(1)] bool SubmissionAuthorized,
+    [property: Id(2)] string? Runtime,
+    [property: Id(3)] string? RuntimeSessionId);
 
 [GenerateSerializer]
 public sealed record PrepareManualLaunchCommand(
@@ -288,6 +353,17 @@ public sealed record AgentJobReportResult(
 {
     public bool Accepted => Verdict == WorkReportVerdict.Accepted;
 }
+
+[GenerateSerializer]
+public sealed record AgentJobActivityConvergence(
+    [property: Id(0)] string SessionId,
+    [property: Id(1)] string Observation,
+    [property: Id(2)] long ContextGeneration,
+    [property: Id(3)] long BindingEpoch,
+    [property: Id(4)] string[] SettledTurnIds,
+    [property: Id(5)] string[] SettledJobIds,
+    [property: Id(6)] string[] SupersededOperationIds,
+    [property: Id(7)] DateTimeOffset RecordedAt);
 
 [GenerateSerializer]
 public sealed record AgentJobRuntimeSnapshot(
@@ -559,7 +635,7 @@ public sealed record AgentJobInput(
     /// <summary>
     /// Named Workspace binding resolved at launch time. When set, the
     /// dispatch envelope carries <c>variables.workspace = { name,
-    /// repositories }</c> and the runner materializes the named
+    /// repositories }</c> and the runner provisions the named
     /// workspace directory instead of using a free-form path.
     /// Append-only Orleans field id (next free after
     /// <see cref="SpawnOrigin"/>).
@@ -673,7 +749,7 @@ public sealed record AgentJobInput(
     [property: Id(15)] string? InitialTurnId = null,
     /// <summary>
     /// Accepted attachment descriptors for the launch-time input.
-    /// The Runner uses these to materialize the workspace and to
+    /// The Runner uses these to provision the workspace and to
     /// build the honest, system-attributed manifest block. Absent on
     /// jobs persisted before attachments were attached to inputs —
     /// the Runner treats an absent or empty list as no attachments.

@@ -91,6 +91,76 @@ public sealed class RuntimeSessionMissingException : InvalidOperationException
 
 [Serializable]
 [GenerateSerializer]
+public sealed class AgentSessionMissingException : InvalidOperationException
+{
+    public AgentSessionMissingException(string sessionId)
+        : base($"AgentSession {sessionId} does not exist.")
+    {
+        SessionId = sessionId;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
+}
+
+[Serializable]
+[GenerateSerializer]
+public sealed class AgentSessionInitialLaunchConflictException : InvalidOperationException
+{
+    public AgentSessionInitialLaunchConflictException(
+        string sessionId,
+        string inputId,
+        string turnId,
+        string detail)
+        : base($"AgentSession {sessionId} already accepted input '{inputId}' or turn '{turnId}' "
+            + $"with a different launch identity: {detail}.")
+    {
+        SessionId = sessionId;
+        InputId = inputId;
+        TurnId = turnId;
+        Detail = detail;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
+    [Id(1)]
+    public string InputId { get; }
+    [Id(2)]
+    public string TurnId { get; }
+    [Id(3)]
+    public string Detail { get; }
+}
+
+[Serializable]
+[GenerateSerializer]
+public sealed class AgentSessionIdentityMismatchException : InvalidOperationException
+{
+    public AgentSessionIdentityMismatchException(
+        string sessionId,
+        string expectedProjectId,
+        string expectedAgentId,
+        string? actualProjectId,
+        string? actualAgentId)
+        : base($"AgentSession {sessionId} belongs to project/agent "
+            + $"'{actualProjectId ?? "missing"}'/'{actualAgentId ?? "missing"}', not "
+            + $"'{expectedProjectId}'/'{expectedAgentId}'.")
+    {
+        SessionId = sessionId;
+        ExpectedProjectId = expectedProjectId;
+        ExpectedAgentId = expectedAgentId;
+        ActualProjectId = actualProjectId;
+        ActualAgentId = actualAgentId;
+    }
+
+    [Id(0)] public string SessionId { get; }
+    [Id(1)] public string ExpectedProjectId { get; }
+    [Id(2)] public string ExpectedAgentId { get; }
+    [Id(3)] public string? ActualProjectId { get; }
+    [Id(4)] public string? ActualAgentId { get; }
+}
+
+[Serializable]
+[GenerateSerializer]
 public sealed class StaleRuntimeSessionBindingException : InvalidOperationException
 {
     public StaleRuntimeSessionBindingException(
@@ -270,8 +340,20 @@ public sealed record AgentSessionMetadata(
 
         if (string.Equals(kind, "workflow", StringComparison.Ordinal))
         {
-            if (string.IsNullOrWhiteSpace(Label(WorkflowRunIdKey)) || string.IsNullOrWhiteSpace(Label(SessionNameKey)))
-                throw new InvalidOperationException("Workflow AgentSession source requires workflow run and session name labels.");
+            if (string.IsNullOrWhiteSpace(Label(WorkflowRunIdKey))
+                || string.IsNullOrWhiteSpace(Label(SessionNameKey)))
+            {
+                throw new InvalidOperationException(
+                    "Workflow AgentSession source requires workflow run and session name labels.");
+            }
+            // Persisted Workflow facts written before the agent label existed
+            // stay readable as incomplete owner evidence; every new creation
+            // and admission path validates strictly and never backfills.
+            if (!allowLegacySource && string.IsNullOrWhiteSpace(Label(AgentIdKey)))
+            {
+                throw new InvalidOperationException(
+                    "Workflow AgentSession source requires an agent label.");
+            }
             return;
         }
 
@@ -376,6 +458,34 @@ public sealed record AgentSessionStatusSnapshot(
     /// </summary>
     IReadOnlyList<SessionScheduleRecord>? Schedules = null,
     /// <summary>
+    /// Monotonic logical context generation of this session. Starts at 1 and
+    /// advances only when a committed binding replacement starts a new
+    /// logical context. Together with the binding epoch it fences accepted
+    /// execution facts and lifecycle observations.
+    /// </summary>
+    long ContextGeneration = 1,
+    /// <summary>
+    /// Superseded stop operations retained after a newer operation replaces
+    /// the current slot. Their outcome cannot be derived from the Turn alone.
+    /// </summary>
+    IReadOnlyList<AgentSessionStopClaim>? SupersededStopClaims = null,
+    /// <summary>
+    /// Local capture of the outstanding activity probe, if any. Durable so a
+    /// repeated or superseded answer stays fenced across a grain reload.
+    /// </summary>
+    AgentSessionActivityObservation? PendingActivityObservation = null,
+    /// <summary>
+    /// Runner evidence that a still-unknown Turn retains exclusive Runtime
+    /// ownership. This evidence cannot be derived from terminal Unknown alone.
+    /// </summary>
+    AgentSessionExecutionOwnership? ConfirmedExecutionOwnership = null,
+    /// <summary>
+    /// Durable deterministic missing evidence for the current binding's
+    /// Runner, recorded from an <c>unknown-to-runner</c> observation and
+    /// cleared by the next binding replacement.
+    /// </summary>
+    AgentSessionRunnerMissingFact? MissingRunnerFact = null,
+    /// <summary>
     /// Wall-clock instant the session last entered <c>idle</c>, stamped
     /// by the injected <see cref="TimeProvider"/> through the activity
     /// transitions. Non-null only while <see cref="Activity"/> is
@@ -383,11 +493,51 @@ public sealed record AgentSessionStatusSnapshot(
     /// unconfirmable activity can never retain a stale idle time. A
     /// <c>null</c> value is fail-closed (never confirmed idle).
     /// </summary>
-    [property: JsonPropertyName("idleSince")] DateTime? IdleSince = null)
+    [property: JsonPropertyName("idleSince")] DateTime? IdleSince = null,
+    /// <summary>
+    /// Exact initial AgentJob recovery/start receipt. It is separate from
+    /// accepted Input facts because acceptance generation never changes.
+    /// </summary>
+    AgentInitialInputOperation? InitialInputOperation = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
         new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), ContextUsageHistory: [], IdleSince: now);
+
+    /// <summary>
+    /// Next action for the retained unresolved previous facts. Derived, not
+    /// persisted: the facts themselves are the record, this is the stable
+    /// read a caller acts on.
+    /// </summary>
+    public const string NextActionInspectPreviousExecution = "inspect_previous_execution";
+
+    /// <summary>
+    /// Derived count of the retained superseded facts; a duplicate counter
+    /// would be a second ledger to keep in step.
+    /// </summary>
+    [JsonIgnore]
+    public int UnresolvedPreviousCount => Turns?.Count(turn => turn.SupersededAt is not null) ?? 0;
+
+    [JsonIgnore]
+    public string? NextAction =>
+        UnresolvedPreviousCount == 0 ? null : NextActionInspectPreviousExecution;
 }
+
+public sealed record AgentInitialInputOperation(
+    string OperationId,
+    string JobId,
+    string WorkId,
+    string ProcessGeneration,
+    string RunnerId,
+    string InputId,
+    string TurnId,
+    string Runtime,
+    string RuntimeSessionId,
+    long BindingEpoch,
+    long ContextGeneration,
+    DateTime RecordedAt,
+    bool EffectAdmitted = false,
+    DateTime? EffectAdmittedAt = null,
+    string? SubmissionAttemptId = null);
 
 public sealed record AgentUsageSummary(
     long? InputTokens = null,
@@ -424,7 +574,15 @@ public sealed record AgentSessionResetReservation(
     IReadOnlyList<string>? AdditionalIdempotencyKeys = null,
     long ExpectedBindingEpoch = 0,
     bool EffectAdmitted = false,
-    string? OwnerProcessGeneration = null);
+    string? OwnerProcessGeneration = null,
+    /// <summary>
+    /// Explicit supersession marker set when lifecycle evidence settled the
+    /// Turn this reservation was opened for. The reservation keeps its
+    /// identity and records a superseded outcome, so the operation stays
+    /// auditable and replayable without holding the session active.
+    /// Append-only Orleans field id.
+    /// </summary>
+    DateTime? SupersededAt = null);
 
 public sealed record AgentSessionCommandAdmissionTombstone(
     string Command,
@@ -450,33 +608,17 @@ public sealed record AgentSessionFollowupLease(
     [property: Id(2)] bool Accepted = false,
     [property: Id(3)] DateTime? AcceptedAt = null,
     [property: Id(4)] DateTime? StartedAt = null,
-    /// <summary>
-    /// When non-null, this follow-up lease occupies a per-agent
-    /// concurrency permit acquired at <c>BeginFollowupAsync</c>. The
-    /// permit is released when the lease is cleared by an idle
-    /// activity event, the lease-expiration sweep, or an explicit
-    /// abandon. Null on leases created for follow-ups that join an
-    /// already-active session (per-session serial, no new permit).
-    /// Append-only Orleans field id.
-    /// </summary>
-    [property: Id(5)] string? ConcurrencyToken = null,
-    /// <summary>
-    /// Agent identity stamped on the lease when the concurrency
-    /// permit is acquired, so the lease-clearing release path can
-    /// route back to the same per-agent gate as the launch path.
-    /// Null when <see cref="ConcurrencyToken"/> is null.
-    /// </summary>
-    [property: Id(6)] string? ConcurrencyAgentId = null,
+    // Ids 5, 6, 11-14 and 16 are retired with the AgentConcurrencyGrain
+    // permit authority: the per-agent dispatch token, agent id, permit id,
+    // dispatch id, generation, gate status and waiter id a lease carried
+    // were only reconciled against the removed ledger. They stay free so an
+    // older persisted lease still deserializes without colliding on later
+    // ids; admission is now the derived capacity claim the Turn itself
+    // makes (see AgentTurnRecord.CapacityClaimedAt).
     [property: Id(7)] string? InputId = null,
     [property: Id(8)] string? TurnId = null,
     [property: Id(9)] bool Dispatching = false,
-    [property: Id(10)] bool PayloadSealed = false,
-    [property: Id(11)] string? ConcurrencyPermitId = null,
-    [property: Id(12)] string? ConcurrencyDispatchId = null,
-    [property: Id(13)] long ConcurrencyGeneration = 0,
-    [property: Id(14)] string? ConcurrencyGateStatus = null,
-    [property: Id(15)] string? WaitingReason = null,
-    [property: Id(16)] string? ConcurrencyWaiterId = null);
+    [property: Id(10)] bool PayloadSealed = false);
 
 /// <summary>
 /// Result of a single <see cref="AgentSessionExtensions.AcceptFollowup"/>
@@ -625,7 +767,13 @@ public sealed record AgentSessionInputRecord(
     /// </summary>
     [property: Id(10)] AgentStartupContext? StartupContext = null,
     [property: Id(11)] string ExecutionSource = AgentExecutionSources.NonSlack,
-    [property: Id(12)] string? OriginMarker = null);
+    [property: Id(12)] string? OriginMarker = null,
+    /// <summary>
+    /// Immutable logical context in which this Input was accepted. A queued
+    /// Turn may be retargeted before submission, but the accepted Input never
+    /// changes generation.
+    /// </summary>
+    [property: Id(13)] long ContextGeneration = 1);
 
 public enum AgentSessionInputAcceptance
 {
@@ -645,7 +793,26 @@ public sealed record AgentTurnRecord(
     [property: Id(6)] DateTime? RecordedAt = null,
     [property: Id(7)] DateTime? UpdatedAt = null,
     [property: Id(8)] SessionWorkflowExecutionBinding? WorkflowExecution = null,
-    [property: Id(10)] string? OperationId = null);
+    [property: Id(10)] string? OperationId = null,
+    /// <summary>
+    /// Execution context generation for this Turn. It is stamped at
+    /// acceptance and changes only for the one sealed queued Turn retargeted
+    /// atomically by strict pre-submission missing-runtime recovery.
+    /// Append-only Orleans field id.
+    /// </summary>
+    [property: Id(11)] long ContextGeneration = 1,
+    /// <summary>
+    /// Explicit supersession marker set when lifecycle evidence settled this
+    /// Turn. The Turn keeps its identity and terminal status history; a
+    /// superseded Turn never revives and takes no part in current Activity,
+    /// occupancy or admission derivation. Append-only Orleans field id.
+    /// </summary>
+    [property: Id(12)] DateTime? SupersededAt = null,
+    /// <summary>
+    /// Durable owner fact that this Turn acquired Agent capacity. It remains
+    /// after the Turn stops occupying capacity so retries need no permit ledger.
+    /// </summary>
+    [property: Id(13)] DateTimeOffset? CapacityClaimedAt = null);
 
 /// <summary>
 /// Immutable Workflow execution identity frozen on the Agent turn before its
@@ -684,10 +851,19 @@ public sealed record AgentSessionStopClaim(
     [property: Id(2)] bool DispatchStarted = false,
     [property: Id(3)] DateTimeOffset? DeadlineAt = null,
     [property: Id(4)] AgentSessionStopDisposition Disposition = AgentSessionStopDisposition.Pending,
-    [property: Id(5)] string? Reason = null)
+    [property: Id(5)] string? Reason = null,
+    /// <summary>
+    /// Explicit supersession marker set when lifecycle evidence settled the
+    /// owning Turn. The claim keeps its identity, dispatch state and
+    /// disposition for audit and exact-key replay; a superseded claim is no
+    /// longer active and can never dispatch or block again. Append-only
+    /// Orleans field id.
+    /// </summary>
+    [property: Id(6)] DateTime? SupersededAt = null)
 {
-    public bool IsActive => Disposition is AgentSessionStopDisposition.Pending
-        or AgentSessionStopDisposition.StopRequested;
+    public bool IsActive =>
+        (Disposition is AgentSessionStopDisposition.Pending or AgentSessionStopDisposition.StopRequested)
+        && SupersededAt is null;
 }
 
 [GenerateSerializer]

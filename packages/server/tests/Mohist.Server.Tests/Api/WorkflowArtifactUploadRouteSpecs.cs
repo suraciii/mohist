@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -16,6 +17,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Services.Artifacts;
 using Xunit;
 
 namespace Mohist.Server.Tests.Api;
@@ -263,7 +265,63 @@ public class WorkflowArtifactUploadRouteSpecs
                 "sha256:bad", envelope.LongLength);
 
             using var response = await _fixture.Client.PostAsync(
+                $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-directory-uploads",
+                form);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.False(string.IsNullOrEmpty(body.GetProperty("error").GetString()));
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
+    public async Task FileUploadEndpoint_RejectsDirectoryContentType()
+    {
+        var (workflowRunId, workId, runnerId) = await SetupActiveWorkAsync();
+        try
+        {
+            // Directory envelopes must use the dedicated directory route so a
+            // directory payload can never ride the smaller file-upload
+            // transport boundary. The file route fails closed early.
+            var envelope = DirectoryEnvelopeTestData.Create(
+                new DirectoryEnvelopeTestFile("a.md", Encoding.UTF8.GetBytes("alpha"), "text/markdown"));
+            using var form = BuildMultipart(
+                "specs", envelope, WorkflowArtifactDirectoryEnvelopeReader.ContentType,
+                "sha256:dir", envelope.LongLength);
+
+            using var response = await _fixture.Client.PostAsync(
                 $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
+                form);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Contains(
+                "artifact-directory-uploads",
+                body.GetProperty("error").GetString() ?? string.Empty,
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
+    public async Task DirectoryUploadEndpoint_RejectsNonDirectoryContentType()
+    {
+        var (workflowRunId, workId, runnerId) = await SetupActiveWorkAsync();
+        try
+        {
+            var payload = Encoding.UTF8.GetBytes("regular file");
+            using var form = BuildMultipart(
+                "review.md", payload, "text/markdown", "sha256:file", payload.LongLength);
+
+            using var response = await _fixture.Client.PostAsync(
+                $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-directory-uploads",
                 form);
 
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -282,7 +340,8 @@ public class WorkflowArtifactUploadRouteSpecs
         var jobId = $"agent-job-upload-{Guid.NewGuid():N}";
         var runnerId = $"agent-upload-runner-{Guid.NewGuid():N}";
         var projectId = $"agent-upload-project-{Guid.NewGuid():N}";
-        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(
             new RunnerInfo(
                 runnerId,
                 ["spec/task"],
@@ -291,42 +350,154 @@ public class WorkflowArtifactUploadRouteSpecs
                 ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration,
                 RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()),
             TestRunnerGenerationExtensions.ProcessGeneration);
-        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
-        await job.SubmitAsync(new AgentJobInput(
-            "upload agent artifact",
-            ProjectId: projectId,
-            AgentId: "agent-test"));
-        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        var dispatch = await runner.PollAsync(_fixture.Services);
-        Assert.NotNull(dispatch);
-        var workId = dispatch.WorkId;
+        await _fixture.SeedAgentAsync(projectId, "agent-test");
+        try
+        {
+            var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
+            await job.SubmitAsync(new AgentJobInput(
+                "upload agent artifact",
+                ProjectId: projectId,
+                AgentId: "agent-test",
+                PinnedRunnerId: runnerId));
+            var dispatch = await runner.PollAsync(_fixture.Services);
+            Assert.NotNull(dispatch);
+            Assert.Equal(jobId, dispatch.AgentJobId);
+            var workId = dispatch.WorkId;
 
-        var path = "review.md";
-        var payload = Encoding.UTF8.GetBytes("agent artifact content");
-        using var form = BuildMultipart(path, payload, "text/markdown", "sha256:agent", payload.LongLength);
+            var path = "review.md";
+            var payload = Encoding.UTF8.GetBytes("agent artifact content");
+            using var form = BuildMultipart(path, payload, "text/markdown", "sha256:agent", payload.LongLength);
 
-        using var response = await _fixture.Client.PostAsync(
-            $"/api/agent-jobs/{jobId}/work/{workId}/artifact-uploads",
-            form);
+            using var response = await _fixture.Client.PostAsync(
+                $"/api/agent-jobs/{jobId}/work/{workId}/artifact-uploads",
+                form);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var data = json.GetProperty("data");
-        var uploadId = data.GetProperty("uploadId").GetString()!;
-        Assert.StartsWith("artup_", uploadId);
-        Assert.Equal(jobId, data.GetProperty("workflowRunId").GetString());
-        Assert.Equal(workId, data.GetProperty("workId").GetString());
-        Assert.Equal(workId, data.GetProperty("actionAttemptId").GetString());
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var data = json.GetProperty("data");
+            var uploadId = data.GetProperty("uploadId").GetString()!;
+            Assert.StartsWith("artup_", uploadId);
+            Assert.Equal(jobId, data.GetProperty("workflowRunId").GetString());
+            Assert.Equal(workId, data.GetProperty("workId").GetString());
+            Assert.Equal(workId, data.GetProperty("actionAttemptId").GetString());
 
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var pending = await db.WorkflowArtifactPendingUploads
-            .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.UploadId == uploadId);
-        Assert.NotNull(pending);
-        Assert.Equal(jobId, pending!.WorkflowRunId);
-        Assert.Equal(workId, pending.WorkId);
+            await using var scope = _fixture.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var pending = await db.WorkflowArtifactPendingUploads
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.UploadId == uploadId);
+            Assert.NotNull(pending);
+            Assert.Equal(jobId, pending!.WorkflowRunId);
+            Assert.Equal(workId, pending.WorkId);
+        }
+        finally
+        {
+            await runner.UnregisterAsync();
+        }
     }
+
+    [Fact]
+    public async Task DirectoryUpload_EndToEnd_ReturnsCreatedAndReadsEveryEntry()
+    {
+        var (workflowRunId, workId, runnerId) = await SetupActiveWorkAsync();
+        try
+        {
+            var fileA = Encoding.UTF8.GetBytes("alpha content");
+            var fileB = Encoding.UTF8.GetBytes("beta content");
+            var files = new[]
+            {
+                new DirectoryEnvelopeTestFile("a.md", fileA, "text/markdown", Sha256(fileA)),
+                new DirectoryEnvelopeTestFile("sub/b.md", fileB, "text/markdown", Sha256(fileB)),
+            };
+            var envelope = DirectoryEnvelopeTestData.Create(files);
+
+            using var form = BuildMultipart(
+                "specs",
+                envelope,
+                WorkflowArtifactDirectoryEnvelopeReader.ContentType,
+                "sha256:dir-envelope",
+                envelope.LongLength);
+
+            using var upload = await _fixture.Client.PostAsync(
+                $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-directory-uploads",
+                form);
+            Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
+            var uploadData = (await upload.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("data");
+            var uploadId = uploadData.GetProperty("uploadId").GetString()!;
+            var actionAttemptId = uploadData.GetProperty("actionAttemptId").GetString()!;
+            Assert.Equal("directory", uploadData.GetProperty("kind").GetString());
+            Assert.False(uploadData.GetProperty("idempotent").GetBoolean());
+
+            using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", new
+            {
+                ownerKind = WorkDispatchOwnerKinds.Workflow,
+                workflowRunId,
+                workId,
+                actionAttemptId,
+                status = "completed",
+                artifacts = new[] { new { path = "specs" } },
+                artifactUploadIds = new[] { uploadId },
+                addTasks = new[]
+                {
+                    new
+                    {
+                        id = "next",
+                        title = "Next",
+                        uses = "spec/task",
+                        with = new { },
+                    },
+                },
+            });
+            Assert.Equal(HttpStatusCode.OK, report.StatusCode);
+
+            var nextWork = await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Services);
+            Assert.NotNull(nextWork);
+            var nextWorkId = nextWork.WorkId;
+
+            using var list = await _fixture.Client.GetAsync(
+                $"/api/runner/{runnerId}/workflow-runs/{workflowRunId}/work/{nextWorkId}/workspace-artifacts");
+            Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+            var artifacts = (await list.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("data")
+                .GetProperty("artifacts");
+            Assert.Single(artifacts.EnumerateArray());
+            var artifact = artifacts[0];
+            Assert.Equal("directory", artifact.GetProperty("kind").GetString());
+            var artifactId = artifact.GetProperty("artifactId").GetString()!;
+
+            using var content = await _fixture.Client.GetAsync(
+                $"/api/runner/{runnerId}/workflow-runs/{workflowRunId}/work/{nextWorkId}/workspace-artifacts/{artifactId}/content");
+            Assert.Equal(HttpStatusCode.OK, content.StatusCode);
+            var entries = (await content.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("data")
+                .GetProperty("entries")
+                .EnumerateArray()
+                .ToDictionary(
+                    entry => entry.GetProperty("relativePath").GetString()!,
+                    StringComparer.Ordinal);
+            Assert.Equal(files.Length, entries.Count);
+
+            foreach (var file in files)
+            {
+                Assert.True(entries.TryGetValue(file.Path, out var entry), $"missing entry {file.Path}");
+                Assert.Equal(file.Content.LongLength, entry.GetProperty("size").GetInt64());
+                Assert.Equal(file.ContentHash, entry.GetProperty("contentHash").GetString());
+            }
+
+            using var entryContent = await _fixture.Client.GetAsync(
+                $"/api/runner/{runnerId}/workflow-runs/{workflowRunId}/work/{nextWorkId}/workspace-artifacts/{artifactId}/content?file=sub%2Fb.md");
+            Assert.Equal(HttpStatusCode.OK, entryContent.StatusCode);
+            Assert.Equal(fileB, await entryContent.Content.ReadAsByteArrayAsync());
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    private static string Sha256(byte[] content) =>
+        $"sha256:{Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant()}";
 
     /// <summary>
     /// Set up a workflow that has been started, assigned by a runner, and

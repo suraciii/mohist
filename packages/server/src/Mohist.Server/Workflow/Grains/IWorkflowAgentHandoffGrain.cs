@@ -92,6 +92,7 @@ public enum WorkflowAgentHandoffDisposition
     Prepared,
     Accepted,
     Rejected,
+    Failed,
 }
 
 public enum WorkflowAgentActivationStep

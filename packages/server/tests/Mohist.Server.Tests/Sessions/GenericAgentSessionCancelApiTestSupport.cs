@@ -79,7 +79,8 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
             "workflow" => WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext(
                 project.Id,
                 $"workflow-{Guid.NewGuid():N}",
-                "build")),
+                "build",
+                "cancel-workflow-agent")),
             "agent-launch" => GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
                 project.Id,
                 $"agent-{Guid.NewGuid():N}",
@@ -187,6 +188,7 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
         foreach (var staleRunnerId in await registry.ListRunnerIdsAsync())
             await registry.UnregisterAsync(staleRunnerId);
         var project = await CreateProjectAsync("launch-stop");
+        await _fixture.SeedAgentAsync(project.Id, "launch-stop-agent");
         await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId)
             .RegisterAsync(new RunnerInfo(
                 _runnerId,
@@ -209,7 +211,8 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
             Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(project.Id, "launch-stop-agent", "launch-stop-agent"))));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand($"runtime-{Guid.NewGuid():N}", workDir));
         await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            inputId, turnId, "stop this launch", "agent-launch", jobId));
+            inputId, turnId, "stop this launch", "agent-launch", jobId,
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(project.Id, "launch-stop-agent", "launch-stop-agent"))));
 
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
         await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(

@@ -36,7 +36,7 @@ public sealed class AgentJobManagerRunnerLossRecoverySpecs : AgentJobGrainTestSu
         var jobKey = $"agent-job-manager-loss-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
         var sessionId = $"manager-loss-session-{Guid.NewGuid():N}";
-        await OpenSessionAsync(sessionId, jobKey);
+        await OpenSessionAsync(sessionId, jobKey, projectId);
 
         var context = ManagerContext(sessionId, jobKey);
         var initialInputId = $"manager-initial-input:{jobKey}";
@@ -136,25 +136,31 @@ public sealed class AgentJobManagerRunnerLossRecoverySpecs : AgentJobGrainTestSu
     private async Task<IReadOnlyList<AgentTurnRecord>> SessionTurnsAsync(string sessionId) =>
         await Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync();
 
-    private async Task OpenSessionAsync(string sessionId, string jobKey)
+    private async Task OpenSessionAsync(string sessionId, string jobKey, string projectId)
     {
+        // The session's accepted labels must attribute the Job's
+        // occupancy, so they carry the Job's own project and agent
+        // identity; the manager anchor lives in the Slack execution
+        // context, not in the session labels.
+        AgentSessionMetadata Labels() => new(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+            [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+            [GenericAgentSessionMetadata.AgentId] = "agent-test",
+        });
         var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await session.OpenAsync(new OpenAgentSessionCommand(
             RunnerId: string.Empty,
             AgentRuntime: "pi",
             WorkDir: "/tmp/agent-job-fixture",
-            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                [AgentSessionQueryMetadataKeys.ProjectId] = SlackDeliveryOwnerIds.ManagerProjectId,
-                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
-                [GenericAgentSessionMetadata.AgentId] = "agent-test",
-            })));
+            Metadata: Labels()));
         await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
             InputId: $"manager-initial-input:{jobKey}",
             TurnId: $"manager-initial-turn:{jobKey}",
             Prompt: "manager request",
             Source: "agent-launch",
             JobId: jobKey,
+            Metadata: Labels(),
             Provenance: new AgentSessionInputProvenance(
                 "slack",
                 "workspace-1",

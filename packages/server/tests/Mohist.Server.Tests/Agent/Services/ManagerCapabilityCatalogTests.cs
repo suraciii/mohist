@@ -33,7 +33,6 @@ public sealed class ManagerCapabilityCatalogTests
     [InlineData("slack", "list", ManagerCapabilityCatalog.ConnectionList)]
     [InlineData("slack", "view", ManagerCapabilityCatalog.ConnectionDiagnostics)]
     [InlineData("slack", "diagnostics", ManagerCapabilityCatalog.ConnectionDiagnostics)]
-    [InlineData("slack", "create", ManagerCapabilityCatalog.AgentCreateOrMount)]
     [InlineData("slack", "edit", "--access-policy", ManagerCapabilityCatalog.ConnectionAccessPolicy)]
     [InlineData("slack", "enable", ManagerCapabilityCatalog.ConnectionEnable)]
     [InlineData("slack", "disable", ManagerCapabilityCatalog.ConnectionDisable)]
@@ -59,10 +58,9 @@ public sealed class ManagerCapabilityCatalogTests
     }
 
     [Theory]
-    [InlineData("GET", "/api/slack-manager/status", ManagerCapabilityCatalog.WorkspaceStatus)]
+    [InlineData("GET", "/api/slack-manager/setup/progress", ManagerCapabilityCatalog.WorkspaceStatus)]
     [InlineData("GET", "/api/projects/proj/slack-manager/agents", ManagerCapabilityCatalog.AgentList)]
     [InlineData("GET", "/api/projects/proj/slack-manager/connections/connection", ManagerCapabilityCatalog.ConnectionView)]
-    [InlineData("POST", "/api/projects/proj/slack-manager/apps", ManagerCapabilityCatalog.AgentCreateOrMount)]
     [InlineData("GET", "/api/projects/proj/agents", ManagerCapabilityCatalog.AgentList)]
     [InlineData("POST", "/api/projects/proj/agents", ManagerCapabilityCatalog.AgentCreateOrMount)]
     [InlineData("GET", "/api/projects/proj/slack-connections", ManagerCapabilityCatalog.ConnectionList)]

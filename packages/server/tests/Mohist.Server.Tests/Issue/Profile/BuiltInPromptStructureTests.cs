@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
 
@@ -42,6 +43,52 @@ public class BuiltInPromptStructureTests
         Assert.Contains(
             "mo run feedback view --issue ${{ issue.number }} --feedback ${{ work.approvalFeedback.id }} --project ${{ issue.projectId }} --json body",
             body);
+    }
+
+    [Fact]
+    public void ApplyFeedbackPrompt_RenderedReportRequiresOneItemPerRequestAndKeepsReadCommand()
+    {
+        var body = new FilePromptLoader().LoadAllTemplates()["apply-feedback"].Body;
+        var variables = JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "issue": { "number": 42, "projectId": "proj-1" },
+              "stage": { "name": "check" },
+              "work": { "approvalFeedback": { "id": "fb-1" } },
+              "repository": { "name": "app" }
+            }
+            """);
+
+        var result = new PromptTemplateEngine().Render(body, variables);
+
+        Assert.Empty(result.Errors);
+        Assert.Contains(
+            "mo run feedback view --issue 42 --feedback fb-1 --project proj-1 --json body",
+            result.Rendered);
+        Assert.Contains("one numbered item per request", result.Rendered);
+        Assert.Contains("same order as the authoritative feedback", result.Rendered);
+    }
+
+    [Fact]
+    public void ApplyFeedbackPrompt_ReportItemDistinguishesChangeVerificationAndRemainingWork()
+    {
+        var body = new FilePromptLoader().LoadAllTemplates()["apply-feedback"].Body;
+
+        Assert.Contains("Change:", body);
+        Assert.Contains("Verification:", body);
+        Assert.Contains("Remaining:", body);
+        Assert.Contains("Name a check that did not run as not run", body);
+        Assert.Contains("as unresolved instead of dropping", body);
+    }
+
+    [Fact]
+    public void ApplyFeedbackPrompt_WorkedExampleCoversCompletedPartialAndUnverifiedRequests()
+    {
+        var body = new FilePromptLoader().LoadAllTemplates()["apply-feedback"].Body;
+
+        Assert.Contains("Example with a completed, a partially completed, and an unverified request", body);
+        Assert.Contains("Remaining: none.", body);
+        Assert.Contains("Server isolation behavior was not verified.", body);
+        Assert.Contains("the full gate was not run.", body);
     }
 
     [Fact]

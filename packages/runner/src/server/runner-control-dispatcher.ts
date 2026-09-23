@@ -1,6 +1,7 @@
 import type { WorkspaceQuery } from '../runtime/workspace-query.js'
 import type { CancelAgentSessionPayload, ReceiveFollowupPayload } from './session-target.js'
 import type { SessionCommandRequest } from './session-command-handler.js'
+import { isRunnerSessionActivityProbeRequest, type RunnerSessionActivityProbeRequest } from './session-probe-handler.js'
 import { readExecutionSourceContext } from '../runtime/slack-execution-context.js'
 
 export const JSON_RPC_PARSE_ERROR = -32700
@@ -20,6 +21,7 @@ export interface RunnerControlHandlers {
   sessionFollowup(params: ReceiveFollowupPayload): Promise<unknown>
   sessionStop(params: CancelAgentSessionPayload): Promise<unknown>
   sessionCommand(params: SessionCommandRequest): Promise<unknown>
+  sessionProbe(params: RunnerSessionActivityProbeRequest): Promise<unknown>
 }
 
 export interface RunnerControlDispatcherOutput {
@@ -134,6 +136,8 @@ export class RunnerControlDispatcher {
         return isSessionCommand(params)
           ? () => this.handlers.sessionCommand(normalizeSessionCommand(params))
           : 'invalid'
+      case 'session.probe':
+        return isRunnerSessionActivityProbeRequest(params) ? () => this.handlers.sessionProbe(params) : 'invalid'
       default:
         return 'unknown'
     }

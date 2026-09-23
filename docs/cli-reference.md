@@ -207,7 +207,7 @@ enter the language.
 - `slack`: `setup`, `status`, `install-agent`; `list`, `view`, `claim-owner`,
   `edit`, `transfer-owner`, `enable`, `disable`, `remove-binding`,
   `permanent-delete`; `message send`; `deliveries`, `resend-delivery`,
-  `clear-gap`, `reconcile-create`, `reconcile-delete`.
+  `clear-gap`.
 - `otel`: `status`, `query <sql>`, `traces`; `query` runs through the Server
   and supports `--json <fields>` field selection.
 - `skill`: `list`, `view`, `install`, `path`, `sync`.
@@ -419,7 +419,7 @@ their default Workspaces automatically.
 - `mo workspace list [--status active|archived] [--origin issue|slack|web|cli|manual]`
   lists Workspaces in the current Project.
 - `mo workspace view <name>` reads the Origin, repository membership, bound
-  Sessions, materialization location, and status.
+  Sessions, provisioning location, and status.
 - `mo workspace create <name> [--repo <repo>...]` creates a `manual` Workspace.
   Its name must be unique within the Project.
 - `mo workspace repo add <name> <repo>` and
@@ -565,44 +565,58 @@ instead of selecting the tree again. See
 a bot identity in one Slack workspace, and installation of the workspace-level
 Mohist App.
 
-- `mo slack setup [--workspace-team <team-id>] [--configuration-token-file <path>] [--credentials-file <path>]`[^go-slack-provisioning]
-  installs the workspace-level Mohist App in Slack and connects local Socket
-  Mode. It creates or restores one workspace installation record, creates and
-  configures the App, and guides the user through Slack installation and
-  App-level token generation. On first installation, Configuration token
-  validation determines the workspace. Use the flag when multiple workspaces
-  are connected.
-- `mo slack install-agent <agent> [--workspace-team <team-id>] [--credentials-file <path>]`[^go-slack-provisioning]
-  installs an existing Mohist Agent in Slack. It creates or restores the Agent
-  integration and dedicated Agent App. It guides App configuration,
-  installation, identity and credential validation, connection startup, and
-  Owner claim. The workspace flag may be omitted when only one workspace is
-  connected. If the Agent already has an installation record in that workspace,
-  the command continues it instead of creating a second App.
+- `mo slack setup [--credentials-file <path>] [--workspace-team <team-id>]`
+  creates or resumes the workspace-level Mohist App and local Socket Mode.
+  On first enrollment Slack's verified Configuration credentials determine the
+  Workspace; the command never asks for a workspace, enrollment, or App ID.
+- `mo slack install-agent <agent> [--project <project>] [--credentials-file <path>] [--workspace-team <team-id>]`
+  creates or resumes the selected Agent's dedicated Slack App. The Agent is
+  resolved by its ordinary Project-scoped name or ID, and its configured
+  identity and execution definition are reused. When exactly one active
+  Workspace is eligible, Agent selection is the only product input;
+  `--workspace-team` names an enrolled Workspace, and several eligible
+  Workspaces fail with the readable choices instead of resuming the Agent's
+  first existing Connection. A previously started installation resumes the same
+  Connection and App. Once identity, permission, and Socket verification pass,
+  the next primary action is `mo slack claim-owner <id>`.
 - `setup` and `install-agent` are idempotent, resumable guides. When a step must
   be completed in Slack, the command returns the installation link, exact page,
-  and same continuation command. A rerun continues from confirmed steps and
-  validates saved credentials again. Invalid credentials return the guide to
-  the credential step. Supplying credentials again for a ready record rotates
-  them. New credentials must still belong to the original workspace, App, and
-  Bot. Non-interactive mode never waits for input. If a required file for the
-  current step is missing, it exits nonzero and returns the continuation
-  command.
-- A Configuration Token file contains only
-  `{ "configurationToken": "...", "configurationRefreshToken": "..." }`.
-  A runtime credential file contains only
-  `{ "botToken": "...", "appToken": "..." }`. Both must be regular,
-  non-symlink files owned by the current user and readable and writable only by
-  that user. Interactive mode uses hidden input. The command line does not
-  accept token literals. The CLI reads only the fields needed for the current
-  step. Mohist encrypts them after validation and never includes them in output,
-  errors, JSON, or logs.
-[^go-slack-provisioning]: The Go CLI currently rejects the workspace and credential-file options on these two provisioning commands. It accepts `mo slack setup` without options and `mo slack install-agent <agent> --project <project>`. The guided provisioning contract above still requires implementation; passing these unsupported options exits 2 before any request.
+  and same continuation command. That continuation carries the selected
+  `--workspace-team` and the resolved `--project`, so a rerun keeps the original
+  target. A rerun continues from confirmed steps and validates saved
+  credentials again. Invalid credentials return the guide to the credential
+  step. Supplying credentials again for a ready record is an explicit
+  replacement and rotates them; a rerun with no new input rotates nothing. New
+  credentials must still belong to the original workspace, App, and Bot.
+  Non-interactive mode never waits for input. If a required file for the current
+  step is missing, it exits nonzero and returns the continuation command.
+- In a TTY the guides collect credentials through hidden input. Automation
+  names one protected, user-owned file with `--credentials-file`; the CLI
+  reads no shared default credential file and accepts no credential literal on
+  the command line. The file is regular, owned by the current user, and
+  readable and writable only by that user, and it contains only the complete
+  pair the current step needs:
 
-- `mo slack status --workspace-team <team-id>` shows the current Mohist App, Agent integrations, local
-  connection state, and one next action. Missing provisioning credentials point
-  to `setup`. An incomplete Agent installation points to the same
-  `install-agent` command.
+  ```json
+  {
+    "configurationAccessToken": "...",
+    "configurationRefreshToken": "...",
+    "botToken": "...",
+    "appLevelToken": "..."
+  }
+  ```
+
+  A present pair must be complete, an unknown field is rejected, and
+  credential values never appear in output, errors, JSON, or logs. A
+  Configuration pair already consumed by a completed step is never submitted
+  again by an ordinary rerun.
+- `mo slack status [--workspace-team <team-id>]` reads the Workspace
+  installation, the current result, and its one next action. Without a
+  selector it reports the only eligible Workspace; with several enrolled it
+  names the ambiguity and the selector instead of choosing the first record.
+  It exits 0 while it truthfully reports an incomplete installation, and it
+  exits 1 when the projection reports a definite failure, such as a Mohist App
+  Bot or App-level token that does not verify against the selected Workspace.
 - `mo slack message send --workspace <workspace-id> --conversation <conversation-id> --reply-to <thread-root-ts> --connection <connection-id> --session <session-id> --triggering-message <message-id> --dispatch-ref <reply-anchor-ref> [--text <body>] [--image <url> | --file <path>]`
   lets an Agent speak in Slack through an anchored reply. The seven reply-anchor
   options are required for Connection Agent replies; the CLI refuses an
@@ -613,9 +627,28 @@ Mohist App.
   at most 10 MB. The options are mutually exclusive. `--text -` reads the body
   from stdin and preserves line breaks. `--text` may be omitted when an image is
   attached. Manager-mode invocation uses the dedicated Manager reply contract.
-- `mo slack claim-owner <id>` generates and displays a setup claim, expiration,
-  and Slack direct-message step only after identity verification. A second call
-  invalidates the old claim immediately.
+- `mo slack thread view --session <session> [--project <project>] [--limit <1-100>] [--continuation <token>] [--json thread,messages,continuation]`
+  reads one page of the Slack channel thread already bound to that Session, so
+  an Agent can read earlier discussion that was not in its own context. The
+  result is one object with `thread` (the resolved Workspace team, Connection,
+  channel, and root message), `messages` in source order with author identity,
+  the exact message timestamp, text, and source-provided edit, deletion, and
+  unread-content facts, and a nullable `continuation`. `--limit` defaults to 15
+  and accepts 1 to 100; Slack may return fewer messages and Mohist never
+  fetches another page to fill a short one. A non-null `continuation` means the
+  discussion continues: pass it to the next call to read forward. It is opaque
+  and bound to the resolved Project, Session, Connection, channel, and thread,
+  so a token from another Session is rejected before Slack is contacted. The
+  command reads at most one Slack thread; it never lists channels or reads a DM.
+  A missing `--session` or a `--limit` outside 1 to 100 is a LOCAL ERROR
+  (exit 2) and no request is sent.
+- `mo slack claim-owner <id>` generates the Owner claim code once installation
+  identity is verified, and displays it once with its expiry and the exact Bot
+  DM destination. Generating is the only action that issues a code, and a
+  second call explicitly regenerates and immediately invalidates the
+  outstanding code. The code is a single-use secret that appears only in this
+  authorized claim response: `status`, `view`, `list`, and `diagnostics` neither
+  issue nor invalidate a code and never display one.
 - `mo slack view <id>` always returns setup progress, status, and one next
   action. The command process may exit; installation and claim do not depend on
   it remaining alive.
@@ -633,11 +666,11 @@ Mohist App.
   facts. `permanent-delete --yes` permanently deletes the Agent App when no
   active binding exists. The last two operations do not delete the Agent,
   AgentJob, or AgentSession.
-- When the result of an external App write is unknown, `reconcile-create` or
-  `reconcile-delete` checks the original operation without replaying it blindly.
-  Delivery diagnostics use `deliveries`, `resend-delivery`, and `clear-gap`.
-  These recovery commands do not replace `install-agent` as the normal
-  installation path.
+- When the result of an external App write is unknown, rerunning the guide
+  (`install-agent` or `setup`) recovers it: a recorded App identity is
+  reconciled against the provider, and one without an identity is retried with a
+  fresh create. Delivery diagnostics use `deliveries`, `resend-delivery`, and
+  `clear-gap`.
 
 The integration owns only the external identity, permissions, and connection
 state. `agent edit` still changes Agent configuration. The normal path for
@@ -794,7 +827,8 @@ cannot start new work; the error identifies this command and the Project Setting
 - Outside a TTY, commands never prompt. Missing required input fails
   immediately with an executable hint.
 - `MOHIST_PROMPT_DISABLED=1` disables prompts in every environment so Agents,
-  scripts, and CI get deterministic behavior.
+  scripts, and CI get deterministic behavior. The conventional `CI` marker
+  disables prompts as well, because a CI run must never wait for a terminal.
 - Interactive use confirms permanent deletion and unrecoverable control
   actions. Automation explicitly confirms with `--yes` when leaf help declares
   it.

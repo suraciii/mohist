@@ -22,6 +22,12 @@ namespace Mohist.Server.AgentOps.Services;
 /// implementation.
 /// </summary>
 /// <remarks>
+/// Cost figures report recorded cost: the sum of the per-session amounts that
+/// were actually reported. A session without a reported amount stays unknown
+/// and is not a cost sample; an explicit zero is a known amount and counts as
+/// one cost sample. Tokens are an independent observation — a token-only
+/// session contributes tokens but no monetary figure.
+///
 /// Previously these methods (and their private helpers
 /// <c>ComputePreWindowSpendAsync</c>, <c>ComputeCumulativeCostPerShipAsync</c>,
 /// <c>LoadCompletedIssueCountsAsync</c>, <c>BuildFigure</c>,
@@ -82,13 +88,15 @@ public sealed class AgentUsageReporter : IScopedService
             if (bucketIndex < 0 || bucketIndex >= bucketCount) continue;
 
             var bucket = buckets[bucketIndex];
-            var costAmount = usage.CostAmount ?? 0d;
             bucket.InputTokens += usage.InputTokens ?? 0;
             bucket.OutputTokens += usage.OutputTokens ?? 0;
             bucket.TotalTokens += usage.TotalTokens ?? 0;
-            bucket.CostAmount += costAmount;
-            bucket.CostCurrency ??= usage.CostCurrency;
-            bucket.SampleCount++;
+            if (usage.CostAmount is { } costAmount)
+            {
+                bucket.CostAmount = (bucket.CostAmount ?? 0d) + costAmount;
+                bucket.CostCurrency ??= usage.CostCurrency;
+                bucket.CostSampleCount++;
+            }
         }
 
         var preWindow = await ComputePreWindowSpendAsync(projectId, rangeFrom, ct);
@@ -110,7 +118,7 @@ public sealed class AgentUsageReporter : IScopedService
         return ("day", days, 1);
     }
 
-    private sealed record PreWindowSpendResult(double Spend, int Samples, string? Currency);
+    private sealed record PreWindowSpendResult(double? Spend, int Samples, string? Currency);
 
     private async Task<PreWindowSpendResult> ComputePreWindowSpendAsync(string projectId, DateTime rangeFrom, CancellationToken ct)
     {
@@ -120,7 +128,7 @@ public sealed class AgentUsageReporter : IScopedService
             .OrderBy(s => s.CreatedAt)
             .ToListAsync(ct);
 
-        double spend = 0;
+        double? spend = null;
         int samples = 0;
         string? currency = null;
 
@@ -130,9 +138,9 @@ public sealed class AgentUsageReporter : IScopedService
             if (session is null) continue;
 
             var usage = AgentSessionJsonHelper.Usage(session);
-            if (!HasUsage(usage)) continue;
+            if (usage.CostAmount is not { } costAmount) continue;
 
-            spend += usage.CostAmount ?? 0d;
+            spend = (spend ?? 0d) + costAmount;
             samples++;
             currency ??= usage.CostCurrency;
         }
@@ -143,7 +151,7 @@ public sealed class AgentUsageReporter : IScopedService
     private async Task<IReadOnlyList<CumulativeCostPerShipPointDto>> ComputeCumulativeCostPerShipAsync(
         string projectId,
         DateTime rangeFrom,
-        double preWindowSpend,
+        double? preWindowSpend,
         int preWindowSamples,
         string? currency,
         UsageBucketData[] buckets,
@@ -165,7 +173,7 @@ public sealed class AgentUsageReporter : IScopedService
 
         var preWindowShipped = shippedDates.Count(d => d < rangeFrom);
         var result = new List<CumulativeCostPerShipPointDto>(buckets.Length);
-        double cumulativeCost = preWindowSpend;
+        double? cumulativeCost = preWindowSpend;
         int cumulativeSamples = preWindowSamples;
         var cumulativeShipped = preWindowShipped;
         string? resolvedCurrency = currency;
@@ -175,15 +183,20 @@ public sealed class AgentUsageReporter : IScopedService
             var dayStart = rangeFrom.AddDays((long)i * bucketSizeDays);
             var dayEnd = rangeFrom.AddDays((long)(i + 1) * bucketSizeDays);
 
-            cumulativeCost += buckets[i].CostAmount;
-            cumulativeSamples += buckets[i].SampleCount;
-            resolvedCurrency ??= buckets[i].CostCurrency;
+            if (buckets[i].CostAmount is { } bucketCost)
+            {
+                cumulativeCost = (cumulativeCost ?? 0d) + bucketCost;
+                resolvedCurrency ??= buckets[i].CostCurrency;
+            }
+            cumulativeSamples += buckets[i].CostSampleCount;
 
             var dayShipped = shippedDates.Count(d => d >= dayStart && d < dayEnd);
             cumulativeShipped += dayShipped;
 
-            double? costForDay = cumulativeSamples > 0 || cumulativeShipped > 0 ? cumulativeCost : null;
-            double? costPerShip = cumulativeShipped > 0
+            // Recorded cost stays unknown until the first observed amount; a
+            // later bucket without new amounts keeps the last known total.
+            double? costForDay = cumulativeSamples > 0 ? cumulativeCost : null;
+            double? costPerShip = cumulativeSamples > 0 && cumulativeShipped > 0
                 ? cumulativeCost / cumulativeShipped
                 : null;
 
@@ -219,9 +232,7 @@ public sealed class AgentUsageReporter : IScopedService
         foreach (var record in allSessions)
         {
             var usage = AgentSessionJsonHelper.Usage(record.Session);
-            if (!HasUsage(usage)) continue;
-
-            var costAmount = usage.CostAmount ?? 0d;
+            if (usage.CostAmount is not { } costAmount) continue;
 
             totalCost += costAmount;
             totalSamples++;
@@ -250,13 +261,15 @@ public sealed class AgentUsageReporter : IScopedService
     /// length, immediately preceding. Both advance with the current time.
     /// Spend is the sum of per-session
     /// <see cref="AgentUsageSummary.CostAmount"/> over sessions whose
-    /// creation time falls in the window; per-issue cost is the window's
-    /// spend divided by the count of issues completed (reached
+    /// creation time falls in the window and that reported an amount; a
+    /// session without a reported amount stays unknown and is not a sample.
+    /// Per-issue cost is the window's spend divided by the count of issues
+    /// completed (reached
     /// <see cref="IssueStatus.Done"/>) within the window. Each metric's
     /// emptiness is evaluated independently per metric per window:
-    /// no sessions ⟹ empty spend; no completed issues ⟹ empty per-issue
-    /// cost. The two emptiness states share no fallback — a window with
-    /// spend but no completed issues returns a real spend and an empty
+    /// no reported amounts ⟹ empty spend; no completed issues ⟹ empty
+    /// per-issue cost. The two emptiness states share no fallback — a window
+    /// with spend but no completed issues returns a real spend and an empty
     /// per-issue cost, and vice-versa.
     /// </summary>
     public async Task<AgentCostWindowedData> GetCostWindowedAsync(string projectId, int? windowDays = null, CancellationToken ct = default)
@@ -284,10 +297,9 @@ public sealed class AgentUsageReporter : IScopedService
         foreach (var record in sessions)
         {
             var usage = AgentSessionJsonHelper.Usage(record.Session);
-            if (!HasUsage(usage)) continue;
+            if (usage.CostAmount is not { } costAmount) continue;
 
             var createdAt = record.Session.Status.CreatedAt;
-            var costAmount = usage.CostAmount ?? 0d;
 
             if (createdAt >= currentFrom && createdAt < currentTo)
             {
@@ -387,9 +399,9 @@ public sealed class AgentUsageReporter : IScopedService
         public long InputTokens;
         public long OutputTokens;
         public long TotalTokens;
-        public double CostAmount;
+        public double? CostAmount;
         public string? CostCurrency;
-        public int SampleCount;
+        public int CostSampleCount;
 
         public UsageBucketData(DateTime bucketStart, DateTime bucketEnd)
         {

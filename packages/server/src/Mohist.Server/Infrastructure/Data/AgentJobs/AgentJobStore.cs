@@ -649,7 +649,7 @@ public class AgentJobStore : IAgentJobStore
         LaunchVisibility = record.LaunchVisibility,
     };
 
-    private static AgentJobLedgerRecord ToRecord(AgentJobRow row) => new(
+    internal static AgentJobLedgerRecord ToRecord(AgentJobRow row) => new(
         row.JobKey,
         row.State,
         row.Revision,
@@ -745,13 +745,16 @@ public class AgentJobStore : IAgentJobStore
         existing.LaunchVisibility = record.LaunchVisibility;
     }
 
-    private void StageDirectApiProjection(AgentJobRow row)
+    private void StageDirectApiProjection(AgentJobRow row) =>
+        StageDirectApiProjection(row, _timeProvider.GetUtcNow());
+
+    internal static void StageDirectApiProjection(AgentJobRow row, DateTimeOffset observedAt)
     {
         var snapshot = DirectApiAgentJobProjection.Create(
             row.JobKey,
             row.State,
             row.Revision,
-            _timeProvider.GetUtcNow());
+            observedAt);
         row.DirectApiProjectionJson = snapshot is null ? null : JSON.Serialize(snapshot);
         row.DirectApiProjectionRevision = snapshot is null ? null : row.Revision;
     }

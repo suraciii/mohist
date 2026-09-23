@@ -314,7 +314,7 @@ public class WorkspaceSpecs
         Assert.Equal(confirmedAt, repeated.Directory?.ConfirmedRemovalAt);
 
         using var rematerialized = await _client.PostAsJsonAsync(
-            $"/api/runner/workspace-spec-runner/workspaces/{project.Id}/issue-{issue.Number}/materialized",
+            $"/api/runner/workspace-spec-runner/workspaces/{project.Id}/issue-{issue.Number}/provisioned",
             new { path = expectedPath, created = true });
         Assert.True(rematerialized.IsSuccessStatusCode);
         var current = await _client.GetDataAsync<StatusDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workspace-status");
@@ -474,7 +474,7 @@ public class WorkspaceSpecs
         var workspaceName = $"issue-{issueNumber}";
         await _fixture.Grains
             .GetGrain<IWorkspaceGrain>(GrainKey.Workspace(project.Id, workspaceName))
-            .EnsureMaterializedOnAsync("workspace-spec-runner", NamedWorkspaceHomePath(workspaceName), DateTimeOffset.UnixEpoch);
+            .EnsureProvisionedOnAsync("workspace-spec-runner", NamedWorkspaceHomePath(workspaceName), DateTimeOffset.UnixEpoch);
         return workflowRunId;
     }
 

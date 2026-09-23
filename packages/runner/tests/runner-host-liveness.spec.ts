@@ -22,7 +22,6 @@ type LivenessMocks = Record<
   | 'uploadTaskLog'
   | 'fetchConfig'
   | 'listAgentSessionsForReconcile'
-  | 'reconcileMissingAgentSession'
   | 'reconcileAgentSessionRuntimeEvents'
   | 'startControl'
   | 'stopControl'
@@ -75,7 +74,6 @@ const report = scopedMock('report')
 const uploadTaskLog = scopedMock('uploadTaskLog')
 const fetchConfig = scopedMock('fetchConfig')
 const listAgentSessionsForReconcile = scopedMock('listAgentSessionsForReconcile')
-const reconcileMissingAgentSession = scopedMock('reconcileMissingAgentSession')
 const reconcileAgentSessionRuntimeEvents = scopedMock('reconcileAgentSessionRuntimeEvents')
 const startControl = scopedMock('startControl')
 const stopControl = scopedMock('stopControl')
@@ -94,7 +92,6 @@ vi.mock('../src/server/connection.js', () => ({
     uploadTaskLog = uploadTaskLog
     fetchConfig = fetchConfig
     listAgentSessionsForReconcile = listAgentSessionsForReconcile
-    reconcileMissingAgentSession = reconcileMissingAgentSession
     reconcileAgentSessionRuntimeEvents = reconcileAgentSessionRuntimeEvents
   },
 }))
@@ -152,7 +149,6 @@ function createLivenessMocks(): LivenessMocks {
     uploadTaskLog: vi.fn(async () => ({ status: 'changed', accepted: 0, truncated: false })),
     fetchConfig: vi.fn(async () => null),
     listAgentSessionsForReconcile: vi.fn(async () => []),
-    reconcileMissingAgentSession: vi.fn(async () => undefined),
     reconcileAgentSessionRuntimeEvents: vi.fn(async () => []),
     startControl: vi.fn(async () => undefined),
     stopControl: vi.fn(async () => undefined),

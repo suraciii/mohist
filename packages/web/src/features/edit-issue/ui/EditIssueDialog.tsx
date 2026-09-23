@@ -1,17 +1,20 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/shared/ui/components/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/components/dialog'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
-import { AttachmentComposer } from '@/shared/ui'
-import { extractAttachmentIds, issueDetailKeys, issueListKeys, LabelEditor, partitionIssueBody, recombineIssueBody, updateIssue } from '../../../entities/issue'
+import { AttachmentComposer } from '@/shared/ui/attachment-composer'
+import {
+  extractAttachmentIds,
+  issueDetailKeys,
+  issueListKeys,
+  LabelEditor,
+  partitionIssueBody,
+  recombineIssueBody,
+  updateIssue,
+} from '../../../entities/issue'
 import type { Issue, LabelMap } from '../../../entities/issue'
-import { getPriorityStyle } from '../../../shared/lib/label-colors'
+import { getPriorityStyle } from '../../../entities/issue'
 
 const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4']
 
@@ -22,12 +25,7 @@ interface Props {
   issueUpdater?: typeof updateIssue
 }
 
-export function EditIssueDialog({
-  open,
-  onClose,
-  issue,
-  issueUpdater = updateIssue,
-}: Props) {
+export function EditIssueDialog({ open, onClose, issue, issueUpdater = updateIssue }: Props) {
   const bodyPartition = useMemo(() => partitionIssueBody(issue.body), [issue.body])
   const [title, setTitle] = useState(issue.title)
   const [description, setDescription] = useState(bodyPartition.description)
@@ -49,14 +47,18 @@ export function EditIssueDialog({
   const mutation = useMutation({
     mutationFn: () => {
       const body = recombineIssueBody(bodyPartition, description)
-      return issueUpdater(issue.number, {
-        title,
-        body: body || undefined,
-        attachmentIds: extractAttachmentIds(body),
-        labels,
-        priority,
-        isDraft,
-      }, issue.projectId)
+      return issueUpdater(
+        issue.number,
+        {
+          title,
+          body: body || undefined,
+          attachmentIds: extractAttachmentIds(body),
+          labels,
+          priority,
+          isDraft,
+        },
+        issue.projectId,
+      )
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: issueListKeys.project(issue.projectId) })
@@ -75,12 +77,7 @@ export function EditIssueDialog({
         <div className="space-y-3">
           <div>
             <label className="block text-xs font-medium text-foreground mb-1">Title</label>
-            <Input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              autoFocus
-            />
+            <Input type="text" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
           </div>
 
           <div>
@@ -117,11 +114,7 @@ export function EditIssueDialog({
                     variant="ghost"
                     size="xs"
                     onClick={() => setPriority(p)}
-                    className={`rounded-full ${
-                      priority === p
-                        ? 'ring-1 ring-offset-1'
-                        : 'hover:opacity-80'
-                    }`}
+                    className={`rounded-full ${priority === p ? 'ring-1 ring-offset-1' : 'hover:opacity-80'}`}
                     style={{
                       backgroundColor: style.bg,
                       color: style.text,
@@ -168,22 +161,14 @@ export function EditIssueDialog({
           </div>
 
           {mutation.error && (
-            <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-              {mutation.error.message}
-            </div>
+            <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">{mutation.error.message}</div>
           )}
 
           <div className="flex justify-end gap-2 pt-1">
-            <Button
-              variant="outline"
-              onClick={onClose}
-            >
+            <Button variant="outline" onClick={onClose}>
               Cancel
             </Button>
-            <Button
-              onClick={() => mutation.mutate()}
-              disabled={!title.trim() || mutation.isPending}
-            >
+            <Button onClick={() => mutation.mutate()} disabled={!title.trim() || mutation.isPending}>
               {mutation.isPending ? 'Saving...' : 'Save'}
             </Button>
           </div>

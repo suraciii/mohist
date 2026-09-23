@@ -32,14 +32,17 @@ public sealed partial class SlackManagerApplicationService
         return new(ProjectConnection(connection), await GetAsync(projectId, connectionId, ct));
     }
 
-    public async Task<SlackManagerCreateResult> CreateOrMountAsync(
+    /// <summary>
+    /// Resolves the Agent a Mohist App conversation request names, creating it
+    /// from a name and its daily responsibility when it does not exist yet.
+    /// Installing it into Slack is the shared managed operation, so nothing here
+    /// stages a Connection, an App, or an Owner.
+    /// </summary>
+    public async Task<SlackManagerAgentResolution> CreateAgentAsync(
         string projectId,
         string? agentId,
         string? agentName,
         string? responsibility,
-        string workspaceTeamId,
-        string ownerSlackUserId,
-        string? accessPolicy = null,
         CancellationToken ct = default)
     {
         if (!string.IsNullOrWhiteSpace(agentId) == !string.IsNullOrWhiteSpace(agentName))
@@ -66,7 +69,7 @@ public sealed partial class SlackManagerApplicationService
                 var trimmedName = agentName.Trim();
                 var trimmedResponsibility = responsibility.Trim();
                 var newAgentId = $"agent_{AgentLaunchCoordinatorCodec.StableToken(
-                    $"manager-create\n{projectId}\n{workspaceTeamId}\n{trimmedName}")}";
+                    $"manager-create\n{projectId}\n{trimmedName}")}";
                 var grain = _grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, newAgentId));
                 try
                 {
@@ -95,13 +98,7 @@ public sealed partial class SlackManagerApplicationService
         if (agent is null)
             throw new SlackManagerValidationException("The Agent was not found.", "agent_not_found");
 
-        var mounted = await CreateAsync(new SlackManagerCreateRequest(
-            projectId,
-            agent.Id,
-            workspaceTeamId,
-            accessPolicy ?? AccessPolicyKind.OwnerOnly,
-            ownerSlackUserId), ct);
-        return created ? mounted with { Created = true } : mounted;
+        return new SlackManagerAgentResolution(agent, created);
     }
 
     public async Task<AgentConnection?> SetDesiredStateAsync(
@@ -151,19 +148,14 @@ public sealed partial class SlackManagerApplicationService
             await _accessPolicies.ListMembersAsync(projectId, connectionId, ct));
     }
 
+    /// <summary>
+    /// Hands the caller the explicit host command that issues the Owner claim
+    /// code and the exact Bot DM destination. No code is generated here: the
+    /// host command's own response is the single authorized place a code
+    /// appears, so a conversation read never issues, invalidates, or displays
+    /// one, and an outstanding code stays claimable.
+    /// </summary>
     public async Task<SlackManagerOwnerWorkflowResult?> IssueOwnerWorkflowAsync(
-        string projectId,
-        string connectionId,
-        string kind,
-        CancellationToken ct = default)
-    {
-        var result = await IssueOwnerWorkflowServiceAsync(projectId, connectionId, kind, ct);
-        return result is null
-            ? null
-            : new(result.ConnectionId, result.BotName, result.ExpiresAt, result.NextAction);
-    }
-
-    public async Task<SlackManagerOwnerWorkflowServiceResult?> IssueOwnerWorkflowServiceAsync(
         string projectId,
         string connectionId,
         string kind,
@@ -171,15 +163,28 @@ public sealed partial class SlackManagerApplicationService
     {
         var connection = await _connections.GetAsync(projectId, connectionId, ct);
         if (connection is null) return null;
-        var claim = await _ownerClaims.GenerateAsync(projectId, connectionId, kind, ct: ct);
+        var command = string.Equals(kind, SlackOwnerClaimCodeKinds.Transfer, StringComparison.Ordinal)
+            ? "transfer-owner"
+            : "claim-owner";
+        var botName = string.IsNullOrWhiteSpace(connection.BotName)
+            ? connection.VerifiedBotName
+            : connection.BotName;
         return new(
             connection.Id,
-            connection.BotName,
-            claim.Value,
-            claim.ExpiresAt,
-            kind == SlackOwnerClaimCodeKinds.Transfer ? "transfer-owner" : "claim-owner");
+            $"mo slack {command} {connection.Id} --project {projectId}",
+            string.IsNullOrWhiteSpace(botName)
+                ? "Direct message with this Connection's Slack Bot"
+                : $"Direct message with the {botName} Bot");
     }
 }
+
+/// <summary>
+/// The Agent a conversation request resolved. <see cref="Created"/> says whether
+/// this request created it; installation is a separate managed operation.
+/// </summary>
+public sealed record SlackManagerAgentResolution(
+    AgentInfo Agent,
+    bool Created);
 
 public sealed record SlackManagerConnectionInspection(
     SlackManagerConnectionProjection Connection,
@@ -192,13 +197,5 @@ public sealed record SlackManagerAccessPolicyResult(
 
 public sealed record SlackManagerOwnerWorkflowResult(
     string ConnectionId,
-    string BotName,
-    DateTimeOffset ExpiresAt,
-    string NextAction);
-
-public sealed record SlackManagerOwnerWorkflowServiceResult(
-    string ConnectionId,
-    string BotName,
-    string Code,
-    DateTimeOffset ExpiresAt,
-    string NextAction);
+    string HostCommand,
+    string DmDestination);

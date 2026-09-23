@@ -93,13 +93,7 @@ public class RuntimeEntrySpecs
     {
         var projectName = $"runtime-status-{Guid.NewGuid():N}";
         var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
-
-        // Capacity is summed across every online runner in the global registry,
-        // which is shared across the integration collection. Drain it so the
-        // active/max assertions below reflect only this test's runner.
-        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-        foreach (var staleId in await registry.ListRunnerIdsAsync())
-            await registry.UnregisterAsync(staleId);
+        var baseline = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
 
         try
         {
@@ -115,12 +109,17 @@ public class RuntimeEntrySpecs
             Assert.False(status.Running);
             Assert.False(status.RunnerAvailable);
             Assert.False(status.EmbeddedRunnerEnabled);
-            Assert.Contains("credential-missing", status.RunnerMessage);
-            Assert.Equal(0, status.Capacity.Active);
-            Assert.Equal(2, status.Capacity.Max);
+            Assert.StartsWith("Runner admission is blocked", status.RunnerMessage);
+            Assert.Equal(baseline.Capacity.Active, status.Capacity.Active);
+            Assert.Equal(baseline.Capacity.Max + 2, status.Capacity.Max);
             var runner = Assert.Single(status.Runners, r => r.Id == "runtime-test-runner");
             Assert.Equal(0, runner.Active);
             Assert.Equal(2, runner.Max);
+
+            var detail = await GetRunnerDetailAsync("runtime-test-runner");
+            Assert.Equal(0, detail.GetProperty("capacity").GetProperty("used").GetInt32());
+            Assert.Equal(2, detail.GetProperty("capacity").GetProperty("total").GetInt32());
+            AssertBlockedFor(detail, "credential-missing");
         }
         finally
         {
@@ -143,8 +142,9 @@ public class RuntimeEntrySpecs
             var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
 
             Assert.False(status.RunnerAvailable);
-            Assert.Contains("credential-missing", status.RunnerMessage);
+            Assert.StartsWith("Runner admission is blocked", status.RunnerMessage);
             Assert.Contains(status.Runners, r => r.Id == runnerId);
+            AssertBlockedFor(await GetRunnerDetailAsync(runnerId), "credential-missing");
         }
         finally
         {
@@ -232,8 +232,9 @@ public class RuntimeEntrySpecs
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
             Assert.False(status.RunnerAvailable);
-            Assert.Contains("credential-missing", status.RunnerMessage);
+            Assert.StartsWith("Runner admission is blocked", status.RunnerMessage);
             Assert.Contains(status.Runners, r => r.Id == runnerId && r.Max == 1);
+            AssertBlockedFor(await GetRunnerDetailAsync(runnerId), "credential-missing");
         }
         finally
         {
@@ -272,10 +273,7 @@ public class RuntimeEntrySpecs
         // count, not the (smaller) AgentSession count.
         var projectName = $"runtime-divergence-{Guid.NewGuid():N}";
         var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
-        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-        foreach (var staleId in await registry.ListRunnerIdsAsync())
-            await registry.UnregisterAsync(staleId);
-
+        var baseline = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
         var runnerId = $"runtime-divergence-{Guid.NewGuid():N}";
 
         try
@@ -316,17 +314,21 @@ public class RuntimeEntrySpecs
 
             var httpStatus = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
 
-            // capacity.active reflects the runner active-works count (2
-            // distinct workflow owners), NOT the AgentSession visibility count
-            // (no AgentSessions were persisted in this scenario).
-            Assert.Equal(2, httpStatus.Capacity.Active);
-            Assert.Equal(4, httpStatus.Capacity.Max);
+            // The aggregate is global, so this Runner contributes its exact
+            // owner-ledger facts on top of any already-online Runner population.
+            // Its active count still diverges from AgentSession visibility.
+            Assert.Equal(baseline.Capacity.Active + 2, httpStatus.Capacity.Active);
+            Assert.Equal(baseline.Capacity.Max + 4, httpStatus.Capacity.Max);
             Assert.True(httpStatus.ActiveAgents is null || httpStatus.ActiveAgents.Value.GetArrayLength() == 0);
             Assert.False(httpStatus.Running);
 
             var runnerView = Assert.Single(httpStatus.Runners, r => r.Id == runnerId);
             Assert.Equal(2, runnerView.Active);
             Assert.Equal(4, runnerView.Max);
+            var detail = await GetRunnerDetailAsync(runnerId);
+            Assert.Equal(2, detail.GetProperty("capacity").GetProperty("used").GetInt32());
+            Assert.Equal(4, detail.GetProperty("capacity").GetProperty("total").GetInt32());
+            Assert.Equal(2, detail.GetProperty("activeWorks").GetArrayLength());
         }
         finally
         {
@@ -401,6 +403,27 @@ public class RuntimeEntrySpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    private async Task<JsonElement> GetRunnerDetailAsync(string runnerId)
+    {
+        using var response = await _fixture.Client.GetAsync($"/api/runners/{runnerId}");
+        response.EnsureSuccessStatusCode();
+        var runner = (await response.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data")
+            .GetProperty("runner");
+        Assert.Equal(runnerId, runner.GetProperty("identity").GetProperty("id").GetString());
+        return runner;
+    }
+
+    private static void AssertBlockedFor(JsonElement runner, string reason)
+    {
+        Assert.Equal("blocked", runner.GetProperty("admission").GetProperty("state").GetString());
+        Assert.Contains(
+            reason,
+            runner.GetProperty("admission").GetProperty("reasonCodes")
+                .EnumerateArray()
+                .Select(item => item.GetString()));
+    }
+
     private sealed record AgentStatusDto(bool Running, bool RunnerAvailable, bool EmbeddedRunnerEnabled, string? RunnerMessage, RunnerDto[] Runners, AgentCapacityDto Capacity, System.Text.Json.JsonElement? ActiveAgents = null);
     private sealed record AgentCapacityDto(int Active, int Max);
     private sealed record RunnerDto(string Id, string? Kind = null, int Active = 0, int Max = 0);
@@ -415,6 +438,7 @@ public class RuntimeEntrySpecs
             .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, projectId)
             .WithLabel(AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString())
             .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+            .WithLabel(GenericAgentSessionMetadata.AgentId, "workflow-agent")
             .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId)
             .WithLabel(AgentSessionQueryMetadataKeys.SessionName, workId);
         var session = AgentSession.Create(

@@ -286,6 +286,13 @@ describe('AgentSessionComposerPage', () => {
     })
   })
 
+  it('offers Codex alongside OpenCode and Pi in the Runtime select', async () => {
+    renderPage()
+    await screen.findByTestId('execution-config-controls')
+    const runtimeSelect = screen.getByTestId('task-runtime') as HTMLSelectElement
+    expect(Array.from(runtimeSelect.options).map((option) => option.value)).toEqual(['opencode', 'pi', 'codex'])
+  })
+
   it('still sends an explicitly chosen catalog Model and Variant', async () => {
     server.use(
       http.get('*/api/projects/:projectId/opencode/models', () =>

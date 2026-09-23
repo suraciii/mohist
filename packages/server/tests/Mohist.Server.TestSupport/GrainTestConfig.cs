@@ -5,8 +5,11 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Infrastructure.Capacity;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
+using Mohist.Server.Infrastructure.Data.Auth;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -251,6 +254,11 @@ public static class GrainTestConfig
                 services.GetRequiredService<IGrainFactory>(),
                 services.GetRequiredService<IDbContextFactory<MohistDbContext>>()));
         siloBuilder.Services.AddRequiredInfrastructure();
+        siloBuilder.Services.AddScoped<CredentialStore>();
+        siloBuilder.Services.AddScoped<ICredentialStore>(services => services.GetRequiredService<CredentialStore>());
+        siloBuilder.Services.AddScoped<IRunnerCredentialStatusReader>(services => services.GetRequiredService<CredentialStore>());
+        siloBuilder.Services.AddSingleton<IRunnerAuthorityFence>(NoopRunnerAuthorityFence.Instance);
+        siloBuilder.Services.AddSingleton<RunnerAdministrativeRemovalObserver>();
         siloBuilder.Services.AddSingleton<IActionCatalogSource>(NullActionCatalogSource.Instance);
         siloBuilder.Services.AddScoped<IWorkflowProfileProvider, WorkflowProfileProvider>();
         siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
@@ -261,6 +269,7 @@ public static class GrainTestConfig
         siloBuilder.Services.AddScoped<IWorkspaceStore, WorkspaceStore>();
         siloBuilder.Services.AddScoped<WorkspaceQuerier>();
         siloBuilder.Services.AddScoped<IAgentJobStore, AgentJobStore>();
+        siloBuilder.Services.AddScoped<IAgentCapacityStore, AgentCapacityStore>();
         siloBuilder.Services.AddScoped<SlackOutboxStore>();
         siloBuilder.Services.AddScoped<ISlackConnectionHealthBackpressurer, NoopSlackConnectionHealthBackpressurer>();
         siloBuilder.Services.AddScoped<Mohist.Server.Agent.Services.AgentQuerier>();
@@ -350,6 +359,16 @@ public static class GrainTestConfig
             opts.DispatchBackoffCap = TimeSpan.FromMilliseconds(200);
             opts.DispatchRetryBound = TimeSpan.FromSeconds(5);
         });
+    }
+
+    private sealed class NoopRunnerAuthorityFence : IRunnerAuthorityFence
+    {
+        public static NoopRunnerAuthorityFence Instance { get; } = new();
+
+        public Task<RunnerAuthorityFenceResult> FenceAsync(
+            string runnerId,
+            string? processGeneration,
+            CancellationToken ct = default) => Task.FromResult(RunnerAuthorityFenceResult.Empty);
     }
 
     private sealed class NoopTranscriptEventPublisher : ITranscriptEventPublisher

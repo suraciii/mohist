@@ -15,6 +15,7 @@ using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Slack;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Domain;
@@ -384,7 +385,8 @@ public sealed partial class SlackMultiAgentIngressSpecs
         {
             var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
             var row = await db.Agents.SingleAsync(agent =>
-                agent.ProjectId == selected.ProjectId && agent.Id == selected.AgentId);
+                agent.ProjectId == selected.ProjectId
+                && agent.Id == GrainKey.Agent(selected.ProjectId, selected.AgentId));
             var agent = AgentStore.Deserialize(row.State)!;
             // An explicitly malformed Model reference is a structural
             // configuration gap; an unset Model is not.

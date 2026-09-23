@@ -74,18 +74,21 @@ type managedSource struct {
 	BuildRoot      string `json:"buildRoot"`
 }
 
+// managedRuntimeIdentity is the canonical RuntimeIdentity v1 contract carried by
+// every managed release manifest. All nine identity keys are always emitted, so
+// the manifest key set is stable. Version is documented display metadata, not
+// identity; it never participates in identity comparison.
 type managedRuntimeIdentity struct {
-	Component            string `json:"component"`
-	Version              string `json:"version"`
-	SourceRevision       string `json:"sourceRevision"`
-	TreeHash             string `json:"treeHash"`
-	ArtifactDigest       string `json:"artifactDigest"`
-	ReleaseID            string `json:"releaseId"`
-	Generation           int64  `json:"generation"`
-	RunnerID             string `json:"runnerId,omitempty"`
-	ConnectionGeneration string `json:"connectionGeneration,omitempty"`
-	BuildGitHash         string `json:"buildGitHash,omitempty"`
-	IsComplete           bool   `json:"isComplete"`
+	SchemaVersion  int    `json:"schemaVersion"`
+	Component      string `json:"component"`
+	Version        string `json:"version"`
+	SourceRevision string `json:"sourceRevision"`
+	BuildGitHash   string `json:"buildGitHash"`
+	TreeHash       string `json:"treeHash"`
+	ArtifactDigest string `json:"artifactDigest"`
+	ReleaseID      string `json:"releaseId"`
+	Generation     int64  `json:"generation"`
+	RunnerID       string `json:"runnerId"`
 }
 
 type managedRuntimeTarget struct {

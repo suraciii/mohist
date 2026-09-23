@@ -194,6 +194,52 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Established_dm_followup_is_rejected_with_a_visible_reply_when_the_launch_never_bound_a_runtime_session()
+    {
+        var connection = await CreateConnectionAsync();
+        var runnerId = $"slack-dm-unbound-runner-{Guid.NewGuid():N}";
+        await RegisterRunnerAsync(connection.ProjectId, runnerId);
+
+        var initial = await PostIngressAsync(connection, "D-DM-UNBOUND", "1710000000.001700", "initial task");
+        var sessionId = initial.GetProperty("sessionId").GetString()!;
+        var jobKey = initial.GetProperty("jobKey").GetString()!;
+        var claim = await AcceptLaunchAsync(jobKey, runnerId, connection.ProjectId);
+
+        // The Runner dies before attaching a physical runtime session, so the
+        // launch turn goes terminal with no binding — the black hole this
+        // contract closes. Follow-ups must not park in an invisible queue.
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
+        await job.ReportResultAsync(
+            runnerId,
+            claim.WorkId,
+            new WorkResult("failed", "The bound runtime is disabled on the Runner."));
+        await job.WaitForTerminalAsync();
+
+        var followup = await PostIngressAsync(connection, "D-DM-UNBOUND", "1710000000.001800", "ordinary follow-up");
+
+        Assert.Equal("runtime_session_missing", followup.GetProperty("kind").GetString());
+        Assert.True(followup.GetProperty("followup").GetBoolean());
+        Assert.Equal("server", followup.GetProperty("responseOwner").GetString());
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var expectedDispatchRef = $"slack-followup-rejected:{connection.WorkspaceTeamId}/D-DM-UNBOUND/1710000000.001800";
+        var rejection = await db.SlackOutboxRows.SingleAsync(row =>
+            row.ConnectionId == connection.Id
+            && row.ConversationId == "D-DM-UNBOUND"
+            && row.DispatchRef == expectedDispatchRef);
+        Assert.Equal(SlackOutboxKinds.UserAction, rejection.Kind);
+        Assert.Contains("cannot continue automatically", rejection.PayloadJson, StringComparison.Ordinal);
+
+        var inbox = await db.SlackProviderInboxRows.SingleAsync(row =>
+            row.ConnectionId == connection.Id
+            && row.SlackMessageIdentity == $"{connection.WorkspaceTeamId}/D-DM-UNBOUND/1710000000.001800");
+        Assert.NotNull(inbox.DispatchedAt);
+        Assert.Equal(sessionId, await scope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>()
+            .GetCurrentSessionIdAsync(connection.ProjectId, connection.Id, "D-DM-UNBOUND", default));
+    }
+
+    [Fact]
     public async Task Empty_new_task_is_rejected_without_accepting_or_creating_work()
     {
         var connection = await CreateConnectionAsync();
@@ -410,7 +456,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         var row = await db.Agents.SingleAsync(agent => agent.ProjectId == connection.ProjectId);
         var agent = new Mohist.Server.Agent.Domain.Agent
         {
-            Id = row.Id,
+            Id = connection.AgentId,
             ProjectId = connection.ProjectId,
             Name = "Mohist Agent",
             Status = AgentStatus.Active,

@@ -13,9 +13,10 @@ namespace Mohist.Server.Tests.Agent.Services;
 /// online (or the runner pool is full, or the agent's own concurrency
 /// limit has been reached) must read as Availability, not as a
 /// configuration gap. Counts surfaced through the summary
-/// (<c>activeRuns</c>, <c>queuedCount</c>) come from the concurrency grain
-/// and the pending-jobs table respectively, while runner capacity is
-/// fetched exactly once across the whole list.
+/// (<c>activeRuns</c>, <c>queuedCount</c>) come from one batched derived
+/// owner read, and the live concurrency limit comes from that same
+/// snapshot rather than the Agent definition the list was hydrated
+/// from; runner capacity is fetched exactly once across the whole list.
 /// </summary>
 [Trait("level", "L0")]
 public sealed class AgentAvailabilityListSummaryServiceTests
@@ -43,7 +44,8 @@ public sealed class AgentAvailabilityListSummaryServiceTests
             activeRuns: 0,
             queuedCount: 0,
             hasOnlineRunner: false,
-            ObservedAt);
+            ObservedAt,
+            maxConcurrentRuns: 2);
 
         Assert.False(entry.CanStartNow);
         Assert.Equal(AgentAvailabilityWaitReasons.NoOnlineRunner, entry.WaitingReason);
@@ -62,7 +64,8 @@ public sealed class AgentAvailabilityListSummaryServiceTests
             activeRuns: 1,
             queuedCount: 0,
             hasOnlineRunner: true,
-            ObservedAt);
+            ObservedAt,
+            maxConcurrentRuns: 2);
 
         Assert.True(entry.CanStartNow);
         Assert.Null(entry.WaitingReason);
@@ -80,7 +83,8 @@ public sealed class AgentAvailabilityListSummaryServiceTests
             activeRuns: 0,
             queuedCount: 2,
             hasOnlineRunner: true,
-            ObservedAt);
+            ObservedAt,
+            maxConcurrentRuns: 2);
 
         Assert.False(entry.CanStartNow);
         Assert.Equal(AgentAvailabilityWaitReasons.CapacityFull, entry.WaitingReason);
@@ -97,7 +101,8 @@ public sealed class AgentAvailabilityListSummaryServiceTests
             activeRuns: 2,
             queuedCount: 1,
             hasOnlineRunner: true,
-            ObservedAt);
+            ObservedAt,
+            maxConcurrentRuns: 2);
 
         Assert.False(entry.CanStartNow);
         Assert.Equal(AgentAvailabilityWaitReasons.ConcurrencyLimit, entry.WaitingReason);
@@ -108,19 +113,58 @@ public sealed class AgentAvailabilityListSummaryServiceTests
     [Fact]
     public void BuildListEntry_NoMaxConcurrentRuns_SkipsConcurrencyLimitCheck()
     {
-        var unlimited = ReadyAgent with { MaxConcurrentRuns = null };
-
         var entry = AgentAvailabilityService.BuildListEntry(
-            unlimited,
+            ReadyAgent,
             capacity: new RunnerCapacityView(0, 4),
             activeRuns: 99,
             queuedCount: 5,
             hasOnlineRunner: true,
-            ObservedAt);
+            ObservedAt,
+            maxConcurrentRuns: null);
 
         Assert.True(entry.CanStartNow);
         Assert.Null(entry.MaxConcurrentRuns);
         Assert.Equal(99, entry.ActiveRuns);
         Assert.Equal(5, entry.QueuedCount);
+    }
+
+    [Fact]
+    public void BuildListEntry_LiveLimitFromSnapshotOverridesStaleDefinitionLimit()
+    {
+        // The definition snapshot the list was hydrated from says 4; the
+        // derived read says the Agent's current limit is 1 and one run holds
+        // it. The live limit decides, not the stale definition.
+        var entry = AgentAvailabilityService.BuildListEntry(
+            ReadyAgent,
+            capacity: new RunnerCapacityView(0, 4),
+            activeRuns: 1,
+            queuedCount: 1,
+            hasOnlineRunner: true,
+            ObservedAt,
+            maxConcurrentRuns: 1);
+
+        Assert.False(entry.CanStartNow);
+        Assert.Equal(AgentAvailabilityWaitReasons.ConcurrencyLimit, entry.WaitingReason);
+        Assert.Equal(1, entry.MaxConcurrentRuns);
+    }
+
+    [Fact]
+    public void BuildListEntry_IncompleteOwnerEvidence_NullsCountsAndReportsDispatchPending()
+    {
+        var entry = AgentAvailabilityService.BuildListEntry(
+            ReadyAgent,
+            capacity: new RunnerCapacityView(1, 4),
+            activeRuns: null,
+            queuedCount: null,
+            hasOnlineRunner: true,
+            ObservedAt,
+            maxConcurrentRuns: null,
+            capacityIncomplete: true);
+
+        Assert.False(entry.CanStartNow);
+        Assert.Equal(AgentAvailabilityWaitReasons.DispatchPending, entry.WaitingReason);
+        Assert.True(entry.CapacityIncomplete);
+        Assert.Null(entry.ActiveRuns);
+        Assert.Null(entry.QueuedCount);
     }
 }

@@ -191,6 +191,58 @@ describe('ServerConnection.uploadArtifact', () => {
     expect(url).toContain('/api/agent-jobs/agent-job-1/work/agent-work-1/artifact-uploads')
     expect(url).not.toContain('/api/workflow-runs//')
   })
+
+  it('usesDirectoryEndpointWhenUploadKindIsDirectory', async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        status: 200,
+        body: JSON.stringify({
+          data: {
+            uploadId: 'artup_dir',
+            workflowRunId: 'wf-1',
+            workId: 'work-1',
+            path: 'specs',
+            size: 6,
+          },
+        }),
+      }),
+    )
+    const connection = new ServerConnection(options())
+
+    await connection.uploadArtifact(
+      'wf-1',
+      'work-1',
+      { path: 'specs', kind: 'directory', size: 6, content: new TextEncoder().encode('{}') },
+      new AbortController().signal,
+    )
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/api/workflow-runs/wf-1/work/work-1/artifact-directory-uploads')
+    expect(url).not.toContain('/api/workflow-runs/wf-1/work/work-1/artifact-uploads')
+  })
+
+  it('usesAgentJobDirectoryEndpointWhenOwnerKindAndKindAreDirectory', async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        status: 200,
+        body: JSON.stringify({
+          data: { uploadId: 'artup_agent_dir', workflowRunId: 'agent-job-1', workId: 'agent-work-1' },
+        }),
+      }),
+    )
+    const connection = new ServerConnection(options())
+
+    await connection.uploadArtifact(
+      'agent-job-1',
+      'agent-work-1',
+      { path: 'specs', kind: 'directory', size: 6, content: new Uint8Array([0x7b, 0x7d]) },
+      new AbortController().signal,
+      'agent-job',
+    )
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/api/agent-jobs/agent-job-1/work/agent-work-1/artifact-directory-uploads')
+  })
 })
 
 describe('ServerConnection.report', () => {
@@ -473,71 +525,82 @@ describe('ServerConnection.poll', () => {
   })
 })
 
-describe('ServerConnection.buildGitHash', () => {
-  it('registerRequestIncludesBuildGitHash', async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: '' }))
-    const hash = 'abcdef1234567890abcdef1234567890abcdef12'
-    const connection = new ServerConnection(options(), hash)
+describe('ServerConnection identity payload', () => {
+  const buildInfo = {
+    schemaVersion: 1,
+    component: 'runner',
+    version: '0.0.0+source',
+    sourceRevision: 'source-sha',
+    buildGitHash: 'build-sha',
+    treeHash: 'tree-sha',
+    artifactDigest: 'artifact-digest',
+    releaseId: 'release-id',
+    generation: 3,
+    runnerId: 'runner-1',
+    builtAt: null,
+  }
+  const identityKeys = [
+    'schemaVersion',
+    'component',
+    'version',
+    'sourceRevision',
+    'buildGitHash',
+    'treeHash',
+    'artifactDigest',
+    'releaseId',
+    'generation',
+    'runnerId',
+  ]
+  const registration = {
+    processGeneration: 'test-generation',
+    capabilities: ['spec/*'],
+    actionCatalog: { actions: [], tombstones: [] },
+    projectId: 'project-1',
+    coderModels: ['openai/gpt-4'],
+  }
 
-    await connection.connect(
-      {
-        processGeneration: 'test-generation',
-        capabilities: ['spec/*'],
-        actionCatalog: { actions: [], tombstones: [] },
-        projectId: 'project-1',
-        coderModels: ['openai/gpt-4'],
-        buildGitHash: hash,
-      },
-      new AbortController().signal,
-    )
+  it('registerRequestCarriesCanonicalIdentityDirectly', async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: '' }))
+    const connection = new ServerConnection(options(), buildInfo)
+
+    await connection.connect(registration, new AbortController().signal)
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('/api/runner/runner-1/register')
     expect(init.method).toBe('POST')
     const body = JSON.parse(init.body as string)
-    expect(body.buildGitHash).toBe(hash)
+    expect(body.schemaVersion).toBe(1)
+    expect(body.buildGitHash).toBe('build-sha')
+    expect(body.sourceRevision).toBe('source-sha')
+    for (const key of identityKeys) expect(body).toHaveProperty(key)
   })
 
-  it('heartbeatIncludesBuildGitHashAndState', async () => {
+  it('heartbeatIncludesCanonicalIdentityAndState', async () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: '' }))
-    const hash = 'abcdef1234567890abcdef1234567890abcdef12'
-    const connection = new ServerConnection(options(), hash)
+    const connection = new ServerConnection(options(), buildInfo)
 
-    await connection.heartbeat(
-      {
-        processGeneration: 'test-generation',
-        capabilities: ['spec/*'],
-        actionCatalog: { actions: [], tombstones: [] },
-        projectId: 'project-1',
-        coderModels: ['openai/gpt-4'],
-      },
-      new AbortController().signal,
-    )
+    await connection.heartbeat(registration, new AbortController().signal)
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     const body = JSON.parse(init.body as string)
-    expect(body.buildGitHash).toBe(hash)
+    expect(body.schemaVersion).toBe(1)
+    expect(body.buildGitHash).toBe('build-sha')
+    expect(body.sourceRevision).toBe('source-sha')
     expect(body.coderModels).toEqual(['openai/gpt-4'])
+    for (const key of identityKeys) expect(body).toHaveProperty(key)
   })
 
-  it('heartbeatStillSendsStateWhenBuildGitHashUnknown', async () => {
+  it('heartbeatStillSendsStateWhenIdentityIsUnknown', async () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: '' }))
     const connection = new ServerConnection(options(), null)
 
-    await connection.heartbeat(
-      {
-        processGeneration: 'test-generation',
-        capabilities: ['spec/*'],
-        actionCatalog: { actions: [], tombstones: [] },
-        projectId: 'project-1',
-      },
-      new AbortController().signal,
-    )
+    await connection.heartbeat(registration, new AbortController().signal)
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('/api/runner/runner-1/heartbeat')
     const body = JSON.parse(init.body as string)
     expect(body.buildGitHash).toBeNull()
+    expect(body.schemaVersion).toBeNull()
   })
 })

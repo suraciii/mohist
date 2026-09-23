@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Hosting;
@@ -46,13 +47,15 @@ public sealed class WorkflowArtifactUploadService : IScopedService
     private readonly ILogger<WorkflowArtifactUploadService> _log;
     private readonly TimeProvider _time;
     private readonly TimeSpan _pendingTtl;
+    private readonly WorkflowArtifactDirectoryLimits _directoryLimits;
 
     public WorkflowArtifactUploadService(
         IDbContextFactory<MohistDbContext> dbFactory,
         IWorkflowArtifactStorage storage,
         IGrainFactory grains,
+        IOptions<WorkflowArtifactStorageOptions> options,
         ILogger<WorkflowArtifactUploadService> log)
-        : this(dbFactory, storage, new WorkflowGrainWorkContextResolver(grains), log, TimeProvider.System, DefaultPendingTtl)
+        : this(dbFactory, storage, new WorkflowGrainWorkContextResolver(grains), log, TimeProvider.System, DefaultPendingTtl, options)
     {
     }
 
@@ -60,8 +63,9 @@ public sealed class WorkflowArtifactUploadService : IScopedService
         IDbContextFactory<MohistDbContext> dbFactory,
         IWorkflowArtifactStorage storage,
         IWorkflowArtifactUploadWorkContextResolver workContextResolver,
+        IOptions<WorkflowArtifactStorageOptions> options,
         ILogger<WorkflowArtifactUploadService> log)
-        : this(dbFactory, storage, workContextResolver, log, TimeProvider.System, DefaultPendingTtl)
+        : this(dbFactory, storage, workContextResolver, log, TimeProvider.System, DefaultPendingTtl, options)
     {
     }
 
@@ -71,7 +75,8 @@ public sealed class WorkflowArtifactUploadService : IScopedService
         IWorkflowArtifactUploadWorkContextResolver workContextResolver,
         ILogger<WorkflowArtifactUploadService> log,
         TimeProvider time,
-        TimeSpan pendingTtl)
+        TimeSpan pendingTtl,
+        IOptions<WorkflowArtifactStorageOptions> options)
     {
         _pendingUploads = new WorkflowArtifactPendingUploadRepository(dbFactory);
         _storage = storage;
@@ -79,6 +84,7 @@ public sealed class WorkflowArtifactUploadService : IScopedService
         _log = log;
         _time = time;
         _pendingTtl = pendingTtl;
+        _directoryLimits = options.Value.DirectoryLimits ?? WorkflowArtifactDirectoryLimits.Default;
     }
 
     /// <summary>
@@ -118,6 +124,16 @@ public sealed class WorkflowArtifactUploadService : IScopedService
         var kind = WorkflowArtifactDirectoryEnvelopeReader.IsDirectoryContentType(request.ContentType)
             ? "directory"
             : "file";
+
+        // Reject an over-limit declared envelope before the content
+        // stream is opened or any bytes are read. The reader applies the
+        // same cap defensively.
+        if (kind == "directory" && request.Size > _directoryLimits.MaxEnvelopeBytes)
+        {
+            return WorkflowArtifactUploadResult.Invalid(
+                $"Directory envelope declared size {request.Size} exceeds the maximum of {_directoryLimits.MaxEnvelopeBytes} bytes.");
+        }
+
         var pending = new WorkflowArtifactPendingUploadRow
         {
             UploadId = uploadId,
@@ -147,16 +163,13 @@ public sealed class WorkflowArtifactUploadService : IScopedService
 
             await using var content = request.OpenContent();
             WorkflowArtifactStorageWriteResult writeResult;
-            int? fileCount = null;
             if (kind == "directory")
             {
-                var envelope = await WorkflowArtifactDirectoryEnvelopeReader
-                    .ReadAsync(content, request.Size, cancellationToken)
-                    .ConfigureAwait(false);
-                fileCount = envelope.Entries.Count;
+                var entries = WorkflowArtifactDirectoryEnvelopeReader.ReadAsync(
+                    content, request.Size, _directoryLimits, cancellationToken);
                 writeResult = await _storage.WriteDirectoryAsync(
                     storagePath,
-                    envelope.Entries,
+                    entries,
                     new WorkflowArtifactFileWrite
                     {
                         SourcePath = request.Path,
@@ -165,7 +178,7 @@ public sealed class WorkflowArtifactUploadService : IScopedService
                         ContentHash = request.ContentHash,
                     },
                     now,
-                    limits: null,
+                    limits: _directoryLimits,
                     cancellationToken).ConfigureAwait(false);
             }
             else
@@ -192,9 +205,9 @@ public sealed class WorkflowArtifactUploadService : IScopedService
             }
 
             pending.StoragePath = writeResult.StoragePath;
-            pending.FileCount = fileCount;
             if (kind == "directory")
             {
+                pending.FileCount = writeResult.FileCount;
                 pending.Size = writeResult.Size;
             }
 

@@ -8,8 +8,8 @@ public static class DoctorRoutes
 {
     public static WebApplication MapDoctorRoutes(this WebApplication app)
     {
-        app.MapGet("/api/doctor/checks", async (DoctorCheckService doctor, CancellationToken ct) =>
-            ApiResults.Ok(await doctor.GetChecksAsync(ct)))
+        app.MapGet("/api/doctor/checks", async (DoctorCheckService doctor, CancellationToken ct, bool strict = false) =>
+            ApiResults.Ok(await doctor.GetChecksAsync(ct, strict)))
             .RequireScopes(Scope.Operator);
 
         return app;

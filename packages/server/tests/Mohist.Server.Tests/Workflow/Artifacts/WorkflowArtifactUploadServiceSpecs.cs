@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.TestSupport;
 using Mohist.Workflow.Definition;
@@ -28,7 +29,8 @@ public class WorkflowArtifactUploadServiceSpecs
 
     private WorkflowArtifactUploadService BuildService(
         StubWorkContextResolver? resolver = null,
-        ILogger<WorkflowArtifactUploadService>? log = null)
+        ILogger<WorkflowArtifactUploadService>? log = null,
+        WorkflowArtifactDirectoryLimits? limits = null)
     {
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         resolver ??= new StubWorkContextResolver();
@@ -38,10 +40,14 @@ public class WorkflowArtifactUploadServiceSpecs
             resolver,
             log ?? NullLogger<WorkflowArtifactUploadService>.Instance,
             new FixedTimeProvider(new DateTimeOffset(2026, 6, 11, 12, 0, 0, TimeSpan.Zero)),
-            TimeSpan.FromHours(24));
+            TimeSpan.FromHours(24),
+            Options.Create(new WorkflowArtifactStorageOptions { DirectoryLimits = limits }));
     }
 
     private static byte[] Bytes(string text) => Encoding.UTF8.GetBytes(text);
+
+    private static string Sha256(byte[] content) =>
+        $"sha256:{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)).ToLowerInvariant()}";
 
     [Fact]
     public async Task UploadAsync_NewUploadCreatesPendingRowAndContent()
@@ -341,18 +347,14 @@ public class WorkflowArtifactUploadServiceSpecs
 
         var service = BuildService(resolver, new ThrowOnWarningLogger<WorkflowArtifactUploadService>());
 
-        // Build a directory envelope mirroring what the runner
-        // produces: a JSON object with kind=directory and base64
-        // entries that are decoded server-side.
+        // Build a streaming NDJSON envelope mirroring what the runner
+        // produces: a kind=directory header followed by one base64
+        // value per contained file.
         var fileA = Bytes("alpha content");
         var fileB = Bytes("beta bytes");
-        var envelopeJson = "{" +
-            "\"kind\":\"directory\"," +
-            "\"files\":[" +
-            $"{{\"path\":\"a.md\",\"size\":{fileA.LongLength},\"contentType\":\"text/markdown\",\"data\":\"{Convert.ToBase64String(fileA)}\"}}," +
-            $"{{\"path\":\"sub/b.md\",\"size\":{fileB.LongLength},\"contentType\":\"text/markdown\",\"data\":\"{Convert.ToBase64String(fileB)}\"}}" +
-            "]}";
-        var envelopeBytes = Encoding.UTF8.GetBytes(envelopeJson);
+        var envelopeBytes = DirectoryEnvelopeTestData.Create(
+            new DirectoryEnvelopeTestFile("a.md", fileA, "text/markdown", Sha256(fileA)),
+            new DirectoryEnvelopeTestFile("sub/b.md", fileB, "application/json", Sha256(fileB)));
         var totalBytes = fileA.LongLength + fileB.LongLength;
 
         var result = await service.UploadAsync(new WorkflowArtifactUploadRequest
@@ -395,6 +397,20 @@ public class WorkflowArtifactUploadServiceSpecs
         var metadata = await _storage.ReadMetadataAsync(row.StoragePath);
         Assert.NotNull(metadata);
         Assert.Equal("directory", metadata!.Kind);
+        Assert.NotNull(metadata.Entries);
+        Assert.Equal(
+            ["a.md", "sub/b.md"],
+            metadata.Entries!.Select(entry => entry.RelativePath));
+        Assert.Equal(
+            ["text/markdown", "application/json"],
+            metadata.Entries!.Select(entry => entry.ContentType));
+        // The declared hash is verified and the computed hash is recorded.
+        Assert.Equal(
+            [Sha256(fileA), Sha256(fileB)],
+            metadata.Entries!.Select(entry => entry.ContentHash));
+        Assert.Equal(
+            [fileA.LongLength, fileB.LongLength],
+            metadata.Entries!.Select(entry => entry.Size));
     }
 
     [Fact]
@@ -408,12 +424,8 @@ public class WorkflowArtifactUploadServiceSpecs
 
         var service = BuildService(resolver);
         var fileA = Bytes("alpha content");
-        var envelopeJson = "{" +
-            "\"kind\":\"directory\"," +
-            "\"files\":[" +
-            $"{{\"path\":\"a.md\",\"size\":{fileA.LongLength},\"contentType\":\"text/markdown\",\"data\":\"{Convert.ToBase64String(fileA)}\"}}" +
-            "]}";
-        var envelopeBytes = Encoding.UTF8.GetBytes(envelopeJson);
+        var envelopeBytes = DirectoryEnvelopeTestData.Create(
+            new DirectoryEnvelopeTestFile("a.md", fileA, "text/markdown"));
 
         var first = await service.UploadAsync(new WorkflowArtifactUploadRequest
         {
@@ -426,6 +438,13 @@ public class WorkflowArtifactUploadServiceSpecs
             OpenContent = () => new MemoryStream(envelopeBytes, writable: false),
         });
         Assert.Equal(WorkflowArtifactUploadResultKind.Created, first.Kind);
+
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var firstRow = await db.WorkflowArtifactPendingUploads
+            .AsNoTracking()
+            .FirstAsync(p => p.UploadId == first.Pending!.UploadId);
+        var recordedManifest = (await _storage.ReadMetadataAsync(firstRow.StoragePath))!.Entries!;
 
         var second = await service.UploadAsync(new WorkflowArtifactUploadRequest
         {
@@ -442,13 +461,17 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Equal("directory", second.Pending!.Kind);
         Assert.Equal(first.Pending!.UploadId, second.Pending.UploadId);
 
-        using var scope = _fixture.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var rows = await db.WorkflowArtifactPendingUploads
             .AsNoTracking()
             .Where(p => p.WorkflowRunId == workflowRunId)
             .ToListAsync();
         Assert.Single(rows);
+
+        // The retry must not rewrite the stored manifest.
+        var afterRetryManifest = (await _storage.ReadMetadataAsync(firstRow.StoragePath))!.Entries!;
+        Assert.Equal(
+            recordedManifest.Select(entry => (entry.RelativePath, entry.Size, entry.ContentHash, entry.ContentType)),
+            afterRetryManifest.Select(entry => (entry.RelativePath, entry.Size, entry.ContentHash, entry.ContentType)));
     }
 
     [Fact]
@@ -462,12 +485,8 @@ public class WorkflowArtifactUploadServiceSpecs
 
         var service = BuildService(resolver);
         var fileA = Bytes("alpha content");
-        var envelopeJsonA = "{" +
-            "\"kind\":\"directory\"," +
-            "\"files\":[" +
-            $"{{\"path\":\"a.md\",\"size\":{fileA.LongLength},\"contentType\":\"text/markdown\",\"data\":\"{Convert.ToBase64String(fileA)}\"}}" +
-            "]}";
-        var envelopeBytesA = Encoding.UTF8.GetBytes(envelopeJsonA);
+        var envelopeBytesA = DirectoryEnvelopeTestData.Create(
+            new DirectoryEnvelopeTestFile("a.md", fileA, "text/markdown"));
 
         var first = await service.UploadAsync(new WorkflowArtifactUploadRequest
         {
@@ -482,12 +501,8 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Equal(WorkflowArtifactUploadResultKind.Created, first.Kind);
 
         var fileB = Bytes("beta content");
-        var envelopeJsonB = "{" +
-            "\"kind\":\"directory\"," +
-            "\"files\":[" +
-            $"{{\"path\":\"a.md\",\"size\":{fileB.LongLength},\"contentType\":\"text/markdown\",\"data\":\"{Convert.ToBase64String(fileB)}\"}}" +
-            "]}";
-        var envelopeBytesB = Encoding.UTF8.GetBytes(envelopeJsonB);
+        var envelopeBytesB = DirectoryEnvelopeTestData.Create(
+            new DirectoryEnvelopeTestFile("a.md", fileB, "text/markdown"));
 
         var second = await service.UploadAsync(new WorkflowArtifactUploadRequest
         {
@@ -507,18 +522,21 @@ public class WorkflowArtifactUploadServiceSpecs
     }
 
     [Theory]
+    [InlineData("", false)]
     [InlineData("not-valid-json", false)]
-    [InlineData("{\"kind\":\"directory\",\"files\":[]}", false)]
-    [InlineData("{\"kind\":\"file\",\"files\":[{\"path\":\"a.md\",\"data\":\"YQ==\"}]}", false)]
-    [InlineData("{\"kind\":\"directory\",\"files\":[{\"path\":\"a.md\",\"data\":\"!!!\"}]}", false)]
-    [InlineData("{\"kind\":\"directory\",\"files\":[{\"path\":\"a.md\",\"size\":2,\"data\":\"YQ==\"}]}", true)]
+    [InlineData("{\"kind\":\"file\"}", false)]
+    [InlineData("{\"kind\":\"directory\"}", false)]
+    [InlineData("{\"kind\":\"directory\"}\n{\"path\":\"a.md\",\"data\":\"!!!\"}", false)]
+    [InlineData("{\"kind\":\"directory\"}\n{\"data\":\"YQ==\"}", false)]
+    [InlineData("{\"kind\":\"directory\"}\n{\"path\":\"a.md\",\"size\":2,\"data\":\"YQ==\"}", true)]
     public async Task UploadAsync_DirectoryContent_MalformedEnvelopeReturnsInvalid(
         string envelopeJson, bool assertEntrySizeDiagnostic)
     {
-        // Directory envelope validation failures (bad JSON, wrong kind,
-        // empty file list, invalid base64) must surface as an Invalid
-        // result rather than throwing, so the upload endpoint returns a
-        // diagnosable 400 instead of an opaque 500.
+        // Directory envelope validation failures (empty body, bad JSON,
+        // wrong kind, empty directory, missing path, invalid base64, and
+        // a decoded size that contradicts the declared size) must surface
+        // as an Invalid result rather than throwing, so the upload
+        // endpoint returns a diagnosable 400 instead of an opaque 500.
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
         var workId = $"task-1.1_{Guid.NewGuid():N}";
         var actionAttemptId = "task-1.1";
@@ -558,8 +576,10 @@ public class WorkflowArtifactUploadServiceSpecs
         resolver.Register(workflowRunId, workId, actionAttemptId);
         var service = BuildService(resolver);
 
-        var envelopeJson = "{\"kind\":\"directory\",\"files\":[{\"path\":\"a.md\",\"size\":1,\"data\":\"YQ==\"}]}";
-        var envelopeBytes = Encoding.UTF8.GetBytes(envelopeJson);
+        // Declared size larger than the actual body: the parser reaches a
+        // real EOF before the declared size and the size check rejects it.
+        var envelopeBytes = DirectoryEnvelopeTestData.Create(
+            new DirectoryEnvelopeTestFile("a.md", Bytes("a")));
         var result = await service.UploadAsync(new WorkflowArtifactUploadRequest
         {
             WorkflowRunId = workflowRunId,
@@ -573,6 +593,148 @@ public class WorkflowArtifactUploadServiceSpecs
 
         Assert.Equal(WorkflowArtifactUploadResultKind.Invalid, result.Kind);
         Assert.Contains("mismatch", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task UploadAsync_DirectoryContent_DeclaredSmallerThanActualTrailingBytesIsInvalid()
+    {
+        // Deterministic regression for the artificial-EOF gap: the declared
+        // size ends exactly at a well-formed value boundary, so the parser
+        // can complete without ever seeing the trailing bytes. The reader's
+        // one-byte EOF probe must still reject the body.
+        var workflowRunId = $"wr_{Guid.NewGuid():N}";
+        var workId = $"task-1.1_{Guid.NewGuid():N}";
+        var resolver = new StubWorkContextResolver();
+        resolver.Register(workflowRunId, workId, "task-1.1");
+        var service = BuildService(resolver);
+
+        var validEnvelope = DirectoryEnvelopeTestData.Create(
+            new DirectoryEnvelopeTestFile("a.md", Bytes("alpha")));
+        var trailing = Encoding.UTF8.GetBytes(
+            "{\"path\":\"trailing.md\",\"data\":\"YQ==\"}");
+        var actual = validEnvelope.Concat(trailing).ToArray();
+
+        var result = await service.UploadAsync(new WorkflowArtifactUploadRequest
+        {
+            WorkflowRunId = workflowRunId,
+            WorkId = workId,
+            Path = "specs",
+            ContentType = "application/x-mohist-artifact-directory",
+            ContentHash = "sha256:trailing",
+            Size = validEnvelope.LongLength,
+            OpenContent = () => new MemoryStream(actual, writable: false),
+        });
+
+        Assert.Equal(WorkflowArtifactUploadResultKind.Invalid, result.Kind);
+        Assert.Contains("larger", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task UploadAsync_DirectoryContent_DeclaredEnvelopeOverLimitIsRejectedBeforeContentOpened()
+    {
+        var workflowRunId = $"wr_{Guid.NewGuid():N}";
+        var workId = $"task-1.1_{Guid.NewGuid():N}";
+        var resolver = new StubWorkContextResolver();
+        resolver.Register(workflowRunId, workId, "task-1.1");
+        var limits = new WorkflowArtifactDirectoryLimits { MaxEnvelopeBytes = 32 };
+        var service = BuildService(resolver, limits: limits);
+
+        var opened = false;
+        var result = await service.UploadAsync(new WorkflowArtifactUploadRequest
+        {
+            WorkflowRunId = workflowRunId,
+            WorkId = workId,
+            Path = "specs",
+            ContentType = "application/x-mohist-artifact-directory",
+            ContentHash = "sha256:too-big",
+            Size = limits.MaxEnvelopeBytes + 1,
+            OpenContent = () =>
+            {
+                opened = true;
+                return new MemoryStream(new byte[1], writable: false);
+            },
+        });
+
+        Assert.Equal(WorkflowArtifactUploadResultKind.Invalid, result.Kind);
+        Assert.Contains("exceeds", result.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.False(opened, "the content stream must not be opened for an over-limit envelope");
+    }
+
+    [Fact]
+    public async Task UploadAsync_DirectoryContent_DeclaredContentHashIsVerified()
+    {
+        var workflowRunId = $"wr_{Guid.NewGuid():N}";
+        var workId = $"task-1.1_{Guid.NewGuid():N}";
+        var resolver = new StubWorkContextResolver();
+        resolver.Register(workflowRunId, workId, "task-1.1");
+        var service = BuildService(resolver);
+
+        var file = Bytes("alpha");
+        var envelopeBytes = DirectoryEnvelopeTestData.Create(
+            new DirectoryEnvelopeTestFile("a.md", file, ContentHash: $"sha256:{new string('0', 64)}"));
+
+        var result = await service.UploadAsync(new WorkflowArtifactUploadRequest
+        {
+            WorkflowRunId = workflowRunId,
+            WorkId = workId,
+            Path = "specs",
+            ContentType = "application/x-mohist-artifact-directory",
+            ContentHash = "sha256:hash-mismatch",
+            Size = envelopeBytes.LongLength,
+            OpenContent = () => new MemoryStream(envelopeBytes, writable: false),
+        });
+
+        Assert.Equal(WorkflowArtifactUploadResultKind.Invalid, result.Kind);
+        Assert.Contains("hash mismatch", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("count")]
+    [InlineData("single")]
+    [InlineData("total")]
+    public async Task UploadAsync_DirectoryContent_LimitBreachesReturnInvalid(string breach)
+    {
+        var workflowRunId = $"wr_{Guid.NewGuid():N}";
+        var workId = $"task-1.1_{Guid.NewGuid():N}";
+        var resolver = new StubWorkContextResolver();
+        resolver.Register(workflowRunId, workId, "task-1.1");
+        var limits = breach switch
+        {
+            "count" => new WorkflowArtifactDirectoryLimits { MaxFileCount = 1 },
+            "single" => new WorkflowArtifactDirectoryLimits { MaxFileBytes = 4 },
+            _ => new WorkflowArtifactDirectoryLimits { MaxTotalBytes = 6 },
+        };
+        var service = BuildService(resolver, limits: limits);
+
+        var files = breach switch
+        {
+            "count" => new[]
+            {
+                new DirectoryEnvelopeTestFile("a.md", Bytes("a")),
+                new DirectoryEnvelopeTestFile("b.md", Bytes("b")),
+            },
+            "single" => new[] { new DirectoryEnvelopeTestFile("a.md", Bytes("large")) },
+            _ => new[]
+            {
+                new DirectoryEnvelopeTestFile("a.md", Bytes("four")),
+                new DirectoryEnvelopeTestFile("b.md", Bytes("four")),
+            },
+        };
+        var envelopeBytes = DirectoryEnvelopeTestData.Create(files);
+
+        var result = await service.UploadAsync(new WorkflowArtifactUploadRequest
+        {
+            WorkflowRunId = workflowRunId,
+            WorkId = workId,
+            Path = "specs",
+            ContentType = "application/x-mohist-artifact-directory",
+            ContentHash = $"sha256:{breach}",
+            Size = envelopeBytes.LongLength,
+            OpenContent = () => new MemoryStream(envelopeBytes, writable: false),
+        });
+
+        Assert.Equal(WorkflowArtifactUploadResultKind.Invalid, result.Kind);
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
     }
 
     [Fact]
@@ -617,13 +779,9 @@ public class WorkflowArtifactUploadServiceSpecs
         var uploadService = BuildService(resolver);
         var fileA = Bytes("alpha content");
         var fileB = Bytes("beta content");
-        var envelopeJson = "{" +
-            "\"kind\":\"directory\"," +
-            "\"files\":[" +
-            $"{{\"path\":\"a.md\",\"size\":{fileA.LongLength},\"contentType\":\"text/markdown\",\"data\":\"{Convert.ToBase64String(fileA)}\"}}," +
-            $"{{\"path\":\"sub/b.md\",\"size\":{fileB.LongLength},\"contentType\":\"text/markdown\",\"data\":\"{Convert.ToBase64String(fileB)}\"}}" +
-            "]}";
-        var envelopeBytes = Encoding.UTF8.GetBytes(envelopeJson);
+        var envelopeBytes = DirectoryEnvelopeTestData.Create(
+            new DirectoryEnvelopeTestFile("a.md", fileA, "text/markdown"),
+            new DirectoryEnvelopeTestFile("sub/b.md", fileB, "text/markdown"));
 
         var uploaded = await uploadService.UploadAsync(new WorkflowArtifactUploadRequest
         {

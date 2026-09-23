@@ -65,7 +65,7 @@ facts. Detailed domain contracts are indexed by [`domain-analysis.md`](domain-an
 - The Agent API owns unified Agent launch, continuation, observation, and stop.
   Agent, Session, Workflow, and Connection contracts remain on the Server side.
 - The Control Plane owns product state and decisions. The Execution Plane
-  materializes Workspaces, runs user-project commands, and reports facts.
+  provisions Workspace Homes, runs user-project commands, and reports facts.
 - The User Project is the only location for project shell, process, git, and
   Agent execution side effects.
 

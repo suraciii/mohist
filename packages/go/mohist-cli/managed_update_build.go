@@ -93,14 +93,12 @@ func stageManagedTargets(
 			return nil, fmt.Errorf("hash %s candidate: %w", component, err)
 		}
 		identity := managedRuntimeIdentity{
-			Component: component, Version: "0.0.0+" + source.Commit,
-			SourceRevision: source.Commit, TreeHash: source.TreeHash, ArtifactDigest: digest,
-			ReleaseID: "mohist-" + releaseScope + "-" + source.Commit, Generation: generation,
-			RunnerID: runnerID, IsComplete: true,
+			SchemaVersion: 1, Component: component, Version: "0.0.0+" + source.Commit,
+			SourceRevision: source.Commit, BuildGitHash: source.Commit, TreeHash: source.TreeHash,
+			ArtifactDigest: digest, ReleaseID: "mohist-" + releaseScope + "-" + source.Commit,
+			Generation: generation, RunnerID: runnerID,
 		}
-		if component == "runner" {
-			identity.BuildGitHash = source.Commit
-		} else {
+		if component != "runner" {
 			identity.RunnerID = ""
 		}
 		if err := writeManagedMetadata(env.files, candidateRoot, source, identity); err != nil {
@@ -148,23 +146,11 @@ func writeManagedMetadata(files managedFileSystem, root string, source managedSo
 		return err
 	}
 	if identity.Component == "runner" {
-		buildInfo := struct {
-			Component      string `json:"component"`
-			Version        string `json:"version"`
-			GitHash        string `json:"gitHash"`
-			SourceRevision string `json:"sourceRevision"`
-			TreeHash       string `json:"treeHash"`
-			ArtifactDigest string `json:"artifactDigest"`
-			ReleaseID      string `json:"releaseId"`
-			RunnerID       string `json:"runnerId"`
-			Generation     int64  `json:"generation"`
-		}{"runner", identity.Version, identity.SourceRevision, identity.SourceRevision, identity.TreeHash,
-			identity.ArtifactDigest, identity.ReleaseID, identity.RunnerID, identity.Generation}
-		value, err := json.MarshalIndent(buildInfo, "", "  ")
+		buildInfoValue, err := json.MarshalIndent(identity, "", "  ")
 		if err != nil {
 			return err
 		}
-		if err := files.WriteFileAtomic(filepath.Join(root, "dist", "build-info.json"), append(value, '\n'), 0o600); err != nil {
+		if err := files.WriteFileAtomic(filepath.Join(root, "dist", "build-info.json"), append(buildInfoValue, '\n'), 0o600); err != nil {
 			return err
 		}
 	}

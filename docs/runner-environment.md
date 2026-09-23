@@ -53,6 +53,27 @@ and prevents a written-but-unloaded snapshot. The file is mode `0600`. The
 existing `runner.env` file remains the owner of Runner application settings
 such as `ENABLED_AGENT_RUNTIMES`; the two files must not be merged.
 
+Older managed installations may not have this file or its systemd directive.
+Run the explicit local migration before the first refresh:
+
+```text literal
+mo runner environment initialize
+```
+
+`initialize` measures the allowlisted environment of the currently running
+Runner process through its systemd `MainPID`, writes the active snapshot, and
+idempotently adds the fixed `EnvironmentFile` directive. For legacy units it
+also removes inline `Environment=` assignments for the fixed allowlist, while
+preserving unrelated service settings; this is required for a candidate to
+remove a previously inherited variable. Ambiguous continued environment
+directives fail closed. It does not use the invoking terminal, contact Server,
+restart the Runner, pause admission, or change current work. It verifies the
+process digest after `daemon-reload` and restores the unit and snapshot if any
+step fails. A stopped service, missing process environment, or process identity
+change fails closed. Existing active snapshots are verified rather than
+replaced. Initialization is migration evidence only; candidate apply still
+requires the normal fence and new-process activation witness.
+
 The local transaction files are also fixed under `~/.config/mohist/`:
 
 - `runner-environment.candidate.env` is the inactive candidate;
@@ -70,6 +91,7 @@ Run these commands as the operating-system user that owns the Runner service:
 
 ```text literal
 mo runner environment capture [--runner-id <runner-id>]
+mo runner environment initialize
 mo runner environment status [--runner-id <runner-id>] [--json]
 ```
 

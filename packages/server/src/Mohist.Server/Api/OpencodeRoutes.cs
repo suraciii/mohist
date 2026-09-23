@@ -20,7 +20,7 @@ public static class OpencodeRoutes
                 ? AgentConfigSchema.OpenCodeRuntime
                 : runtime.Trim().ToLowerInvariant();
             if (!AgentConfigSchema.AllowedRuntimes.Contains(selectedRuntime))
-                return ApiResults.BadRequest("runtime must be 'opencode' or 'pi'", "runtime_invalid");
+                return ApiResults.BadRequest("runtime must be 'opencode', 'pi', or 'codex'", "runtime_invalid");
 
             var registry = grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
             var models = (await registry.ListCoderModelsByRuntimeAsync(selectedRuntime)).ToArray();

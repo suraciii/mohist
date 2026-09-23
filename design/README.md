@@ -40,6 +40,7 @@ changing a document in `design/`.
 
 ## Runtime integration
 
+- [runtime-switch-context.md](runtime-switch-context.md) — Replace an unavailable physical Runtime Session without changing the logical AgentSession or creating a synthetic user Turn.
 - [runtimes/](runtimes/README.md) — External execution backends: process, SDK, physical session, event and compatibility boundaries; OpenCode, Pi, and Codex.
 
 ## Workflow core domain
@@ -53,13 +54,14 @@ changing a document in `design/`.
 - [workflow/task-dispatch.md](workflow/task-dispatch.md) — Single authority for `with` / `expect` template evaluation timing: Server dispatch carries the original declaration and an immutable attempt snapshot; Runner renders once at the execution entry before calling the Action.
 - [workflow/recovery.md](workflow/recovery.md) — Failure recovery: recovery declarations, when matching, runner-built recovery tasks.
 - [workflow/plan-artifacts.md](workflow/plan-artifacts.md) — Plan artifacts: the task list, named artifacts, persistence and recovery, review as approval, prompt realignment, Web evidence surface.
+- [workflow/artifacts.md](workflow/artifacts.md) — Workflow artifact ingestion: directory envelope transport, ingestion limits, streaming retention bound, and failure/cancellation rollback.
 - [workflow/issue-coordination.md](workflow/issue-coordination.md) — Cross-aggregate interaction of Issue, WorkflowRun, Runner, Session.
 
 ## Supporting topics
 
 - [auth.md](auth.md) — Auth and identity: single admin plus service/agent principals, file and signed credentials, device authorization login, Runner machine credentials, Scope enforcement, and attribution.
 - [repositories.md](repositories.md) — Repository execution: Project resource authority, Issue binding, live dispatch resolution.
-- [workspaces.md](workspaces.md) — Workspace: first-class persistent execution environment under a Project, with Origin resolution, named Runner materialization, binding affinity, archival, and reclamation.
+- [workspaces.md](workspaces.md) — Workspace: first-class persistent execution environment under a Project, with Origin resolution, named Runner provisioning, binding affinity, archival, and reclamation.
 - [hermes-webhook.md](hermes-webhook.md) — Hermes notification gateway: event types, payload, signature, delivery reliability.
 - [outbound-webhook.md](outbound-webhook.md) — Outbound webhook: Project-scoped HTTP delivery with CloudEvents, event selection, and configurable authentication.
 - [github-integration.md](github-integration.md) — GitHub integration: signed ingress, intake and close translation, and write-back; product behavior in [`docs/github.md`](../docs/github.md).
@@ -77,6 +79,7 @@ changing a document in `design/`.
 
 ## Decision records
 
+- [decisions/cli-go.md](decisions/cli-go.md) — The `mo` CLI is a static Go binary while preserving its command and output contracts.
 - [decisions/issue-owns-epic-membership.md](decisions/issue-owns-epic-membership.md) — Issue holds the current Epic membership; Project-scoped number identity and cross-aggregate recovery flow.
 - [decisions/epic-status-revival.md](decisions/epic-status-revival.md) — Epic `done` auto-revival and `closed` link rejection.
 - [decisions/composite-issues.md](decisions/composite-issues.md) — Composite Issues: explicit owner-chosen decomposition, independent of the Epic axis.

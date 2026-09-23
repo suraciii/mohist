@@ -149,8 +149,9 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
     {
         var projectId = await CreateProjectAsync("launch-distinct");
 
-        // The validation-only endpoint has no project/agent scoping,
-        // no AgentSession minting, and no source-kind=agent-launch label.
+        // The developer-only validation endpoint now persists the Job-owned
+        // Session/Turn before submission, but remains distinct from the
+        // authenticated product launch API and its project-scoped route.
         // Use a synchronous validation error here; this route-boundary spec
         // must not start an AgentJob and wait for runner/report completion.
         using var validate = await _fixture.Client.PostAsJsonAsync(

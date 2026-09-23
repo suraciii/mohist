@@ -2,12 +2,16 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
 import { cn } from '@/shared/lib/utils'
-import { AttachmentComposer, AttachmentResults, type AttachmentResultsValue, type UploadAttachment } from '@/shared/ui'
+import { AttachmentComposer, type UploadAttachment } from '@/shared/ui/attachment-composer'
+import { AttachmentResults, type AttachmentResultsValue } from '@/shared/ui/attachment-results'
 import { extractAttachmentIds } from '../../../entities/issue'
 import type { FollowupStatus } from '../../../entities/coder-session'
 
 export interface SessionFollowupComposerProps {
-  onSend: (text: string, attachmentIds?: string[]) => Promise<SessionFollowupSubmissionResult | void> | SessionFollowupSubmissionResult | void
+  onSend: (
+    text: string,
+    attachmentIds?: string[],
+  ) => Promise<SessionFollowupSubmissionResult | void> | SessionFollowupSubmissionResult | void
   projectId?: string | null
   allowAttachments?: boolean
   uploadAttachment?: UploadAttachment
@@ -55,33 +59,28 @@ export function SessionFollowupComposer({
   const attachmentsEnabled = Boolean(projectId) && allowAttachments
   const isSending = isSendingProp || localSending
 
-  const resolvedState: ResolvedState = state === 'closed' ? 'unavailable' : state ?? (
-    disabled
+  const resolvedState: ResolvedState =
+    state === 'closed'
       ? 'unavailable'
-      : (isSending || hasQueuedFollowup)
-        ? 'queued'
-        : 'interactive'
-  )
+      : (state ?? (disabled ? 'unavailable' : isSending || hasQueuedFollowup ? 'queued' : 'interactive'))
   const observedTurnStatus = followupStatus?.turnStatus?.toLowerCase()
   const observedInputAcceptance = followupStatus?.inputAcceptance?.toLowerCase()
-  const isObservedAccepted = followupStatus?.outcome === 'accepted'
-    && (observedInputAcceptance == null || observedInputAcceptance === 'accepted')
+  const isObservedAccepted =
+    followupStatus?.outcome === 'accepted' &&
+    (observedInputAcceptance == null || observedInputAcceptance === 'accepted')
   const isObservedQueued = isObservedAccepted && observedTurnStatus === 'queued'
   const isObservedExecuting = isObservedAccepted && observedTurnStatus === 'executing'
-  const observedTerminalStatus = isObservedAccepted && (
-    observedTurnStatus === 'completed'
-    || observedTurnStatus === 'failed'
-    || observedTurnStatus === 'cancelled'
-    || observedTurnStatus === 'unknown'
-  )
-    ? observedTurnStatus
-    : null
+  const observedTerminalStatus =
+    isObservedAccepted &&
+    (observedTurnStatus === 'completed' ||
+      observedTurnStatus === 'failed' ||
+      observedTurnStatus === 'cancelled' ||
+      observedTurnStatus === 'unknown')
+      ? observedTurnStatus
+      : null
   const isQueued = isObservedQueued || (resolvedState === 'queued' && !isObservedExecuting)
 
-  const canSend =
-    !disabled &&
-    (trimmed.length > 0 || attachmentIds.length > 0) &&
-    !isSending
+  const canSend = !disabled && (trimmed.length > 0 || attachmentIds.length > 0) && !isSending
 
   useEffect(() => {
     if (disabled) setInlineError(null)
@@ -147,45 +146,40 @@ export function SessionFollowupComposer({
         data-testid="session-followup-composer"
         data-disabled="true"
         data-state="unavailable"
-        className={cn(
-          'shrink-0 border-t border-border bg-muted px-4 py-2 text-xs text-muted-foreground',
-          className,
-        )}
+        className={cn('shrink-0 border-t border-border bg-muted px-4 py-2 text-xs text-muted-foreground', className)}
       >
         Session activity is unknown. Follow-up is unavailable until the activity is resolved.
       </div>
     )
   }
 
-  const buttonState: ButtonState = isSending
-    ? 'sending'
-    : (sentFlash && !hasQueuedFollowup ? 'sent' : 'idle')
+  const buttonState: ButtonState = isSending ? 'sending' : sentFlash && !hasQueuedFollowup ? 'sent' : 'idle'
 
-  const statusLabel = followupStatus?.outcome === 'rejected'
-    ? 'Rejected'
-    : followupStatus?.outcome === 'unknown'
-      ? 'Outcome unknown — retry with the same key'
-      : isObservedExecuting
-        ? 'Executing'
-        : observedTerminalStatus
-          ? observedTerminalStatus[0].toUpperCase() + observedTerminalStatus.slice(1)
-        : isQueued
-          ? followupStatus ? 'Accepted — pending' : 'Queued — waiting for agent...'
-    : buttonState === 'sending'
-      ? 'Sending...'
-      : buttonState === 'sent'
-        ? 'Sent'
-        : null
+  const statusLabel =
+    followupStatus?.outcome === 'rejected'
+      ? 'Rejected'
+      : followupStatus?.outcome === 'unknown'
+        ? 'Outcome unknown — retry with the same key'
+        : isObservedExecuting
+          ? 'Executing'
+          : observedTerminalStatus
+            ? observedTerminalStatus[0].toUpperCase() + observedTerminalStatus.slice(1)
+            : isQueued
+              ? followupStatus
+                ? 'Accepted — pending'
+                : 'Queued — waiting for agent...'
+              : buttonState === 'sending'
+                ? 'Sending...'
+                : buttonState === 'sent'
+                  ? 'Sent'
+                  : null
 
   return (
     <form
       data-testid="session-followup-composer"
       data-state={resolvedState}
       onSubmit={handleSubmit}
-      className={cn(
-        'shrink-0 border-t border-border bg-background px-4 py-2 md:py-3',
-        className,
-      )}
+      className={cn('shrink-0 border-t border-border bg-background px-4 py-2 md:py-3', className)}
     >
       <div className="flex items-end gap-2">
         {attachmentsEnabled ? (
@@ -227,11 +221,7 @@ export function SessionFollowupComposer({
         </Button>
       </div>
 
-      <AttachmentResults
-        accepted={attachmentResult?.accepted}
-        rejected={attachmentResult?.rejected}
-        className="mt-2"
-      />
+      <AttachmentResults accepted={attachmentResult?.accepted} rejected={attachmentResult?.rejected} className="mt-2" />
 
       <div className="mt-1 flex items-center justify-between text-xs" aria-live="polite">
         <span
@@ -245,11 +235,11 @@ export function SessionFollowupComposer({
                   ? 'success'
                   : observedTerminalStatus
                     ? 'terminal'
-                : followupStatus?.outcome === 'rejected' || followupStatus?.outcome === 'unknown'
-                  ? 'outcome'
-              : buttonState === 'sent'
-                ? 'success'
-                : 'neutral'
+                    : followupStatus?.outcome === 'rejected' || followupStatus?.outcome === 'unknown'
+                      ? 'outcome'
+                      : buttonState === 'sent'
+                        ? 'success'
+                        : 'neutral'
           }
           className={cn(
             isQueued
@@ -262,24 +252,19 @@ export function SessionFollowupComposer({
                     ? 'text-destructive'
                     : observedTerminalStatus
                       ? 'text-warning'
-                : followupStatus?.outcome === 'rejected'
-                  ? 'text-destructive'
-                  : followupStatus?.outcome === 'unknown'
-                    ? 'text-warning'
-                    : buttonState === 'sent'
-                      ? 'text-success'
-                      : 'text-transparent',
+                      : followupStatus?.outcome === 'rejected'
+                        ? 'text-destructive'
+                        : followupStatus?.outcome === 'unknown'
+                          ? 'text-warning'
+                          : buttonState === 'sent'
+                            ? 'text-success'
+                            : 'text-transparent',
           )}
         >
           {statusLabel ?? 'placeholder'}
         </span>
         {inlineError && (
-          <span
-            role="alert"
-            data-testid="session-followup-error"
-            data-tone="danger"
-            className="text-danger"
-          >
+          <span role="alert" data-testid="session-followup-error" data-tone="danger" className="text-danger">
             {inlineError}
           </span>
         )}

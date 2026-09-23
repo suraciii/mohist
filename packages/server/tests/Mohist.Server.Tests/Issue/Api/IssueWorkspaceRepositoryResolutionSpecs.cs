@@ -93,7 +93,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         var issue = await CreateIssueAsync(projectId, "Repo gets removed", "secondary");
         await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
         await _fixture.Grains.GetGrain<IWorkspaceGrain>(GrainKey.Workspace(projectId, $"issue-{issue.Number}"))
-            .EnsureMaterializedOnAsync("repo-resolution-runner", $"/mohist-tests/issue-{issue.Number}", DateTimeOffset.UnixEpoch);
+            .EnsureProvisionedOnAsync("repo-resolution-runner", $"/mohist-tests/issue-{issue.Number}", DateTimeOffset.UnixEpoch);
 
         await DriveIssueToTerminalAsync(projectId, issue);
 

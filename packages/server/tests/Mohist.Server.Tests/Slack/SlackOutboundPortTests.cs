@@ -26,6 +26,7 @@ public sealed class SlackOutboundPortTests
         Assert.NotNull(serverAssembly.GetType(typeof(ISlackAppManagementPort).FullName!));
         Assert.NotNull(serverAssembly.GetType(typeof(ISlackBotIdentityVerificationPort).FullName!));
         Assert.NotNull(serverAssembly.GetType(typeof(ISlackMemberIdentityPort).FullName!));
+        Assert.NotNull(serverAssembly.GetType(typeof(ISlackThreadQueryPort).FullName!));
     }
 
     [Fact]
@@ -65,12 +66,14 @@ public sealed class SlackOutboundPortTests
             serverAssembly.GetType("Mohist.Server.Infrastructure.Slack.Ports.SlackConfigurationCredentialPortAdapter")!,
             serverAssembly.GetType("Mohist.Server.Infrastructure.Slack.Ports.SlackBotIdentityVerificationPortAdapter")!,
             serverAssembly.GetType("Mohist.Server.Infrastructure.Slack.Ports.SlackMemberIdentityPortAdapter")!,
+            serverAssembly.GetType("Mohist.Server.Infrastructure.Slack.Ports.SlackThreadQueryPortAdapter")!,
         };
         Assert.Contains(typeof(ISlackAppManagementPort), adapterTypes[0].GetInterfaces());
         Assert.Contains(typeof(ISlackAppManagementFactPort), adapterTypes[0].GetInterfaces());
         Assert.Contains(typeof(ISlackConfigurationCredentialPort), adapterTypes[1].GetInterfaces());
         Assert.Contains(typeof(ISlackBotIdentityVerificationPort), adapterTypes[2].GetInterfaces());
         Assert.Contains(typeof(ISlackMemberIdentityPort), adapterTypes[3].GetInterfaces());
+        Assert.Contains(typeof(ISlackThreadQueryPort), adapterTypes[4].GetInterfaces());
 
         var transport = serverAssembly.GetType("Mohist.Server.Infrastructure.Slack.Ports.SlackApiTransport")!;
         Assert.Contains(typeof(HttpClient), transport.GetConstructors().SelectMany(ctor => ctor.GetParameters()).Select(parameter => parameter.ParameterType));
@@ -244,9 +247,9 @@ public sealed class SlackOutboundPortTests
         return IsExternalSlackClient(type);
     }
 
-    // The three outbound ports and their fakes live in the server assembly; any other type
-    // whose name or namespace mentions Slack is an external SDK dependency the boundary must
-    // not reach directly.
+    // The outbound ports and their fakes live in the server assembly; any other type whose
+    // name or namespace mentions Slack is an external SDK dependency the boundary must not
+    // reach directly.
     private static bool IsExternalSlackClient(Type type)
     {
         if (type.Assembly == typeof(ISlackAppManagementPort).Assembly)

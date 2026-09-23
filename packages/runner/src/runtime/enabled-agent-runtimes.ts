@@ -2,7 +2,7 @@ import type { ActionCatalog } from '../actions/manifest.js'
 import type { AgentRuntime } from '../core/types.js'
 
 const DEFAULT_AGENT_RUNTIMES: readonly AgentRuntime[] = ['pi']
-const KNOWN_AGENT_RUNTIMES = new Set<AgentRuntime>(['pi', 'opencode'])
+const KNOWN_AGENT_RUNTIMES = new Set<AgentRuntime>(['pi', 'opencode', 'codex'])
 
 export function parseEnabledAgentRuntimes(value: string | undefined): readonly AgentRuntime[] {
   if (value === undefined) return DEFAULT_AGENT_RUNTIMES

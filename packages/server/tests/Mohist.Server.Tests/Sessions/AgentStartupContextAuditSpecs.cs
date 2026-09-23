@@ -132,7 +132,7 @@ public sealed class AgentStartupContextAuditSpecs : IAsyncLifetime, IClassFixtur
             WorkDir: "/tmp/agent-session-startup-replay",
             StartupContext: BuildContext(truncated: false)));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        await Assert.ThrowsAsync<AgentSessionInitialLaunchConflictException>(() =>
             session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
                 InputId: inputId,
                 TurnId: turnId,
@@ -188,7 +188,7 @@ public sealed class AgentStartupContextAuditSpecs : IAsyncLifetime, IClassFixtur
         // Replay the launch with the same input id and a deliberately
         // divergent startup context. The grain must reject this as a
         // conflict — the launch identity is immutable once accepted.
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        await Assert.ThrowsAsync<AgentSessionInitialLaunchConflictException>(() =>
             session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
                 InputId: launchInputId,
                 TurnId: launchTurnId,

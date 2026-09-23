@@ -451,6 +451,7 @@ public class AgentSessionQuerySpecs
                 {
                     [AgentSessionQueryMetadataKeys.ProjectId] = ProjectA,
                     [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
+                    [GenericAgentSessionMetadata.AgentId] = "workflow-agent",
                     [AgentSessionQueryMetadataKeys.WorkflowRunId] = WorkflowRunW1,
                     [AgentSessionQueryMetadataKeys.SessionName] = SessionNameW1,
                     [AgentSessionQueryMetadataKeys.IssueNumber] = WorkflowIssueNumberW1,

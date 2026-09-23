@@ -11,6 +11,15 @@ public static class TestRunnerGenerationExtensions
     public static Task RegisterAsync(this IRunnerGrain runner, RunnerInfo info) =>
         runner.RegisterAsync(info, ProcessGeneration);
 
+    public static Task RegisterAsync(
+        this IRunnerGrain runner,
+        RunnerInfo info,
+        string processGeneration) =>
+        runner.RegisterAsync(
+            info,
+            processGeneration,
+            new RunnerPresentedAuthority(CredentialId: null, OperatorOverride: true));
+
     public static Task<RunnerPollAdmission> TryBeginPollAsync(this IRunnerGrain runner) =>
         runner.TryBeginPollAsync(ProcessGeneration);
 

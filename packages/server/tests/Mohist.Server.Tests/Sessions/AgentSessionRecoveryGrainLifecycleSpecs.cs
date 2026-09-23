@@ -41,6 +41,12 @@ public sealed partial class AgentSessionRecoveryGrainSpecs
             "manager request",
             "agent-launch",
             "manager-job",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = SlackDeliveryOwnerIds.ManagerProjectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "manager-agent",
+            }),
             Provenance: initialProvenance));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-1"));
         await grain.MarkInitialTurnTerminalAsync("manager-job", AgentTurnStatus.Completed, null);

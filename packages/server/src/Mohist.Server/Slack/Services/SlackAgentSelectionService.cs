@@ -394,7 +394,6 @@ internal sealed class SlackAgentSelectionService : IScopedService
                 threadAnchor,
                 claim.ThreadTs,
                 new SlackChannelLaunchServiceLaunchIds(ids.SessionId, ids.InputId, ids.TurnId),
-                StartupContext: null,
                 _threadMappings), ct);
             if (result.ResponseOwner == SlackIngressResponseOwners.Server)
                 return new SlackTurnControlResult(

@@ -16,22 +16,120 @@ function buildUsageData(overrides?: Partial<AgentUsageTimeseriesDto>): AgentUsag
     rangeTo: '2026-06-28T23:59:59',
     bucketGranularity: 'day',
     buckets: [
-      { bucketStart: '2026-06-22T00:00:00', bucketEnd: '2026-06-22T23:59:59', inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 10, costCurrency: 'USD' },
-      { bucketStart: '2026-06-23T00:00:00', bucketEnd: '2026-06-23T23:59:59', inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 25, costCurrency: 'USD' },
-      { bucketStart: '2026-06-24T00:00:00', bucketEnd: '2026-06-24T23:59:59', inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 5, costCurrency: 'USD' },
-      { bucketStart: '2026-06-25T00:00:00', bucketEnd: '2026-06-25T23:59:59', inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 30, costCurrency: 'USD' },
-      { bucketStart: '2026-06-26T00:00:00', bucketEnd: '2026-06-26T23:59:59', inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 15, costCurrency: 'USD' },
-      { bucketStart: '2026-06-27T00:00:00', bucketEnd: '2026-06-27T23:59:59', inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 20, costCurrency: 'USD' },
-      { bucketStart: '2026-06-28T00:00:00', bucketEnd: '2026-06-28T23:59:59', inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 8, costCurrency: 'USD' },
+      {
+        bucketStart: '2026-06-22T00:00:00',
+        bucketEnd: '2026-06-22T23:59:59',
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costAmount: 10,
+        costCurrency: 'USD',
+      },
+      {
+        bucketStart: '2026-06-23T00:00:00',
+        bucketEnd: '2026-06-23T23:59:59',
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costAmount: 25,
+        costCurrency: 'USD',
+      },
+      {
+        bucketStart: '2026-06-24T00:00:00',
+        bucketEnd: '2026-06-24T23:59:59',
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costAmount: 5,
+        costCurrency: 'USD',
+      },
+      {
+        bucketStart: '2026-06-25T00:00:00',
+        bucketEnd: '2026-06-25T23:59:59',
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costAmount: 30,
+        costCurrency: 'USD',
+      },
+      {
+        bucketStart: '2026-06-26T00:00:00',
+        bucketEnd: '2026-06-26T23:59:59',
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costAmount: 15,
+        costCurrency: 'USD',
+      },
+      {
+        bucketStart: '2026-06-27T00:00:00',
+        bucketEnd: '2026-06-27T23:59:59',
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costAmount: 20,
+        costCurrency: 'USD',
+      },
+      {
+        bucketStart: '2026-06-28T00:00:00',
+        bucketEnd: '2026-06-28T23:59:59',
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costAmount: 8,
+        costCurrency: 'USD',
+      },
     ],
     cumulativeCostPerShip: [
-      { dayEnd: '2026-06-22T23:59:59', cumulativeCost: 10, currency: 'USD', cumulativeShippedCount: 1, costPerShip: 10 },
-      { dayEnd: '2026-06-23T23:59:59', cumulativeCost: 35, currency: 'USD', cumulativeShippedCount: 2, costPerShip: 17.5 },
-      { dayEnd: '2026-06-24T23:59:59', cumulativeCost: 40, currency: 'USD', cumulativeShippedCount: 2, costPerShip: 20 },
-      { dayEnd: '2026-06-25T23:59:59', cumulativeCost: 70, currency: 'USD', cumulativeShippedCount: 3, costPerShip: 23.33 },
-      { dayEnd: '2026-06-26T23:59:59', cumulativeCost: 85, currency: 'USD', cumulativeShippedCount: 4, costPerShip: 21.25 },
-      { dayEnd: '2026-06-27T23:59:59', cumulativeCost: 105, currency: 'USD', cumulativeShippedCount: 5, costPerShip: 21 },
-      { dayEnd: '2026-06-28T23:59:59', cumulativeCost: 113, currency: 'USD', cumulativeShippedCount: 6, costPerShip: 18.83 },
+      {
+        dayEnd: '2026-06-22T23:59:59',
+        cumulativeCost: 10,
+        currency: 'USD',
+        cumulativeShippedCount: 1,
+        costPerShip: 10,
+      },
+      {
+        dayEnd: '2026-06-23T23:59:59',
+        cumulativeCost: 35,
+        currency: 'USD',
+        cumulativeShippedCount: 2,
+        costPerShip: 17.5,
+      },
+      {
+        dayEnd: '2026-06-24T23:59:59',
+        cumulativeCost: 40,
+        currency: 'USD',
+        cumulativeShippedCount: 2,
+        costPerShip: 20,
+      },
+      {
+        dayEnd: '2026-06-25T23:59:59',
+        cumulativeCost: 70,
+        currency: 'USD',
+        cumulativeShippedCount: 3,
+        costPerShip: 23.33,
+      },
+      {
+        dayEnd: '2026-06-26T23:59:59',
+        cumulativeCost: 85,
+        currency: 'USD',
+        cumulativeShippedCount: 4,
+        costPerShip: 21.25,
+      },
+      {
+        dayEnd: '2026-06-27T23:59:59',
+        cumulativeCost: 105,
+        currency: 'USD',
+        cumulativeShippedCount: 5,
+        costPerShip: 21,
+      },
+      {
+        dayEnd: '2026-06-28T23:59:59',
+        cumulativeCost: 113,
+        currency: 'USD',
+        cumulativeShippedCount: 6,
+        costPerShip: 18.83,
+      },
     ],
     ...overrides,
   }
@@ -46,7 +144,7 @@ function buildZeroSampleUsageData(): AgentUsageTimeseriesDto {
       inputTokens: 0,
       outputTokens: 0,
       totalTokens: 0,
-      costAmount: 0,
+      costAmount: null,
       costCurrency: null,
     }
   })
@@ -130,7 +228,7 @@ describe('CostTrendChart', () => {
     await waitFor(() => {
       const empty = screen.getByTestId('chart-container-empty')
       expect(empty).toBeInTheDocument()
-      expect(empty.textContent).toContain('once an agent session reports usage')
+      expect(empty.textContent).toContain('once an agent session reports a cost')
     })
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
   })
@@ -143,7 +241,7 @@ describe('CostTrendChart', () => {
     await waitFor(() => {
       const empty = screen.getByTestId('chart-container-empty')
       expect(empty).toBeInTheDocument()
-      expect(empty.textContent).toContain('once an agent session reports usage')
+      expect(empty.textContent).toContain('once an agent session reports a cost')
     })
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
   })
@@ -194,6 +292,85 @@ describe('CostTrendChart', () => {
     })
   })
 
+  it('unknown-cost day renders as a gap, not a zero-height bar', async () => {
+    const data = buildUsageData()
+    data.buckets[2] = { ...data.buckets[2], costAmount: null }
+
+    mockUsageResponse(data)
+
+    renderChart()
+
+    await waitFor(() => {
+      const barSeries = screen.getByTestId('bar-series')
+      expect(barSeries.children).toHaveLength(6)
+      expect(screen.queryByTestId('bar-2')).not.toBeInTheDocument()
+      expect(screen.getByTestId('bar-3')).toBeInTheDocument()
+    })
+  })
+
+  it('treats an omitted costAmount key as unknown, not zero', async () => {
+    const data = buildUsageData()
+    const { costAmount: _omit, ...bucketWithoutCost } = data.buckets[2]
+    data.buckets[2] = bucketWithoutCost as AgentUsageTimeseriesDto['buckets'][number]
+
+    mockUsageResponse(data)
+
+    renderChart()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('bar-series').children).toHaveLength(6)
+      expect(screen.queryByTestId('bar-2')).not.toBeInTheDocument()
+    })
+  })
+
+  it('reports unknown recorded cost in the summary when no bucket reported an amount', async () => {
+    const data = buildUsageData()
+    data.buckets = data.buckets.map((bucket) => ({ ...bucket, costAmount: null, costCurrency: null }))
+    // A known pre-window cumulative amount still resolves the chart while
+    // every in-window bucket stays unknown.
+    data.cumulativeCostPerShip = data.cumulativeCostPerShip!.map((point) => ({
+      ...point,
+      cumulativeCost: 12,
+    }))
+
+    mockUsageResponse(data)
+
+    renderChart()
+
+    await waitFor(() => {
+      const summary = screen.getByTestId('chart-sr-summary')
+      expect(summary.textContent).toContain('Total window recorded cost: unknown')
+    })
+  })
+
+  it('renders the empty state for a token-only project without recorded cost', async () => {
+    const data = buildUsageData({
+      buckets: buildUsageData().buckets.map((bucket) => ({
+        ...bucket,
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+        costAmount: null,
+        costCurrency: null,
+      })),
+      cumulativeCostPerShip: buildUsageData().cumulativeCostPerShip!.map((point) => ({
+        ...point,
+        cumulativeCost: null,
+        costPerShip: null,
+      })),
+    })
+
+    mockUsageResponse(data)
+
+    renderChart()
+
+    await waitFor(() => {
+      const empty = screen.getByTestId('chart-container-empty')
+      expect(empty).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
+  })
+
   // --- Trend values ---
 
   it('trend line renders with markers for valid costPerShip points', async () => {
@@ -213,8 +390,20 @@ describe('CostTrendChart', () => {
   it('skips null costPerShip points (undefined)', async () => {
     const data = buildUsageData()
     if (data.cumulativeCostPerShip) {
-      data.cumulativeCostPerShip[1] = { dayEnd: '2026-06-23T23:59:59', cumulativeCost: null, currency: null, cumulativeShippedCount: 0, costPerShip: null }
-      data.cumulativeCostPerShip[3] = { dayEnd: '2026-06-25T23:59:59', cumulativeCost: null, currency: null, cumulativeShippedCount: 0, costPerShip: null }
+      data.cumulativeCostPerShip[1] = {
+        dayEnd: '2026-06-23T23:59:59',
+        cumulativeCost: null,
+        currency: null,
+        cumulativeShippedCount: 0,
+        costPerShip: null,
+      }
+      data.cumulativeCostPerShip[3] = {
+        dayEnd: '2026-06-25T23:59:59',
+        cumulativeCost: null,
+        currency: null,
+        cumulativeShippedCount: 0,
+        costPerShip: null,
+      }
     }
 
     mockUsageResponse(data)
@@ -231,7 +420,13 @@ describe('CostTrendChart', () => {
   it('does not bridge null costPerShip gaps in the trend path', async () => {
     const data = buildUsageData()
     if (data.cumulativeCostPerShip) {
-      data.cumulativeCostPerShip[1] = { dayEnd: '2026-06-23T23:59:59', cumulativeCost: null, currency: null, cumulativeShippedCount: 0, costPerShip: null }
+      data.cumulativeCostPerShip[1] = {
+        dayEnd: '2026-06-23T23:59:59',
+        cumulativeCost: null,
+        currency: null,
+        cumulativeShippedCount: 0,
+        costPerShip: null,
+      }
     }
 
     mockUsageResponse(data)
@@ -247,7 +442,13 @@ describe('CostTrendChart', () => {
   it('genuine zero costPerShip plots at value 0 (not skipped)', async () => {
     const data = buildUsageData()
     if (data.cumulativeCostPerShip) {
-      data.cumulativeCostPerShip[0] = { dayEnd: '2026-06-22T23:59:59', cumulativeCost: 0, currency: 'USD', cumulativeShippedCount: 2, costPerShip: 0 }
+      data.cumulativeCostPerShip[0] = {
+        dayEnd: '2026-06-22T23:59:59',
+        cumulativeCost: 0,
+        currency: 'USD',
+        cumulativeShippedCount: 2,
+        costPerShip: 0,
+      }
     }
 
     mockUsageResponse(data)
@@ -311,13 +512,13 @@ describe('CostTrendChart', () => {
     await waitFor(() => {
       const legend = screen.getByTestId('chart-legend')
       expect(legend).toBeInTheDocument()
-      expect(legend.textContent).toContain('Daily cost')
-      expect(legend.textContent).toContain('Cost per ship')
+      expect(legend.textContent).toContain('Recorded cost')
+      expect(legend.textContent).toContain('Recorded cost per completed Issue')
 
       const entries = legend.querySelectorAll('span')
-      const dailyCostEntry = [...entries].find((e) => e.textContent === 'Daily cost')
-      const cpsEntry = [...entries].find((e) => e.textContent === 'Cost per ship')
-      expect(dailyCostEntry).toBeTruthy()
+      const recordedCostEntry = [...entries].find((e) => e.textContent === 'Recorded cost')
+      const cpsEntry = [...entries].find((e) => e.textContent === 'Recorded cost per completed Issue')
+      expect(recordedCostEntry).toBeTruthy()
       expect(cpsEntry).toBeTruthy()
     })
   })
@@ -413,9 +614,9 @@ describe('CostTrendChart', () => {
     await waitFor(() => {
       const summary = screen.getByTestId('chart-sr-summary')
       expect(summary).toBeInTheDocument()
-      expect(summary.textContent).toContain('Daily cost bar chart')
+      expect(summary.textContent).toContain('Recorded cost bar chart')
       expect(summary.textContent).toContain('Jun 22')
-      expect(summary.textContent).toContain('Total window cost')
+      expect(summary.textContent).toContain('Total window recorded cost')
     })
   })
 
@@ -493,7 +694,7 @@ describe('CostTrendChart', () => {
 
     await waitFor(() => {
       const empty = screen.getByTestId('chart-container-empty')
-      expect(empty.textContent).toContain('once an agent session reports usage on this project')
+      expect(empty.textContent).toContain('once an agent session reports a cost on this project')
     })
   })
 
@@ -537,10 +738,12 @@ describe('CostTrendChart', () => {
   // --- Window annotation ---
 
   it('renders a window badge derived from rangeFrom/rangeTo when usage data is present', async () => {
-    mockUsageResponse(buildUsageData({
-      rangeFrom: '2026-06-22T00:00:00',
-      rangeTo: '2026-06-28T23:59:59',
-    }))
+    mockUsageResponse(
+      buildUsageData({
+        rangeFrom: '2026-06-22T00:00:00',
+        rangeTo: '2026-06-28T23:59:59',
+      }),
+    )
 
     renderChart()
 

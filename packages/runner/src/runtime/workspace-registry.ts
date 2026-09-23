@@ -8,10 +8,10 @@ export type WorkspaceRegistryPhase = 'active' | 'eligible' | 'stuck'
 //
 // Runner-local registry of NAMED workspaces (the Workspace entity:
 // persistent execution environments independent of any WorkflowRun)
-// this runner has materialized. The registry is runtime state, NOT domain
+// this runner has provisioned. The registry is runtime state, NOT domain
 // truth — the server's Workspace grain owns status/home, and the on-disk
 // identity marker owns the directory. The registry exists so cleanup never
-// touches another runner's directory and so materialization timestamps survive
+// touches another runner's directory and so provisioning timestamps survive
 // restarts. It is a rebuildable index: missing/unreadable/corrupt JSON loads
 // empty and it may never recover work, infer an outcome, claim a Home or
 // override Server Workspace state.
@@ -28,7 +28,7 @@ export interface NamedWorkspaceRegistryEntry {
   workspaceName: string
   workspacePath: string
   phase: WorkspaceRegistryPhase
-  materializedAt: string
+  provisionedAt: string
   terminalAt: string | null
 }
 
@@ -108,14 +108,14 @@ export class NamedWorkspaceRegistry {
     if (owner && owner !== key) {
       throw new Error(`named workspace registry path is already owned by ${owner}`)
     }
-    const materializedAt = this.now().toISOString()
+    const provisionedAt = this.now().toISOString()
     const existing = this.entries.get(key)
     const entry: NamedWorkspaceRegistryEntry = {
       projectId: input.projectId,
       workspaceName: input.workspaceName,
       workspacePath,
       phase: 'active',
-      materializedAt,
+      provisionedAt,
       terminalAt: null,
     }
     if (existing && this.pathIndex.get(existing.workspacePath) === key && existing.workspacePath !== workspacePath) {
@@ -220,7 +220,7 @@ export class NamedWorkspaceRegistry {
       if (typeof entry.workspaceName !== 'string' || entry.workspaceName.length === 0) continue
       if (typeof entry.workspacePath !== 'string' || entry.workspacePath.length === 0) continue
       if (entry.phase !== 'active' && entry.phase !== 'eligible' && entry.phase !== 'stuck') continue
-      if (typeof entry.materializedAt !== 'string') continue
+      if (typeof entry.provisionedAt !== 'string') continue
       const workspacePath = resolve(entry.workspacePath)
       if (nextPathIndex.has(workspacePath)) {
         this.entries = new Map()
@@ -233,7 +233,7 @@ export class NamedWorkspaceRegistry {
         workspaceName: entry.workspaceName,
         workspacePath,
         phase: entry.phase,
-        materializedAt: entry.materializedAt,
+        provisionedAt: entry.provisionedAt,
         terminalAt: typeof entry.terminalAt === 'string' ? entry.terminalAt : null,
       })
       nextPathIndex.set(workspacePath, key)

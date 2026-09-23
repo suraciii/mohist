@@ -27,7 +27,7 @@
       "server-runtime": 1,
       "duration-measurement": 1
     },
-    // The isolated Server measurement precedes the remaining fan-out.
+    // The isolated Server L1 measurement precedes the remaining fan-out.
     "durationMeasurementTracks": ["server-l1"],
     "durationIsolationTrack": "runner"
   },
@@ -61,8 +61,7 @@
     "resourceLanes": [
       { "id": "default", "resources": [], "capacity": 4 },
       { "id": "server-l1", "resources": ["orleans", "sqlite", "server-runtime"], "capacity": 1 },
-      { "id": "server-l0", "resources": ["orleans", "sqlite", "server-runtime", "duration-measurement"], "capacity": 1 },
-      { "id": "architecture-measurement", "resources": ["duration-measurement"], "capacity": 1 }
+      { "id": "server-l0", "resources": ["orleans", "sqlite", "server-runtime", "duration-measurement"], "capacity": 1 }
     ]
   },
   "tracks": [
@@ -75,11 +74,11 @@
       ]
     },
     { "id": "server-l0", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKinds": ["Design", "Product"], "level": "L0", "resources": ["orleans", "sqlite", "server-runtime", "duration-measurement"], "csproj": "packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj", "apphostArgs": ["-trait", "level=L0", "-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "1"], "report": "reports/server-l0.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
-        { "id": "spec", "namePattern": "(OtelOrleansSourceNameSpecs|RunnerBuildIdentitySpecs|WorkflowRecoveryContinuationSpecs)\\.", "expectedTotal": 4, "percentile": 95, "percentileMs": 50 },
+        { "id": "spec", "namePattern": "(OtelOrleansSourceNameSpecs|RunnerBuildIdentitySpecs|WorkflowRecoveryContinuationSpecs)\\.", "expectedTotal": 7, "percentile": 95, "percentileMs": 50 },
         { "id": "unit", "percentile": 95, "percentileMs": 50 }
       ]
     },
-    { "id": "server-arch", "kind": "dotnet-apphost", "trackType": "architecture", "application": "server", "specKinds": ["Design"], "architectureScope": "server", "resources": ["duration-measurement"], "csproj": "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "report": "reports/server-arch.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
+    { "id": "server-arch", "kind": "dotnet-apphost", "trackType": "architecture", "application": "server", "specKinds": ["Design"], "architectureScope": "server", "resources": [], "csproj": "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "report": "reports/server-arch.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
         { "id": "arch" }
       ]
     },

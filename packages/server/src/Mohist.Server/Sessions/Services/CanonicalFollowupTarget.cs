@@ -15,4 +15,5 @@ public sealed record CanonicalFollowupTarget(
     AgentExecutionDefinition? Definition = null,
     string? ProjectId = null,
     string? AgentId = null,
-    string? ConnectionId = null);
+    string? ConnectionId = null,
+    bool RequiresBindingRecovery = false);

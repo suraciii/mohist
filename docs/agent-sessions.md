@@ -103,9 +103,10 @@ Variant and has no `none` value. OpenCode does not support explicit Reasoning
 Effort. Choose Pi or Codex, or leave it unset for OpenCode.
 
 An ordinary launch accepts task text and context references. Context is not Agent
-configuration. The Agent definition is fixed when the AgentJob starts, as are
-its Skills and Workspace identity. Later Agent edits affect later AgentJobs only.
-Follow-ups in an existing Session keep the Session's established configuration.
+configuration. The Agent's execution settings, Skills, and Workspace identity
+are fixed when the AgentJob starts. Later edits to those settings affect later
+AgentJobs only. Follow-ups keep the Session's established execution configuration.
+The concurrency limit is live scheduling policy, not part of that snapshot.
 
 ### Execution Resolution
 
@@ -127,11 +128,13 @@ the model at dispatch, and the AgentJob snapshot records that the Runtime chose
 it. A Runner rejects a dispatch whose Runtime is missing or unknown instead of
 guessing a backend.
 
-An Agent with an unset Model is ready when its Runtime is usable. An Agent edit
-affects later launches only: each AgentJob stores its resolved configuration at
-launch, and no edit reinterprets an existing AgentJob, queued Job, or Session
-follow-up. A Readiness conclusion confirmed by a completed execution is not
-changed by an Agent edit alone.
+An Agent with an unset Model is ready when its Runtime is usable. Each AgentJob
+stores its resolved execution configuration at launch. Edits to execution
+settings do not reinterpret an existing AgentJob, queued Job, or Session
+follow-up. The concurrency limit is the exception: its current value controls
+the next capacity evaluation for both queued launches and follow-ups, without
+cancelling work that already occupies capacity. A Readiness conclusion confirmed
+by a completed execution is not changed by an Agent edit alone.
 
 ### Built-in Agents
 
@@ -235,6 +238,12 @@ launch` returns AgentJob, AgentSession, first Input, and Turn IDs. Use
 its record. Observe `accepted`, `queued`, and `running`; read the result at
 `terminal`; query or retry the original key when state is `unknown`.
 
+Launch context keeps the Server contract's types. `--issue` and `--epic` are
+positive integer references and are sent as JSON numbers; `--workspace`,
+`--repo`, and other text references are JSON strings. The CLI omits context
+properties that were not supplied, so a workspace-only launch does not send
+empty numeric values. Invalid numeric input remains a Server validation error.
+
 ## Launch Entry Points
 
 A task-first launch is available when the caller has a task but does not yet
@@ -337,6 +346,14 @@ reconcile, not as permission to retry with a new identity.
 The Server is the authority. `idle` permits a new Turn, Compact, or Reset;
 `active` means work is queued, executing, or awaiting confirmation; `unknown`
 blocks new work until the original operation is queried or reconciled.
+
+Verified Runtime evidence or administrative Runner removal can settle an old
+execution without discovering its result. The old Turn remains `unknown` and
+retains its identity and context generation; current readiness can return to
+`idle`. `mo session view <session-id> --json
+contextGeneration,unresolvedPrevious,unresolvedPreviousCount,nextAction`
+exposes that retained uncertainty. `inspect_previous_execution` asks the
+operator to inspect the old execution; it does not resubmit its Input.
 
 Stop is the only operation for ending work. A queued Turn is cancelled locally.
 A running Turn is cancelled only after Runtime confirmation. An uncertain Stop

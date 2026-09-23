@@ -35,10 +35,9 @@ The client identity that represents a Mohist Agent in Slack through an Agent
 Connection. It is neither another Mohist Agent nor an External Agent.
 
 **Web UI**:
-Mohist's fallback plane for observation, visualization, manual operations, and
-takeover, with direct configuration, launch, and continuation of Mohist Agents.
-It is neither the user's daily collaboration workspace nor the primary
-interaction entry point.
+Mohist's display surface for progress, relationships, evidence, and results
+alongside Agent interaction. It includes direct controls for manual operations
+and Agent use; see [Web UI Guide](docs/web-ui.md).
 
 **GitHub Mirror**:
 The one GitHub Issue that Mohist creates and maintains for a Mohist Issue whose
@@ -101,8 +100,8 @@ Approval Points, Feedback Tasks, recovery, and template expressions.
 
 **Runner**:
 The execution-plane process that registers with a Server, claims dispatched
-work, materializes Workspace directories, executes resolved Agent work, and
-reports facts. It never interprets facts or decides production-line state.
+work, provisions Workspace Homes, executes resolved Agent work, and reports
+facts. It never interprets facts or decides production-line state.
 
 **Skill**:
 A reusable description of an Agent capability. An External Agent installs
@@ -216,10 +215,10 @@ A Workspace creation source and unique resolution key: an Issue, an interaction
 context such as a Slack channel or Web conversation, or an explicit creation.
 At most one active Workspace exists for the same Origin at one time.
 
-**Materialization**:
-A Workspace directory instance on one Runner, with routing facts that determine
+**Provisioning**:
+A Workspace Home instance on one Runner, with routing facts that determine
 where subsequent execution is scheduled. Its directory can be reclaimed or
-lost with the Runner; rematerialization starts empty without changing Workspace
+lost with the Runner; reprovisioning starts empty without changing Workspace
 identity.
 
 _Avoid_: worktree or Runner directory as the Workspace identity

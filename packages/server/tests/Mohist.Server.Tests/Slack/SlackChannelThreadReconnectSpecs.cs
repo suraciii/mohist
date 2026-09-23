@@ -46,7 +46,7 @@ public sealed partial class SlackChannelThreadIngressSpecs
                     gapAt);
             await _fixture.Grains
                 .GetGrain<IWorkspaceGrain>(GrainKey.Workspace(connection.ProjectId, workspaceName))
-                .EnsureMaterializedOnAsync(runnerId, $"/tmp/{workspaceName}", gapAt);
+                .EnsureProvisionedOnAsync(runnerId, $"/tmp/{workspaceName}", gapAt);
         }
 
         string? jobKey = null;

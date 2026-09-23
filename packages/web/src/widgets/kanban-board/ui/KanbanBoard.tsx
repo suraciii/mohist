@@ -25,7 +25,7 @@ import {
   type SortMode,
 } from '../model/board-query'
 import { useProject, useProjectPath } from '../../../entities/project'
-import { getPriorityStyle } from '../../../shared/lib/label-colors'
+import { getPriorityStyle } from '../../../entities/issue'
 import { getStageColors } from '../model/stage-colors'
 
 interface Props {

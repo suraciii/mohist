@@ -2,6 +2,10 @@ import type { AgentExecutionDefinition, ManagerExecutionGrantResponse } from '..
 import type { SlackExecutionContext } from '../runtime/slack-execution-context.js'
 import type { WorkspaceQuery } from '../runtime/workspace-query.js'
 import type { SessionCommandRequest, SessionCommandResult } from '../server/session-command-handler.js'
+import type {
+  RunnerSessionActivityProbeRequest,
+  RunnerSessionActivityProbeResult,
+} from '../server/session-probe-handler.js'
 import type { RuntimeSessionBinding } from '../server/session-target.js'
 
 export interface JsonRpcRequest<TParams> {
@@ -172,3 +176,4 @@ export interface RunnerStopReply {
 }
 
 export type { SessionCommandRequest, SessionCommandResult }
+export type { RunnerSessionActivityProbeRequest, RunnerSessionActivityProbeResult }

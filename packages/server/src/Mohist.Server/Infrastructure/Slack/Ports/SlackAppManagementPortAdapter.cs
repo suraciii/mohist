@@ -73,7 +73,7 @@ public sealed class SlackAppManagementPortAdapter(
         return response.Outcome switch
         {
             SlackApiCallOutcome.Ok => ParseCreated(response.Body),
-            SlackApiCallOutcome.Rejected => new SlackAppManagementResult(
+            SlackApiCallOutcome.Rejected or SlackApiCallOutcome.RateLimited => new SlackAppManagementResult(
                 SlackAppManagementOutcome.DefiniteFailure, ErrorClass: response.Error ?? "create_rejected"),
             SlackApiCallOutcome.Unparseable => new SlackAppManagementResult(
                 SlackAppManagementOutcome.Unknown, ErrorClass: "unparseable_response"),
@@ -106,7 +106,7 @@ public sealed class SlackAppManagementPortAdapter(
         return response.Outcome switch
         {
             SlackApiCallOutcome.Ok => new SlackAppManagementResult(SlackAppManagementOutcome.Succeeded, request.AppId),
-            SlackApiCallOutcome.Rejected => new SlackAppManagementResult(
+            SlackApiCallOutcome.Rejected or SlackApiCallOutcome.RateLimited => new SlackAppManagementResult(
                 SlackAppManagementOutcome.DefiniteFailure, ErrorClass: response.Error ?? "delete_rejected"),
             SlackApiCallOutcome.Unparseable => new SlackAppManagementResult(
                 SlackAppManagementOutcome.Unknown, ErrorClass: "unparseable_response"),
@@ -141,7 +141,7 @@ public sealed class SlackAppManagementPortAdapter(
             SlackApiCallOutcome.Ok => new SlackAppManagementFact(SlackAppManagementFactOutcome.Present, request.AppId),
             SlackApiCallOutcome.Rejected when response.Error is "not_found" or "app_not_found" or "invalid_app_id" =>
                 new SlackAppManagementFact(SlackAppManagementFactOutcome.Absent, ErrorClass: response.Error),
-            SlackApiCallOutcome.Rejected => new SlackAppManagementFact(
+            SlackApiCallOutcome.Rejected or SlackApiCallOutcome.RateLimited => new SlackAppManagementFact(
                 SlackAppManagementFactOutcome.Unknown, ErrorClass: response.Error ?? "inspect_rejected"),
             _ => new SlackAppManagementFact(SlackAppManagementFactOutcome.Unknown, ErrorClass: "transport_error"),
         };
@@ -174,7 +174,7 @@ public sealed class SlackAppManagementPortAdapter(
             SlackApiCallOutcome.Ok => ParseExportedManifest(response.Body),
             SlackApiCallOutcome.Rejected when response.Error is "not_found" or "app_not_found" or "invalid_app_id" =>
                 new SlackAppManifestExport(SlackAppManagementFactOutcome.Absent, ErrorClass: response.Error),
-            SlackApiCallOutcome.Rejected => new SlackAppManifestExport(
+            SlackApiCallOutcome.Rejected or SlackApiCallOutcome.RateLimited => new SlackAppManifestExport(
                 SlackAppManagementFactOutcome.Unknown, ErrorClass: response.Error ?? "export_rejected"),
             _ => new SlackAppManifestExport(SlackAppManagementFactOutcome.Unknown, ErrorClass: "transport_error"),
         };
@@ -209,7 +209,7 @@ public sealed class SlackAppManagementPortAdapter(
         {
             SlackApiCallOutcome.Ok => new SlackAppManagementResult(
                 SlackAppManagementOutcome.Succeeded, request.App.AppId),
-            SlackApiCallOutcome.Rejected => new SlackAppManagementResult(
+            SlackApiCallOutcome.Rejected or SlackApiCallOutcome.RateLimited => new SlackAppManagementResult(
                 SlackAppManagementOutcome.DefiniteFailure, ErrorClass: response.Error ?? "manifest_rejected"),
             SlackApiCallOutcome.Unparseable => new SlackAppManagementResult(
                 SlackAppManagementOutcome.Unknown, ErrorClass: "unparseable_response"),

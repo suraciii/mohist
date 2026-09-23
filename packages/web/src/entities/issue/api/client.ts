@@ -477,9 +477,11 @@ export function getIssueWorkflowTaskLog(
   taskId: string,
   params: IssueWorkflowTaskLogParams = {},
   projectId?: string | null,
+  workflowRunId?: string | null,
   signal?: AbortSignal,
 ) {
   const search = new URLSearchParams()
+  if (workflowRunId) search.set('workflowRunId', workflowRunId)
   if (params.cursor != null) search.set('cursor', String(params.cursor))
   if (params.limit != null) search.set('limit', String(params.limit))
   const qs = search.toString()

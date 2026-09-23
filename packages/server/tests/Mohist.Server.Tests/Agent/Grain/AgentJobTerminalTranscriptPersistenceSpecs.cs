@@ -29,7 +29,9 @@ public class AgentJobTerminalTranscriptPersistenceSpecs : AgentJobGrainTestSuppo
             $"agent-job-terminal-retry-{Guid.NewGuid():N}");
         var jobKey = $"agent-job-terminal-retry-{Guid.NewGuid():N}";
         var sessionId = $"session-terminal-retry-{Guid.NewGuid():N}";
-        await OpenSessionAsync(sessionId, projectId);
+        var inputId = $"input-terminal-retry-{Guid.NewGuid():N}";
+        var turnId = $"turn-terminal-retry-{Guid.NewGuid():N}";
+        await OpenJobSessionAsync(sessionId, projectId, jobKey, inputId, turnId, "do a failing thing");
 
         var job = JobGrain(jobKey);
         await job.SubmitAsync(new AgentJobInput(
@@ -37,6 +39,8 @@ public class AgentJobTerminalTranscriptPersistenceSpecs : AgentJobGrainTestSuppo
             WorkspacePath: "/tmp/agent-job-terminal-retry",
             ProjectId: projectId,
             AgentSessionId: sessionId,
+            InitialInputId: inputId,
+            InitialTurnId: turnId,
             AgentId: "agent-test"));
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
@@ -63,21 +67,6 @@ public class AgentJobTerminalTranscriptPersistenceSpecs : AgentJobGrainTestSuppo
             await ListTranscriptPartsAsync(sessionId),
             part => part.Type == TranscriptPartTypes.SessionActivity);
         Assert.Equal(AgentJobSessionDeliveryIds.TerminalDeliveryId(jobKey), persisted.CorrelationKey);
-    }
-
-    private async Task OpenSessionAsync(string sessionId, string projectId)
-    {
-        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await session.OpenAsync(new OpenAgentSessionCommand(
-            RunnerId: string.Empty,
-            AgentRuntime: "opencode",
-            WorkDir: "/tmp/agent-job-fixture",
-            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
-                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
-                [GenericAgentSessionMetadata.AgentId] = "agent-test",
-            })));
     }
 
     private async Task<List<AgentSessionTranscriptPartRow>> ListTranscriptPartsAsync(string sessionId)

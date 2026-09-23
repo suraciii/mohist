@@ -24,10 +24,10 @@ const it = Object.assign(
 describe('workspace preparation across stages', () => {
   it('rejects an agent-job dispatch that binds through workspace.path', async () => {
     const workspacePath = await createTestTempDir('mohist-agent-job-workspace-')
-    let materializeCalls = 0
+    let provisionCalls = 0
     const recordingManager = {
       async provisionForIssue() {
-        materializeCalls += 1
+        provisionCalls += 1
         throw new Error('provisionForIssue must not be called for agent-job dispatches')
       },
       async provision() {
@@ -53,14 +53,14 @@ describe('workspace preparation across stages', () => {
     expect(result.status).toBe('failed')
     expect(result.error?.code).toBe('invalid-dispatch')
     expect(result.message).toContain('workspace.name')
-    expect(materializeCalls).toBe(0)
+    expect(provisionCalls).toBe(0)
   })
 
-  it('fails an unresolved workflow workspace before materializing it', async () => {
-    let materializeCalls = 0
+  it('fails an unresolved workflow workspace before provisioning it', async () => {
+    let provisionCalls = 0
     const workspaceManager = {
       async provisionForIssue() {
-        materializeCalls += 1
+        provisionCalls += 1
         throw new Error('workspace Home provisioning must not start')
       },
       async provision() {
@@ -84,7 +84,7 @@ describe('workspace preparation across stages', () => {
     expect(result.status).toBe('failed')
     expect(result.error?.code).toBe('workspace-setup')
     expect(result.message).toMatch(/Named Workspace binding.*workspace\.name/)
-    expect(materializeCalls).toBe(0)
+    expect(provisionCalls).toBe(0)
   })
 
   it('serializes a workspace network timeout as a retry-safe failure', async () => {

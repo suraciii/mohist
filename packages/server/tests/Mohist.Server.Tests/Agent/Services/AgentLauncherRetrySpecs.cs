@@ -89,12 +89,6 @@ public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
                 FailureReason: "runner unavailable",
                 FailureCategory: AgentJobFailureReasons.RunnerUnavailable));
 
-        var unrelated = await session.AcceptFollowupAsync(new AcceptFollowupCommand(
-            Text: "unrelated queued turn",
-            Source: "agent-session-followup",
-            IdempotencyKey: "unrelated-thread-followup",
-            Provenance: failedProvenance with { MessageId = "1710000000.000003" }));
-
         var runnerId = $"thread-retry-runner-{Guid.NewGuid():N}";
         await session.OpenAsync(new OpenAgentSessionCommand(
             runnerId,
@@ -122,6 +116,11 @@ public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
             Assert.Equal(launch.SessionId, retry.SessionId);
             Assert.NotEqual(failed.InputId, retry.InputId);
             Assert.NotEqual(failed.TurnId, retry.TurnId);
+            var unrelated = await session.AcceptFollowupAsync(new AcceptFollowupCommand(
+                Text: "unrelated queued turn",
+                Source: "agent-session-followup",
+                IdempotencyKey: "unrelated-thread-followup",
+                Provenance: failedProvenance with { MessageId = "1710000000.000003" }));
             var followupRequest = Assert.Single(transport.Invocations, request => request.Method == "session.followup");
             var followupPayload = Assert.IsType<Mohist.Server.Contracts.FollowupParams>(followupRequest.Arguments[0]);
             Assert.Equal(retry.TurnId, followupPayload.TurnId);

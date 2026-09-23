@@ -10,6 +10,7 @@ import {
 } from '../../../entities/agent'
 import type { AgentInfo, AgentCreateRequest, AgentUpdateRequest } from '../../../entities/agent'
 import {
+  AGENT_RUNTIME_CODEX,
   AGENT_RUNTIME_OPENCODE,
   AGENT_RUNTIME_PI,
   useAvailableModelIds,
@@ -79,7 +80,8 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
 
   const { data: availableModels } = useAvailableModelIds(runtime)
   const modelVariantsMap = availableModels?.modelVariants ?? {}
-  const reasoningEffortsMap = runtime === AGENT_RUNTIME_PI ? availableModels?.reasoningEfforts : undefined
+  const reasoningEffortsMap =
+    runtime === AGENT_RUNTIME_PI || runtime === AGENT_RUNTIME_CODEX ? availableModels?.reasoningEfforts : undefined
 
   const allModels: string[] = useMemo(() => availableModels?.models ?? [], [availableModels])
 
@@ -300,6 +302,7 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
               >
                 <option value={AGENT_RUNTIME_OPENCODE}>OpenCode</option>
                 <option value={AGENT_RUNTIME_PI}>Pi</option>
+                <option value={AGENT_RUNTIME_CODEX}>Codex</option>
               </select>
             </div>
 

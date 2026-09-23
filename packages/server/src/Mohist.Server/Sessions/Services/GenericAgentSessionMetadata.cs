@@ -64,7 +64,7 @@ public static class GenericAgentSessionMetadata
     /// <summary>
     /// Key for the optional workspace binding recorded on the session
     /// metadata. A bound session executes in the named workspace's
-    /// materialized directory; absence means the runner's default
+    /// provisioned directory; absence means the runner's default
     /// working directory.
     /// </summary>
     public const string WorkspaceName = AgentSessionMetadata.WorkspaceNameKey;
