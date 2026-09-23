@@ -53,7 +53,12 @@ describe('NamedWorkspaceReclaimProbe', () => {
     const { registry } = context()
     await registry.register({ projectId: 'mohist', workspaceName: 'pay', workspacePath: '/tmp/pay' })
     const connection = {
-      getWorkspaceReclaimability: vi.fn(async () => ({ status: 'archived' as const, activeBoundSessions: 0 })),
+      getWorkspaceReclaimability: vi.fn(async () => ({
+        status: 'archived' as const,
+        activeBoundSessions: 0,
+        reclaimable: true,
+        reason: null,
+      })),
     }
     const probe = new NamedWorkspaceReclaimProbe(registry, connection as never)
 
@@ -67,7 +72,12 @@ describe('NamedWorkspaceReclaimProbe', () => {
     const { registry } = context()
     await registry.register({ projectId: 'mohist', workspaceName: 'pay', workspacePath: '/tmp/pay' })
     const connection = {
-      getWorkspaceReclaimability: vi.fn(async () => ({ status: 'active' as const, activeBoundSessions: 0 })),
+      getWorkspaceReclaimability: vi.fn(async () => ({
+        status: 'active' as const,
+        activeBoundSessions: 0,
+        reclaimable: true,
+        reason: null,
+      })),
     }
     const probe = new NamedWorkspaceReclaimProbe(registry, connection as never)
 
@@ -81,7 +91,12 @@ describe('NamedWorkspaceReclaimProbe', () => {
     const { registry } = context()
     await registry.register({ projectId: 'mohist', workspaceName: 'pay', workspacePath: '/tmp/pay' })
     const connection = {
-      getWorkspaceReclaimability: vi.fn(async () => ({ status: 'active' as const, activeBoundSessions: 2 })),
+      getWorkspaceReclaimability: vi.fn(async () => ({
+        status: 'active' as const,
+        activeBoundSessions: 2,
+        reclaimable: false,
+        reason: 'workspace_in_use',
+      })),
     }
     const probe = new NamedWorkspaceReclaimProbe(registry, connection as never)
 
@@ -112,14 +127,19 @@ describe('NamedWorkspaceReclaimProbe', () => {
     await registry.register({ projectId: 'mohist', workspaceName: 'pay', workspacePath: '/tmp/pay' })
     await registry.markEligible('mohist', 'pay')
     const connection = {
-      getWorkspaceReclaimability: vi.fn(async () => ({ status: 'active' as const, activeBoundSessions: 0 })),
+      getWorkspaceReclaimability: vi.fn(async () => ({
+        status: 'active' as const,
+        activeBoundSessions: 0,
+        reclaimable: true,
+        reason: null,
+      })),
     }
     const probe = new NamedWorkspaceReclaimProbe(registry, connection as never)
 
     const result = await probe.runOnce(signal)
 
     expect(result.markedEligible).toBe(0)
-    expect(connection.getWorkspaceReclaimability).not.toHaveBeenCalled()
+    expect(connection.getWorkspaceReclaimability).toHaveBeenCalledOnce()
   })
 })
 
@@ -158,7 +178,11 @@ describe('named workspace cleanup loop end to end', () => {
     current = past
     await registry.markEligible('mohist', 'pay')
 
-    const loop = new CleanupLoop(registry, runner, root, () => null)
+    const loop = new CleanupLoop(registry, runner, root, () => ({
+      async withRemovalFence(_path, callback) {
+        return { kind: 'completed', value: await callback() }
+      },
+    }))
     const policy: CleanupPolicy = { retentionDays: 5 }
     const result = await loop.runOnce(policy, signal)
 

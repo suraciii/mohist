@@ -70,6 +70,9 @@ public sealed class WorkspaceStore : IWorkspaceStore, IScopedService
         }
         else
         {
+            row.DirectoryObservationJson = existing.DirectoryObservationJson;
+            if (existing.HomePath != row.HomePath || existing.HomeRunnerId != row.HomeRunnerId)
+                row.DirectoryObservationJson = null;
             db.Entry(existing).CurrentValues.SetValues(row);
         }
         await db.SaveChangesAsync(ct);

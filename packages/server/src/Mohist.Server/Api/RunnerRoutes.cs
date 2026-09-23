@@ -403,6 +403,7 @@ public static partial class RunnerRoutes
             string workspaceName,
             WorkspaceMaterializedRequest req,
             IGrainFactory grains,
+            WorkspaceDirectoryObservationStore observations,
             TimeProvider time,
             CancellationToken ct) =>
         {
@@ -413,6 +414,8 @@ public static partial class RunnerRoutes
                 var home = await grains.GetGrain<Mohist.Server.Workspace.Grains.IWorkspaceGrain>(
                         GrainKey.Workspace(projectId, workspaceName))
                     .EnsureMaterializedOnAsync(runnerId, req.Path, time.GetUtcNow());
+                if (home is not null && req.Created)
+                    await observations.InvalidateAsync(projectId, workspaceName, home.RunnerId, home.Path, ct);
                 return home is null
                     ? ApiResults.NotFound($"Workspace '{workspaceName}' not found")
                     : ApiResults.Ok(new WorkspaceMaterializedResponse(home.RunnerId, home.Path));
@@ -445,10 +448,31 @@ public static partial class RunnerRoutes
             var state = await workspace.GetAsync();
             if (state is null)
                 return ApiResults.NotFound($"Workspace '{workspaceName}' not found");
-            var activeBoundSessions = await querier.CountActiveBoundSessionsAsync(projectId, workspaceName, ct);
+            var decision = await WorkspaceCleanupEligibility.CheckAsync(state, querier, grains, ct);
             return ApiResults.Ok(new WorkspaceReclaimableResponse(
                 state.Status == Mohist.Server.Workspace.Domain.WorkspaceStatus.Active ? "active" : "archived",
-                activeBoundSessions));
+                decision.ActiveBoundSessions,
+                decision.Reclaimable,
+                decision.Reason));
+        });
+
+        group.MapPost("/workspaces/{projectId}/{workspaceName}/directory-observation", async (
+            string runnerId,
+            string projectId,
+            string workspaceName,
+            WorkspaceDirectoryObservationRequest req,
+            WorkspaceDirectoryObservationStore observations,
+            CancellationToken ct) =>
+        {
+            if (req is null || string.IsNullOrWhiteSpace(req.AttemptId) || string.IsNullOrWhiteSpace(req.HomePath)
+                || req.Outcome is not ("removed" or "already_absent" or "in_use" or "unsafe" or "deletion_failed" or "unknown"))
+                return ApiResults.BadRequest("Invalid directory observation", "workspace_observation_invalid");
+            var saved = await observations.ReportAsync(projectId, workspaceName,
+                new WorkspaceDirectoryObservation(req.AttemptId, runnerId, req.HomePath, req.Outcome,
+                    DateTimeOffset.MinValue, req.Reason, req.EstimatedBytes, req.MeasuredAt), ct);
+            return saved is null
+                ? ApiResults.Conflict("Workspace Home changed before observation was reported", "workspace_home_changed")
+                : ApiResults.Ok(saved);
         });
 
         return app;
@@ -751,7 +775,7 @@ public record RunnerConfigResponse(CleanupPolicyDto? CleanupPolicy);
 /// workspace; the server records it as the workspace home (first writer
 /// wins) so later dispatches bind to this runner.
 /// </summary>
-public record WorkspaceMaterializedRequest(string? Path);
+public record WorkspaceMaterializedRequest(string? Path, bool Created = false);
 public record WorkspaceMaterializedResponse(string RunnerId, string Path);
 
 /// <summary>
@@ -761,4 +785,14 @@ public record WorkspaceMaterializedResponse(string RunnerId, string Path);
 /// </summary>
 public sealed record WorkspaceReclaimableResponse(
     [property: JsonPropertyName("status")] string Status,
-    [property: JsonPropertyName("activeBoundSessions")] int ActiveBoundSessions);
+    [property: JsonPropertyName("activeBoundSessions")] int ActiveBoundSessions,
+    [property: JsonPropertyName("reclaimable")] bool Reclaimable,
+    [property: JsonPropertyName("reason")] string? Reason);
+
+public sealed record WorkspaceDirectoryObservationRequest(
+    string AttemptId,
+    string HomePath,
+    string Outcome,
+    string? Reason = null,
+    long? EstimatedBytes = null,
+    DateTimeOffset? MeasuredAt = null);

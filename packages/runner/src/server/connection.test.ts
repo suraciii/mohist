@@ -395,6 +395,7 @@ describe('ServerConnection named workspace materialization report', () => {
       'pay',
       '/virtual/ws/pay',
       signal,
+      true,
     )
 
     expect(report).toEqual({ runnerId: 'runner-1', path: '/virtual/ws/pay' })
@@ -403,7 +404,7 @@ describe('ServerConnection named workspace materialization report', () => {
     )
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined
     expect(init?.method).toBe('POST')
-    expect(JSON.parse(String(init?.body))).toEqual({ path: '/virtual/ws/pay' })
+    expect(JSON.parse(String(init?.body))).toEqual({ path: '/virtual/ws/pay', created: true })
   })
 
   it('classifies malformed successful workspace reports as protocol', async () => {
@@ -446,15 +447,19 @@ describe('ServerConnection workspace reclaimability', () => {
   itEach([
     [
       'active with no bound sessions',
-      { status: 'active', activeBoundSessions: 0 },
-      { status: 'active', activeBoundSessions: 0 },
+      { status: 'active', activeBoundSessions: 0, reclaimable: true, reason: null },
+      { status: 'active', activeBoundSessions: 0, reclaimable: true, reason: null },
     ],
     [
       'active with bound sessions',
-      { status: 'active', activeBoundSessions: 2 },
-      { status: 'active', activeBoundSessions: 2 },
+      { status: 'active', activeBoundSessions: 2, reclaimable: false, reason: 'workspace_in_use' },
+      { status: 'active', activeBoundSessions: 2, reclaimable: false, reason: 'workspace_in_use' },
     ],
-    ['archived', { status: 'archived', activeBoundSessions: 0 }, { status: 'archived', activeBoundSessions: 0 }],
+    [
+      'archived',
+      { status: 'archived', activeBoundSessions: 0, reclaimable: true, reason: null },
+      { status: 'archived', activeBoundSessions: 0, reclaimable: true, reason: null },
+    ],
   ] as const)('parses the wrapped %s answer', async (_label, data, expected) => {
     fetchSpy.mockResolvedValue(
       new Response(JSON.stringify({ data }), { status: 200, headers: { 'content-type': 'application/json' } }),

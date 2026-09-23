@@ -31,7 +31,7 @@ describe('CleanupLoop', () => {
       expect(fixture.runner.deletedPaths).not.toContain(outPath)
     })
 
-    it('resolves a missing-marker eligible entry to stuck and leaves the directory intact', async () => {
+    it('retries a missing-marker eligible entry and leaves the directory intact', async () => {
       const past = new Date(fixture.now.getTime() - 10 * 24 * 60 * 60 * 1000)
       const path = fixture.workspacePath(1)
       await fixture.registerEligible('wr-missing-marker', 1, past, path)
@@ -43,10 +43,10 @@ describe('CleanupLoop', () => {
         () => fixture.loop.runOnce(policy, new AbortController().signal),
       )
 
-      expect(result.stuckResolved).toBe(1)
-      expect(result.guardAborted).toBe(0)
+      expect(result.stuckResolved).toBe(0)
+      expect(result.guardAborted).toBe(1)
       expect(result.retentionRemoved).toBe(0)
-      expect(fixture.registry.get('wr-missing-marker')).toMatchObject({ phase: 'stuck' })
+      expect(fixture.registry.get('wr-missing-marker')).toMatchObject({ phase: 'eligible' })
       expect(fixture.runner.deletedPaths).not.toContain(path)
     })
 
@@ -108,7 +108,7 @@ describe('CleanupLoop', () => {
       const past = new Date(fixture.now.getTime() - 10 * 24 * 60 * 60 * 1000)
       const path = fixture.workspacePath(1)
       await fixture.registerEligible('wr-stuck', 1, past, path)
-      fixture.runner.markerRunIds.delete(path)
+      fixture.runner.markerRunIds.set(path, 'other')
 
       const policy: CleanupPolicy = {
         retentionDays: null,
@@ -116,7 +116,9 @@ describe('CleanupLoop', () => {
         storageTargetWatermarkBytes: null,
       }
       const result = await fixture.expectWarnings(
-        [`workspace cleanup: refused to remove ${path} — workspace identity is missing or unreadable`],
+        [
+          `workspace cleanup: refused to remove ${path} — workspace identity (other) does not match registry (ws:project-1:wr-stuck)`,
+        ],
         () => fixture.loop.runOnce(policy, new AbortController().signal),
       )
 
@@ -141,11 +143,13 @@ describe('CleanupLoop', () => {
       const past = new Date(fixture.now.getTime() - 10 * 24 * 60 * 60 * 1000)
       const path = fixture.workspacePath(1)
       await fixture.registerEligible('wr-restart', 1, past, path)
-      fixture.runner.markerRunIds.delete(path)
+      fixture.runner.markerRunIds.set(path, 'other')
 
       const policy: CleanupPolicy = { retentionDays: 5 }
       const tick1 = await fixture.expectWarnings(
-        [`workspace cleanup: refused to remove ${path} — workspace identity is missing or unreadable`],
+        [
+          `workspace cleanup: refused to remove ${path} — workspace identity (other) does not match registry (ws:project-1:wr-restart)`,
+        ],
         () => fixture.loop.runOnce(policy, new AbortController().signal),
       )
       expect(tick1.stuckResolved).toBe(1)

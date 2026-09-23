@@ -59,6 +59,11 @@ export class CleanupLoop<E extends CleanupEntry = CleanupEntry> {
     private readonly runner: CleanupRunner,
     private readonly runnerRoot: string,
     private readonly removalFence: () => WorkspaceRemovalFence | null = () => null,
+    private readonly reportOutcome?: (
+      entry: E,
+      outcome: 'removed' | 'already_absent' | 'in_use' | 'unsafe' | 'deletion_failed',
+      reason?: string,
+    ) => Promise<void>,
   ) {}
 
   async runOnce(
@@ -94,13 +99,19 @@ export class CleanupLoop<E extends CleanupEntry = CleanupEntry> {
     for (const entry of initialEligible) {
       if (signal.aborted) break
       if (blockedPaths.has(entry.workspacePath)) continue
+      if (!this.runner.pathExists(entry.workspacePath)) continue
       const verdict = await this.evaluateGuards(entry)
       if (verdict.ok) continue
+      if (verdict.message === 'workspace identity is missing or unreadable') {
+        await this.reportOutcome?.(entry, 'unsafe', verdict.message).catch(() => undefined)
+        continue
+      }
       log.warn('workspace cleanup refused', {
         run: this.registry.entryKey(entry),
         path: entry.workspacePath,
         reason: verdict.message,
       })
+      await this.reportOutcome?.(entry, 'unsafe', verdict.message).catch(() => undefined)
       await this.registry.markStuck(this.registry.entryKey(entry))
       result.stuckResolved++
     }
@@ -141,6 +152,10 @@ export class CleanupLoop<E extends CleanupEntry = CleanupEntry> {
       if (result.workspaceUsageBytes <= policy.storageBudgetBytes!) return result
 
       const targetWatermark = policy.storageTargetWatermarkBytes ?? Math.floor(policy.storageBudgetBytes! * 0.7)
+      if (targetWatermark < 0 || targetWatermark >= policy.storageBudgetBytes!) {
+        log.warn('workspace cleanup refused invalid storage target', { reason: String(targetWatermark) })
+        return result
+      }
       const sorted = [...remaining].sort((a, b) => {
         if (!a.terminalAt && !b.terminalAt) return 0
         if (!a.terminalAt) return 1
@@ -154,13 +169,11 @@ export class CleanupLoop<E extends CleanupEntry = CleanupEntry> {
         if (currentUsage <= targetWatermark) break
 
         const entrySize = await this.runner.computeDirectorySize(entry.workspacePath, signal)
-        if (entrySize != null && entrySize > 0) {
-          currentUsage -= entrySize
-        }
-
         const removed = await this.safeRemove(entry, blockedPaths)
-        if (removed) result.budgetRemoved++
-        else result.guardAborted++
+        if (removed) {
+          result.budgetRemoved++
+          if (entrySize != null && entrySize > 0) currentUsage -= entrySize
+        } else result.guardAborted++
       }
     }
 
@@ -206,7 +219,17 @@ export class CleanupLoop<E extends CleanupEntry = CleanupEntry> {
   async safeRemove(entry: E, blockedPaths: ReadonlySet<string> = new Set()): Promise<boolean> {
     if (blockedPaths.has(entry.workspacePath)) return false
     const fence = this.removalFence()
+    if (!fence) {
+      await this.reportOutcome?.(entry, 'unsafe', 'removal_fence_unavailable').catch(() => undefined)
+      return false
+    }
     const remove = async (): Promise<boolean> => {
+      if (!this.runner.pathExists(entry.workspacePath)) {
+        if (!this.runner.isUnderRunnerRoot(this.runnerRoot, entry.workspacePath)) return false
+        await this.reportOutcome?.(entry, 'already_absent')
+        await this.registry.remove(this.registry.entryKey(entry))
+        return true
+      }
       const verdict = await this.evaluateGuards(entry)
       if (!verdict.ok) {
         log.warn('workspace cleanup refused', {
@@ -217,13 +240,15 @@ export class CleanupLoop<E extends CleanupEntry = CleanupEntry> {
         return false
       }
 
-      if (!this.runner.pathExists(entry.workspacePath)) {
-        await this.registry.remove(this.registry.entryKey(entry))
-        return true
-      }
-
       if (this.runner.validateAndDeleteWorkspace) {
-        if (!(await this.runner.validateAndDeleteWorkspace(entry))) {
+        let deleted: boolean
+        try {
+          deleted = await this.runner.validateAndDeleteWorkspace(entry)
+        } catch (error) {
+          await this.reportOutcome?.(entry, 'deletion_failed').catch(() => undefined)
+          throw error
+        }
+        if (!deleted) {
           log.warn('workspace cleanup refused', {
             run: this.registry.entryKey(entry),
             path: entry.workspacePath,
@@ -231,6 +256,7 @@ export class CleanupLoop<E extends CleanupEntry = CleanupEntry> {
           })
           return false
         }
+        await this.reportOutcome?.(entry, 'removed')
         await this.registry.remove(this.registry.entryKey(entry))
         return true
       }
@@ -244,22 +270,15 @@ export class CleanupLoop<E extends CleanupEntry = CleanupEntry> {
         return false
       }
 
-      await this.runner.deleteDirectory(entry.workspacePath)
+      try {
+        await this.runner.deleteDirectory(entry.workspacePath)
+      } catch (error) {
+        await this.reportOutcome?.(entry, 'deletion_failed').catch(() => undefined)
+        throw error
+      }
+      await this.reportOutcome?.(entry, 'removed')
       await this.registry.remove(this.registry.entryKey(entry))
       return true
-    }
-
-    if (!fence) {
-      try {
-        return await remove()
-      } catch (error) {
-        log.error('workspace cleanup failed to remove path', {
-          run: this.registry.entryKey(entry),
-          path: entry.workspacePath,
-          exception: error,
-        })
-        return false
-      }
     }
 
     const result = await fence.withRemovalFence(entry.workspacePath, async () => {
@@ -274,6 +293,8 @@ export class CleanupLoop<E extends CleanupEntry = CleanupEntry> {
         return false
       }
     })
+    if (result.kind === 'busy') await this.reportOutcome?.(entry, 'in_use', 'workspace_busy').catch(() => undefined)
+    if (result.kind === 'failed') await this.reportOutcome?.(entry, 'unsafe', result.reason).catch(() => undefined)
     return result.kind === 'completed' ? result.value : false
   }
 }

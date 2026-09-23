@@ -37,15 +37,14 @@ public sealed class WorkspaceQuerier : IScopedService
         if (!string.IsNullOrWhiteSpace(origin))
             query = query.Where(w => w.OriginKind == origin.Trim().ToLowerInvariant());
         var rows = await query.OrderBy(w => w.Name).ToListAsync(ct);
-        var states = rows
-            .Select(WorkspaceRowJson.Deserialize)
-            .Where(w => w is not null)
-            .Cast<WorkspaceState>()
+        var records = rows
+            .Select(row => new { State = WorkspaceRowJson.Deserialize(row), Directory = WorkspaceDirectoryObservationStore.Read(row.DirectoryObservationJson) })
+            .Where(item => item.State is not null)
             .ToList();
         var boundCounts = await Task.WhenAll(
-            states.Select(state => CountBoundSessionsAsync(projectId, state.Name, ct)));
-        return states
-            .Select((state, index) => ToDto(state) with { BoundSessionCount = boundCounts[index] })
+            records.Select(item => CountBoundSessionsAsync(projectId, item.State!.Name, ct)));
+        return records
+            .Select((item, index) => ToDto(item.State!, item.Directory) with { BoundSessionCount = boundCounts[index] })
             .ToList();
     }
 
@@ -60,7 +59,8 @@ public sealed class WorkspaceQuerier : IScopedService
 
         var sessions = await _agentSessions.ListUnifiedSessionsByWorkspaceAsync(projectId, name, ct: ct);
         var boundCount = await CountBoundSessionsAsync(projectId, name, ct);
-        return ToDto(state) with { BoundSessionCount = boundCount, Sessions = sessions };
+        return ToDto(state, WorkspaceDirectoryObservationStore.Read(row!.DirectoryObservationJson))
+            with { BoundSessionCount = boundCount, Sessions = sessions };
     }
 
     public async Task<int> CountBoundSessionsAsync(string projectId, string workspaceName, CancellationToken ct = default)
@@ -93,7 +93,7 @@ public sealed class WorkspaceQuerier : IScopedService
             && record.Session.Status.Activity != AgentSessionActivity.Idle);
     }
 
-    private static WorkspaceDto ToDto(WorkspaceState state) => new(
+    private static WorkspaceDto ToDto(WorkspaceState state, WorkspaceDirectoryObservation? directory) => new(
         ProjectId: state.ProjectId,
         Name: state.Name,
         Origin: ToOriginDto(state.Origin),
@@ -101,7 +101,8 @@ public sealed class WorkspaceQuerier : IScopedService
         Status: state.Status == WorkspaceStatus.Active ? "active" : "archived",
         Home: state.Home is null ? null : new WorkspaceHomeDto(state.Home.RunnerId, state.Home.Path),
         CreatedAt: state.CreatedAt.ToString("o"),
-        ArchivedAt: state.ArchivedAt?.ToString("o"));
+        ArchivedAt: state.ArchivedAt?.ToString("o"),
+        Directory: directory);
 
     private static WorkspaceOriginDto ToOriginDto(WorkspaceOrigin origin) => origin switch
     {

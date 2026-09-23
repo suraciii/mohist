@@ -13,6 +13,17 @@ export interface WorkspaceHome {
   path: string
 }
 
+export interface WorkspaceDirectoryObservation {
+  attemptId: string
+  runnerId: string
+  homePath: string
+  outcome: 'removed' | 'already_absent' | 'in_use' | 'unsafe' | 'deletion_failed' | 'unknown'
+  observedAt: string
+  reason?: string | null
+  estimatedBytes?: number | null
+  measuredAt?: string | null
+}
+
 export interface WorkspaceSession {
   id: string
   source: string
@@ -41,4 +52,5 @@ export interface Workspace {
   archivedAt?: string | null
   boundSessionCount: number
   sessions?: WorkspaceSession[] | null
+  directory?: WorkspaceDirectoryObservation | null
 }

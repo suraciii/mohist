@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { isAbsolute, join, relative } from 'node:path'
 import type { AgentRuntime, RunnerOptions, RunnerRegistration } from '../core/types.js'
 import { ServerConnection } from '../server/connection.js'
 import { runnerTransportDiagnostics } from '../server/connection-errors.js'
@@ -11,6 +12,8 @@ import { ActionRegistry, createDefaultRegistry } from '../actions/registry.js'
 import '../core/prompt-registry.js'
 import { NamedWorkspaceRegistry } from './workspace-registry.js'
 import { NamedWorkspaceManager } from './workspace-entity.js'
+import { namedWorkspacePath } from './workspace-entity.js'
+import { RunnerWorkspaceUse, WorkspaceUseConflict } from './runner-workspace-use.js'
 import { createNamedWorkspaceCleanupLoop, NamedWorkspaceReclaimProbe } from './named-workspace-cleanup.js'
 import {
   createAgentSessionRuntimeEventQueue,
@@ -50,7 +53,7 @@ import {
 export { getRunnerBuildGitHash } from './build-info.js'
 import type { DispatchWorkItem, PolledDispatch } from '../core/types.js'
 import type { WorkItemResult } from '../core/types.js'
-import { currentRunnerResources } from '../system/filesystem.js'
+import { currentRunnerFileSystem, currentRunnerResources } from '../system/filesystem.js'
 import { WorkflowSessionTurnCoordinator } from './workflow-session-turn-coordinator.js'
 import { SkillResolver } from './skill-resolver.js'
 import { runnerLogger } from '../system/logger.js'
@@ -113,6 +116,7 @@ export class RunnerHost {
   private readonly connection: ServerConnection
   private readonly control: RunnerControlWebSocketClient
   private readonly namedWorkspaceRegistry: NamedWorkspaceRegistry
+  private readonly workspaceUse: RunnerWorkspaceUse
   private readonly namedWorkspaceManager: NamedWorkspaceManager
   private readonly namedWorkspaceReclaimProbe: NamedWorkspaceReclaimProbe
   private readonly agentSessionRuntimeEventQueue: AgentSessionRuntimeEventQueue
@@ -173,6 +177,27 @@ export class RunnerHost {
     this.buildGitHash = build.gitHash
     this.connection = new ServerConnection(options, this.buildGitHash, build)
     this.namedWorkspaceRegistry = new NamedWorkspaceRegistry(options.runnerRoot)
+    this.workspaceUse = new RunnerWorkspaceUse(
+      async (workspacePath) => {
+        const piResult = this.piRuntime?.releaseWorkspace(workspacePath) ?? 'ready'
+        if (piResult !== 'ready') return piResult
+        const runtime = this.openCodeRuntime
+        if (!runtime) return 'ready'
+        const result = await runtime.reclaimWhere((directory) => {
+          const rel = relative(workspacePath, directory)
+          return rel === '' || (rel !== '..' && !rel.startsWith('../') && !isAbsolute(rel))
+        })
+        return result.failed > 0 ? 'failed' : result.busy > 0 ? 'busy' : 'ready'
+      },
+      undefined,
+      (workspacePath) => {
+        const entry = this.namedWorkspaceRegistry.findByWorkspacePath(workspacePath)
+        if (entry)
+          void this.namedWorkspaceRegistry.markActive(entry.projectId, entry.workspaceName).catch((error) => {
+            log.error('failed to reset Workspace candidate period after admission', { exception: error })
+          })
+      },
+    )
     this.agentSessionRuntimeEventQueue = createAgentSessionRuntimeEventQueue({
       deliver: createServerRuntimeEventDelivery({
         connection: this.connection,
@@ -186,7 +211,23 @@ export class RunnerHost {
     this.namedCleanupLoop = createNamedWorkspaceCleanupLoop(
       this.namedWorkspaceRegistry,
       options.runnerRoot,
-      () => this.openCodeRuntime,
+      () => this.workspaceUse,
+      async (projectId, workspaceName) => {
+        const decision = await this.connection.getWorkspaceReclaimability(
+          projectId,
+          workspaceName,
+          new AbortController().signal,
+        )
+        return decision.reclaimable
+      },
+      async (entry, outcome, reason) => {
+        await this.connection.reportWorkspaceDirectoryObservation(
+          entry.projectId,
+          entry.workspaceName,
+          { attemptId: randomUUID(), homePath: entry.workspacePath, outcome, reason },
+          new AbortController().signal,
+        )
+      },
     )
     this.waitForConnectionRetry = dependencies.waitForConnectionRetry ?? hostDelay
     this.shutdownStopBudgetMs = positiveBudget(dependencies.shutdownStopBudgetMs, 2_000)
@@ -198,14 +239,34 @@ export class RunnerHost {
         onReconnected: () => this.onDispatchReconnected(),
         credential: options.credential ?? null,
         handlers: createRunnerControlHandlers({
+          withWorkspaceUse: async (workDir, work) => {
+            const owner = this.workspaceUse.ownerForWorkDir(
+              workDir,
+              this.namedWorkspaceRegistry.list().map((entry) => entry.workspacePath),
+            )
+            if (owner) return await this.workspaceUse.withUse(owner, work)
+            if (workDir.startsWith('/proc/') || workDir.startsWith(join(this.options.runnerRoot, 'workspaces'))) {
+              throw new WorkspaceUseConflict()
+            }
+            return await work()
+          },
           workspaceGit: {
             resolveQuery: resolveWorkspaceQuery,
             runnerRoot: options.runnerRoot,
+            workspaceUse: this.workspaceUse,
           },
           workspaceRemoval: {
             runnerRoot: options.runnerRoot,
             registry: this.namedWorkspaceRegistry,
-            removalFence: () => this.openCodeRuntime,
+            removalFence: () => this.workspaceUse,
+            eligibleNow: async (projectId, workspaceName) => {
+              const decision = await this.connection.getWorkspaceReclaimability(
+                projectId,
+                workspaceName,
+                new AbortController().signal,
+              )
+              return decision.reclaimable
+            },
           },
           followup: {
             followupTargetResolver: (target) => resolveFollowupTarget(this.options, target),
@@ -287,7 +348,13 @@ export class RunnerHost {
     // a failed read does not block startup.
     try {
       await this.namedWorkspaceRegistry.load()
+      const workspaceParent = join(this.options.runnerRoot, 'workspaces')
+      if (currentRunnerFileSystem().exists(workspaceParent)) {
+        const existing = await currentRunnerFileSystem().readdir(workspaceParent)
+        this.workspaceUse.blockPreviousGeneration(existing.map((item) => join(workspaceParent, item.name)))
+      }
     } catch (error) {
+      this.workspaceUse.blockUnknownPreviousGeneration()
       log.error('failed to load named workspace registry; starting empty', {
         exception: error,
       })
@@ -632,7 +699,39 @@ export class RunnerHost {
           ...(polled.reportOwner ? { reportOwner: polled.reportOwner } : {}),
         }
         this.inFlight.set(key, entry)
-        entry.done = executeAndTransition(this.executionContext, work, controller.signal, key, entry, validationFailure)
+        let releaseWorkspace: (() => void) | null = null
+        if (!isManagerExecution && validationFailure === null) {
+          const name = (work.variables?.workspace as { name?: unknown } | undefined)?.name
+          if (!work.projectId || typeof name !== 'string' || !name.trim()) {
+            validationFailure = {
+              status: 'failed',
+              message: 'Dispatch requires a named Workspace identity',
+              error: { code: 'invalid-dispatch', message: 'Dispatch requires a named Workspace identity' },
+            }
+          } else {
+            try {
+              releaseWorkspace = this.workspaceUse.acquire(
+                namedWorkspacePath(this.options.runnerRoot, work.projectId, name.trim()),
+              )
+            } catch (error) {
+              if (!(error instanceof WorkspaceUseConflict)) throw error
+              validationFailure = {
+                status: 'failed',
+                requeue: true,
+                message: error.message,
+                error: { code: 'workspace-removal-in-progress', message: error.message },
+              }
+            }
+          }
+        }
+        entry.done = executeAndTransition(
+          this.executionContext,
+          work,
+          controller.signal,
+          key,
+          entry,
+          validationFailure,
+        ).finally(() => releaseWorkspace?.())
 
         this.syncOpenCodeWorkOwners()
       }

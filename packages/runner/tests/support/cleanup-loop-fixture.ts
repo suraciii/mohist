@@ -118,7 +118,11 @@ export async function createCleanupLoopFixture(fileSystem: RunnerFileSystem): Pr
   const backing = new NamedWorkspaceRegistry(root, { now: () => registryNow })
   await backing.load()
   const registry = new FixtureRegistry(backing)
-  const loop = new CleanupLoop<NamedWorkspaceRegistryEntry>(registry, runner, root)
+  const loop = new CleanupLoop<NamedWorkspaceRegistryEntry>(registry, runner, root, () => ({
+    async withRemovalFence(_path, callback) {
+      return { kind: 'completed', value: await callback() }
+    },
+  }))
 
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(now)

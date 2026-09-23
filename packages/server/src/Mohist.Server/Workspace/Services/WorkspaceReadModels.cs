@@ -21,4 +21,5 @@ public sealed record WorkspaceDto(
     string CreatedAt,
     string? ArchivedAt,
     int BoundSessionCount = 0,
-    IReadOnlyList<UnifiedSessionListItemDto>? Sessions = null);
+    IReadOnlyList<UnifiedSessionListItemDto>? Sessions = null,
+    WorkspaceDirectoryObservation? Directory = null);

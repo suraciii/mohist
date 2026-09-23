@@ -147,6 +147,7 @@ export async function runCommand(
     // never race Node's internal abort listener.
     const wasTimeout = () => timeoutHandle?.timedOut() === true
     let completed = false
+    let deferredAbortError: Error | null = null
     let directExitCode: number | null | undefined
     let forceKillTimer: NodeJS.Timeout | undefined
     const onAbort = () => {
@@ -177,6 +178,10 @@ export async function runCommand(
       //   - parent aborted ⇒ reject (today's behavior, unchanged)
       if (wasTimeout()) return
       if (completed) return
+      if (effectiveSignal.aborted && child.pid) {
+        deferredAbortError = error
+        return
+      }
       completed = true
       cleanup()
       reject(error)
@@ -204,6 +209,10 @@ export async function runCommand(
       const stderrText = Buffer.concat(stderr).toString('utf8')
       child.stdout.destroy?.()
       child.stderr.destroy?.()
+      if (deferredAbortError) {
+        reject(deferredAbortError)
+        return
+      }
       if (timedOut) {
         // Structured timeout result. The sentinel `Command timed out after Ns`
         // matches the unchanged `looksLikeRetrySafe` arm in

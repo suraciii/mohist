@@ -15,6 +15,7 @@ using Mohist.Server.Contracts;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workspace.Grains;
 using Xunit;
 
 namespace Mohist.Server.Tests.Issue.Api;
@@ -91,6 +92,8 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary", "develop");
         var issue = await CreateIssueAsync(projectId, "Repo gets removed", "secondary");
         await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
+        await _fixture.Grains.GetGrain<IWorkspaceGrain>(GrainKey.Workspace(projectId, $"issue-{issue.Number}"))
+            .EnsureMaterializedOnAsync("repo-resolution-runner", $"/mohist-tests/issue-{issue.Number}", DateTimeOffset.UnixEpoch);
 
         await DriveIssueToTerminalAsync(projectId, issue);
 

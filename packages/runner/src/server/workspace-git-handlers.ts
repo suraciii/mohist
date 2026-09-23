@@ -6,6 +6,8 @@ import { resolveWorkspaceQuery, type WorkspaceQuery } from '../runtime/workspace
 import { validateNamedWorkspaceIdentity } from '../runtime/workspace-entity.js'
 import { withManagedRepositoryHandle, withManagedWorkspaceHandle } from '../runtime/workspace-managed.js'
 import { parseAheadBehind, parseCommits, parseDiffFiles, parseNumstatTotal } from './git-parsers.js'
+import type { RunnerWorkspaceUse } from '../runtime/runner-workspace-use.js'
+import { WorkspaceUseConflict } from '../runtime/runner-workspace-use.js'
 
 export interface WorkspaceGitHandlerDeps {
   resolveQuery: typeof resolveWorkspaceQuery
@@ -13,6 +15,7 @@ export interface WorkspaceGitHandlerDeps {
   runCommand?: typeof defaultRunCommand
   pathExists?: typeof defaultExistsSync
   allowUnverifiedWorkspaceQueriesForTest?: boolean
+  workspaceUse?: RunnerWorkspaceUse
 }
 
 export interface WorkspaceGitHandlers {
@@ -86,8 +89,8 @@ function registerWorkspaceGitHandlers(conn: HandlerRegistrar, deps: WorkspaceGit
   ): Promise<T> {
     const resolved = resolveForHandler(query)
     if (!resolved) return fallback
-    if (deps.allowUnverifiedWorkspaceQueriesForTest) return await operation(resolved.workDir)
-    try {
+    const execute = async () => {
+      if (deps.allowUnverifiedWorkspaceQueriesForTest) return await operation(resolved.workDir)
       return await withManagedWorkspaceHandle(
         deps.runnerRoot!,
         resolved.workspacePath,
@@ -97,7 +100,13 @@ function registerWorkspaceGitHandlers(conn: HandlerRegistrar, deps: WorkspaceGit
           return await withManagedRepositoryHandle(managedWorkspacePath, resolved.identity.repositoryName, operation)
         },
       )
-    } catch {
+    }
+    try {
+      return deps.workspaceUse ? await deps.workspaceUse.withUse(resolved.workspacePath, execute) : await execute()
+    } catch (error) {
+      if (error instanceof WorkspaceUseConflict) {
+        return { reason: 'workspace_removal_in_progress' } as T
+      }
       return fallback
     }
   }

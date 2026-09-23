@@ -69,9 +69,9 @@ describe('CleanupLoop removal fence', () => {
     expect(removed).toBe(true)
     expect(calls).toEqual([
       'fence-enter',
+      'path-exists',
       'guard-root',
       'guard-marker',
-      'path-exists',
       'delete',
       'registry-remove',
       'fence-exit',

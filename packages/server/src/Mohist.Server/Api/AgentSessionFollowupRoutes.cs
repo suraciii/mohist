@@ -329,6 +329,19 @@ public static class AgentSessionFollowupRoutes
             return RuntimeUnavailable(target.SessionId, accept);
         }
 
+        if (delivery is { Accepted: false }
+            && string.Equals(delivery.Error,
+                AgentSessionFollowupDispatcher.WorkspaceRemovalInProgressError,
+                StringComparison.Ordinal))
+        {
+            return ApiResults.Ok(BuildAcceptedResult(target.SessionId, accept) with
+            {
+                Status = "queued",
+                Code = "workspace_removal_in_progress",
+                Error = "Workspace removal is in progress; the turn will retry",
+            });
+        }
+
         return ApiResults.Ok(BuildAcceptedResult(target.SessionId, accept));
     }
 
