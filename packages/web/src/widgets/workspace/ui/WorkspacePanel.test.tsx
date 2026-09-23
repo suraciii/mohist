@@ -19,6 +19,7 @@ type WorkspaceStatus = {
     homePath: string
     outcome: 'removed' | 'already_absent' | 'in_use' | 'unsafe' | 'deletion_failed' | 'unknown'
     observedAt: string
+    reason?: string
   } | null
 }
 
@@ -218,5 +219,35 @@ describe('WorkspacePanel', () => {
     )
     render(<WorkspacePanel issueNumber={1} isAgentRunning={false} workspaceStatusHook={workspaceStatusHook} />)
     expect(screen.getByText('issue-1 on runner-1')).toBeInTheDocument()
+    expect(screen.getByText(/Runner is offline\. The Home cannot be checked now/)).toBeInTheDocument()
+  })
+
+  it.each([
+    ['in_use', /Retry cleanup after that work finishes/],
+    ['unsafe', /Check the Runner and retry/],
+    ['deletion_failed', /may have removed some files/],
+    ['unknown', /Check the Home on the Runner before retrying/],
+  ] as const)('explains recovery for %s', (outcome, guidance) => {
+    mockWorkspaceStatus(
+      {
+        exists: false,
+        branch: '',
+        ahead: 0,
+        behind: 0,
+        canFastForward: false,
+        reason: 'runner_unavailable',
+        directory: {
+          attemptId: 'attempt-1',
+          runnerId: 'runner-1',
+          homePath: '/runner/workspaces/issue-1',
+          outcome,
+          observedAt: '2026-09-23T09:00:00Z',
+        },
+      },
+      false,
+    )
+    render(<WorkspacePanel issueNumber={1} isAgentRunning={false} workspaceStatusHook={workspaceStatusHook} />)
+    expect(screen.getByText(guidance)).toBeInTheDocument()
+    expect(screen.getByText(/last recorded observation, not a current directory check/)).toBeInTheDocument()
   })
 })

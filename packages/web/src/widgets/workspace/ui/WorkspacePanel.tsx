@@ -51,6 +51,16 @@ const DIRECTORY_LABELS = {
   unknown: 'Result pending confirmation',
 } as const
 
+const DIRECTORY_GUIDANCE = {
+  removed: 'Local files were removed. Remote work and issue history remain.',
+  already_absent: 'The directory was already absent when checked; no space is attributed to this cleanup.',
+  in_use: 'Work is still using this Home. Retry cleanup after that work finishes.',
+  unsafe:
+    'The Runner cannot verify that this Home is safe to remove. Check the Runner and retry after the cause is resolved.',
+  deletion_failed: 'Deletion may have removed some files. Inspect the Home before retrying or resuming work.',
+  unknown: 'The request may have run, but its result is unconfirmed. Check the Home on the Runner before retrying.',
+} as const
+
 export function WorkspacePanel({
   issueNumber,
   isAgentRunning,
@@ -180,6 +190,10 @@ export function WorkspacePanel({
             Observed {new Date(status.directory.observedAt).toLocaleString()} on {status.directory.runnerId}
           </div>
           {status.directory.reason && <div>{status.directory.reason.replaceAll('_', ' ')}</div>}
+          <div>{DIRECTORY_GUIDANCE[status.directory.outcome]}</div>
+          {status.reason === 'runner_unavailable' && (
+            <div>Runner is offline. This is the last recorded observation, not a current directory check.</div>
+          )}
           {status.directory.estimatedBytes != null && status.directory.measuredAt && (
             <div>
               Estimated size: {status.directory.estimatedBytes.toLocaleString()} bytes, measured{' '}
@@ -187,6 +201,11 @@ export function WorkspacePanel({
             </div>
           )}
         </div>
+      )}
+      {status.reason === 'runner_unavailable' && !status.directory && (
+        <p className="mb-3 text-xs text-amber-700">
+          Runner is offline. The Home cannot be checked now; retry when the Runner is available.
+        </p>
       )}
 
       {status.branch && <div className="text-xs text-gray-500 mb-2 font-mono">{status.branch}</div>}

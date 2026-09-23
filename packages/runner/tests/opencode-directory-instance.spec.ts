@@ -1,9 +1,9 @@
-import { describe, expect, it, vi } from "vitest"
-import type { OpencodeClient } from "@opencode-ai/sdk/v2"
-import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtime/opencode/event-subscription.js"
-import { OpenCodeRuntime } from "../src/runtime/opencode/index.js"
-import { OpenCodeDirectoryInstances } from "../src/runtime/opencode/directory-instance.js"
-import type { OpencodeServerHandle } from "../src/runtime/opencode/server-process.js"
+import { describe, expect, it, vi } from 'vitest'
+import type { OpencodeClient } from '@opencode-ai/sdk/v2'
+import type { RuntimeEventSubscription, RuntimeGlobalEvent } from '../src/runtime/opencode/event-subscription.js'
+import { OpenCodeRuntime } from '../src/runtime/opencode/index.js'
+import { OpenCodeDirectoryInstances } from '../src/runtime/opencode/directory-instance.js'
+import type { OpencodeServerHandle } from '../src/runtime/opencode/server-process.js'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -31,113 +31,140 @@ async function used(boundary: OpenCodeDirectoryInstances, directory: string): Pr
   })
 }
 
-describe("OpenCodeDirectoryInstances", () => {
-  it("does not call status or dispose for an untracked directory", async () => {
+describe('OpenCodeDirectoryInstances', () => {
+  it('does not call status or dispose for an untracked directory', async () => {
     const fake = buildDirectoryClient()
     const boundary = new OpenCodeDirectoryInstances(() => fake.client)
 
-    await expect(boundary.release("/virtual/untracked")).resolves.toMatchObject({ outcome: "untracked" })
+    await expect(boundary.release('/virtual/untracked')).resolves.toMatchObject({ outcome: 'untracked' })
     expect(fake.sessionStatus).not.toHaveBeenCalled()
     expect(fake.instanceDispose).not.toHaveBeenCalled()
   })
 
-  it("defers disposal while a local operation is admitted", async () => {
+  it('reclaims a live fd directory by the Home captured at admission', async () => {
+    const fake = buildDirectoryClient({ active: { type: 'busy' } })
+    const home = '/runner/workspaces/home'
+    const fd = '/proc/123/fd/7'
+    const boundary = new OpenCodeDirectoryInstances(
+      () => fake.client,
+      (directory) => (directory === fd ? home : null),
+    )
+    await used(boundary, fd)
+
+    const result = await boundary.reclaimWhere((_directory, owner, unknown) => owner === home || unknown)
+    expect(result).toMatchObject({ tracked: 1, candidates: 1, busy: 1 })
+    expect(fake.sessionStatus).toHaveBeenCalledWith({ directory: fd }, { throwOnError: true })
+  })
+
+  it('does not treat an unresolved fd resource as unrelated', async () => {
+    const fake = buildDirectoryClient({ active: { type: 'busy' } })
+    const fd = '/proc/123/fd/7'
+    const boundary = new OpenCodeDirectoryInstances(() => fake.client)
+    await used(boundary, fd)
+
+    const result = await boundary.reclaimWhere(
+      (_directory, owner, unknown) => owner === '/runner/workspaces/home' || unknown,
+    )
+    expect(result).toMatchObject({ tracked: 1, candidates: 1, busy: 1 })
+  })
+
+  it('defers disposal while a local operation is admitted', async () => {
     const fake = buildDirectoryClient()
     const boundary = new OpenCodeDirectoryInstances(() => fake.client)
     const gate = deferred<void>()
-    const operation = boundary.withOperation("/virtual/project", async (lease) => {
+    const operation = boundary.withOperation('/virtual/project', async (lease) => {
       lease.markUsed()
       await gate.promise
     })
 
-    const blocked = await boundary.release("/virtual/project")
-    expect(blocked.outcome).toBe("busy")
+    const blocked = await boundary.release('/virtual/project')
+    expect(blocked.outcome).toBe('busy')
     expect(fake.sessionStatus).not.toHaveBeenCalled()
 
     gate.resolve()
     await operation
-    expect((await boundary.release("/virtual/project")).outcome).toBe("disposed")
+    expect((await boundary.release('/virtual/project')).outcome).toBe('disposed')
   })
 
-  it("keeps a directory busy until a tracked operation settles", async () => {
+  it('keeps a directory busy until a tracked operation settles', async () => {
     const fake = buildDirectoryClient()
     const reply = deferred<void>()
     let trackedFinished!: Promise<void>
     const boundary = new OpenCodeDirectoryInstances(() => fake.client)
 
-    await boundary.withOperation("/virtual/project", async (lease) => {
+    await boundary.withOperation('/virtual/project', async (lease) => {
       lease.markUsed()
       trackedFinished = lease.trackPending(reply.promise)
     })
 
-    expect((await boundary.release("/virtual/project")).outcome).toBe("busy")
+    expect((await boundary.release('/virtual/project')).outcome).toBe('busy')
     reply.resolve()
     await trackedFinished
-    expect((await boundary.release("/virtual/project")).outcome).toBe("disposed")
+    expect((await boundary.release('/virtual/project')).outcome).toBe('disposed')
   })
 
-  it("disposes an empty or all-idle status map once and forgets the directory", async () => {
-    const fake = buildDirectoryClient({ ses_idle: { type: "idle" } })
+  it('disposes an empty or all-idle status map once and forgets the directory', async () => {
+    const fake = buildDirectoryClient({ ses_idle: { type: 'idle' } })
     const boundary = new OpenCodeDirectoryInstances(() => fake.client)
-    await used(boundary, "/virtual/project")
+    await used(boundary, '/virtual/project')
 
-    expect((await boundary.release("/virtual/project")).outcome).toBe("disposed")
-    expect((await boundary.release("/virtual/project")).outcome).toBe("untracked")
+    expect((await boundary.release('/virtual/project')).outcome).toBe('disposed')
+    expect((await boundary.release('/virtual/project')).outcome).toBe('untracked')
     expect(fake.sessionStatus).toHaveBeenCalledTimes(1)
     expect(fake.instanceDispose).toHaveBeenCalledTimes(1)
   })
 
   it.each([
-    ["busy", { ses: { type: "busy" } }],
-    ["retry", { ses: { type: "retry", attempt: 1, message: "retry", next: 1 } }],
-    ["unknown", { ses: { type: "streaming" } }],
-    ["malformed", { ses: null }],
-    ["missing map", null],
-  ])("retains a %s status candidate without disposing", async (_name, status) => {
+    ['busy', { ses: { type: 'busy' } }],
+    ['retry', { ses: { type: 'retry', attempt: 1, message: 'retry', next: 1 } }],
+    ['unknown', { ses: { type: 'streaming' } }],
+    ['malformed', { ses: null }],
+    ['missing map', null],
+  ])('retains a %s status candidate without disposing', async (_name, status) => {
     const fake = buildDirectoryClient(status)
     const boundary = new OpenCodeDirectoryInstances(() => fake.client)
-    await used(boundary, "/virtual/project")
+    await used(boundary, '/virtual/project')
 
-    const result = await boundary.release("/virtual/project")
-    expect(["busy", "failed"]).toContain(result.outcome)
+    const result = await boundary.release('/virtual/project')
+    expect(['busy', 'failed']).toContain(result.outcome)
     expect(fake.instanceDispose).not.toHaveBeenCalled()
-    expect((await boundary.release("/virtual/project")).outcome).toBe(result.outcome)
+    expect((await boundary.release('/virtual/project')).outcome).toBe(result.outcome)
     expect(fake.sessionStatus).toHaveBeenCalledTimes(2)
   })
 
-  it("retains a candidate when status throws, dispose throws, or dispose is false", async () => {
+  it('retains a candidate when status throws, dispose throws, or dispose is false', async () => {
     const statusFailure = buildDirectoryClient()
-    statusFailure.sessionStatus.mockRejectedValue(new Error("status failed"))
+    statusFailure.sessionStatus.mockRejectedValue(new Error('status failed'))
     const statusBoundary = new OpenCodeDirectoryInstances(() => statusFailure.client)
-    await used(statusBoundary, "/virtual/status-failure")
-    expect((await statusBoundary.release("/virtual/status-failure")).outcome).toBe("failed")
+    await used(statusBoundary, '/virtual/status-failure')
+    expect((await statusBoundary.release('/virtual/status-failure')).outcome).toBe('failed')
 
     const disposeFailure = buildDirectoryClient()
-    disposeFailure.instanceDispose.mockRejectedValue(new Error("dispose failed"))
+    disposeFailure.instanceDispose.mockRejectedValue(new Error('dispose failed'))
     const disposeBoundary = new OpenCodeDirectoryInstances(() => disposeFailure.client)
-    await used(disposeBoundary, "/virtual/dispose-failure")
-    expect((await disposeBoundary.release("/virtual/dispose-failure")).outcome).toBe("failed")
+    await used(disposeBoundary, '/virtual/dispose-failure')
+    expect((await disposeBoundary.release('/virtual/dispose-failure')).outcome).toBe('failed')
 
     const falseDispose = buildDirectoryClient({}, false)
     const falseBoundary = new OpenCodeDirectoryInstances(() => falseDispose.client)
-    await used(falseBoundary, "/virtual/false-dispose")
-    expect((await falseBoundary.release("/virtual/false-dispose")).outcome).toBe("failed")
-    expect((await falseBoundary.release("/virtual/false-dispose")).outcome).toBe("failed")
+    await used(falseBoundary, '/virtual/false-dispose')
+    expect((await falseBoundary.release('/virtual/false-dispose')).outcome).toBe('failed')
+    expect((await falseBoundary.release('/virtual/false-dispose')).outcome).toBe('failed')
   })
 
-  it("retracks a directory after a successful release", async () => {
+  it('retracks a directory after a successful release', async () => {
     const fake = buildDirectoryClient()
     const boundary = new OpenCodeDirectoryInstances(() => fake.client)
-    await used(boundary, "/virtual/project")
-    await boundary.release("/virtual/project")
-    await used(boundary, "/virtual/project")
+    await used(boundary, '/virtual/project')
+    await boundary.release('/virtual/project')
+    await used(boundary, '/virtual/project')
 
-    expect((await boundary.release("/virtual/project")).outcome).toBe("disposed")
+    expect((await boundary.release('/virtual/project')).outcome).toBe('disposed')
     expect(fake.sessionStatus).toHaveBeenCalledTimes(2)
     expect(fake.instanceDispose).toHaveBeenCalledTimes(2)
   })
 
-  it("waits a normal operation behind an active disposal and then retracks it", async () => {
+  it('waits a normal operation behind an active disposal and then retracks it', async () => {
     const fake = buildDirectoryClient()
     const statusStarted = deferred<void>()
     const statusGate = deferred<{ data: unknown }>()
@@ -152,13 +179,13 @@ describe("OpenCodeDirectoryInstances", () => {
       return await disposeGate.promise
     })
     const boundary = new OpenCodeDirectoryInstances(() => fake.client)
-    await used(boundary, "/virtual/project")
+    await used(boundary, '/virtual/project')
 
-    const release = boundary.release("/virtual/project")
+    const release = boundary.release('/virtual/project')
     await statusStarted.promise
     const operation = deferred<void>()
     const operationStarted = deferred<void>()
-    const next = boundary.withOperation("/virtual/project", async (lease) => {
+    const next = boundary.withOperation('/virtual/project', async (lease) => {
       operationStarted.resolve()
       lease.markUsed()
       await operation.promise
@@ -175,12 +202,12 @@ describe("OpenCodeDirectoryInstances", () => {
     await next
   })
 
-  it("fences an untracked directory without calling the SDK", async () => {
+  it('fences an untracked directory without calling the SDK', async () => {
     const fake = buildDirectoryClient()
     const boundary = new OpenCodeDirectoryInstances(() => fake.client)
     const callbackStarted = deferred<void>()
     const callbackGate = deferred<void>()
-    const removal = boundary.withRemovalFence("/virtual/untracked", async () => {
+    const removal = boundary.withRemovalFence('/virtual/untracked', async () => {
       callbackStarted.resolve()
       await callbackGate.promise
       return true
@@ -188,7 +215,7 @@ describe("OpenCodeDirectoryInstances", () => {
     await callbackStarted.promise
 
     let operationStarted = false
-    const operation = boundary.withOperation("/virtual/untracked", async (lease) => {
+    const operation = boundary.withOperation('/virtual/untracked', async (lease) => {
       operationStarted = true
       lease.markUsed()
     })
@@ -197,46 +224,46 @@ describe("OpenCodeDirectoryInstances", () => {
     expect(fake.instanceDispose).not.toHaveBeenCalled()
 
     callbackGate.resolve()
-    expect((await removal)).toEqual({ kind: "completed", value: true })
+    expect(await removal).toEqual({ kind: 'completed', value: true })
     await operation
     expect(operationStarted).toBe(true)
   })
 
-  it("rejects a removal fence when a retracked operation wins the TOCTOU race", async () => {
+  it('rejects a removal fence when a retracked operation wins the TOCTOU race', async () => {
     const fake = buildDirectoryClient()
     const boundary = new OpenCodeDirectoryInstances(() => fake.client)
-    await used(boundary, "/virtual/project")
-    expect((await boundary.release("/virtual/project")).outcome).toBe("disposed")
+    await used(boundary, '/virtual/project')
+    expect((await boundary.release('/virtual/project')).outcome).toBe('disposed')
 
     const operationGate = deferred<void>()
-    const operation = boundary.withOperation("/virtual/project", async (lease) => {
+    const operation = boundary.withOperation('/virtual/project', async (lease) => {
       lease.markUsed()
       await operationGate.promise
     })
     const callback = vi.fn(async () => true)
-    await expect(boundary.withRemovalFence("/virtual/project", callback)).resolves.toEqual({ kind: "busy" })
+    await expect(boundary.withRemovalFence('/virtual/project', callback)).resolves.toEqual({ kind: 'busy' })
     expect(callback).not.toHaveBeenCalled()
 
     operationGate.resolve()
     await operation
   })
 
-  it("keeps removal busy while a pending operation settles", async () => {
+  it('keeps removal busy while a pending operation settles', async () => {
     const fake = buildDirectoryClient()
     const boundary = new OpenCodeDirectoryInstances(() => fake.client)
     const pending = deferred<void>()
-    await boundary.withOperation("/virtual/project", async (lease) => {
+    await boundary.withOperation('/virtual/project', async (lease) => {
       lease.markUsed()
       lease.trackPending(pending.promise)
     })
 
     const callback = vi.fn(async () => true)
-    await expect(boundary.withRemovalFence("/virtual/project", callback)).resolves.toEqual({ kind: "busy" })
+    await expect(boundary.withRemovalFence('/virtual/project', callback)).resolves.toEqual({ kind: 'busy' })
     expect(callback).not.toHaveBeenCalled()
     pending.resolve()
   })
 
-  it("holds a tracked removal fence through status, dispose, and callback", async () => {
+  it('holds a tracked removal fence through status, dispose, and callback', async () => {
     const fake = buildDirectoryClient()
     const statusStarted = deferred<void>()
     const statusGate = deferred<{ data: unknown }>()
@@ -251,10 +278,10 @@ describe("OpenCodeDirectoryInstances", () => {
       return await disposeGate.promise
     })
     const boundary = new OpenCodeDirectoryInstances(() => fake.client)
-    await used(boundary, "/virtual/project")
+    await used(boundary, '/virtual/project')
     const callbackStarted = deferred<void>()
     const callbackGate = deferred<void>()
-    const removal = boundary.withRemovalFence("/virtual/project", async () => {
+    const removal = boundary.withRemovalFence('/virtual/project', async () => {
       callbackStarted.resolve()
       await callbackGate.promise
       return true
@@ -262,7 +289,7 @@ describe("OpenCodeDirectoryInstances", () => {
     await statusStarted.promise
 
     let operationStarted = false
-    const operation = boundary.withOperation("/virtual/project", async (lease) => {
+    const operation = boundary.withOperation('/virtual/project', async (lease) => {
       operationStarted = true
       lease.markUsed()
     })
@@ -274,22 +301,24 @@ describe("OpenCodeDirectoryInstances", () => {
     expect(operationStarted).toBe(false)
 
     callbackGate.resolve()
-    await expect(removal).resolves.toEqual({ kind: "completed", value: true })
+    await expect(removal).resolves.toEqual({ kind: 'completed', value: true })
     await operation
     expect(operationStarted).toBe(true)
   })
 
-  it("releases a failed callback fence without retaining a disposed Instance", async () => {
+  it('releases a failed callback fence without retaining a disposed Instance', async () => {
     const fake = buildDirectoryClient()
     const boundary = new OpenCodeDirectoryInstances(() => fake.client)
-    await used(boundary, "/virtual/project")
-    const callbackFailure = new Error("delete failed")
-    await expect(boundary.withRemovalFence("/virtual/project", async () => {
-      throw callbackFailure
-    })).resolves.toEqual({ kind: "failed" })
+    await used(boundary, '/virtual/project')
+    const callbackFailure = new Error('delete failed')
+    await expect(
+      boundary.withRemovalFence('/virtual/project', async () => {
+        throw callbackFailure
+      }),
+    ).resolves.toEqual({ kind: 'failed' })
 
     let operationStarted = false
-    await boundary.withOperation("/virtual/project", async (lease) => {
+    await boundary.withOperation('/virtual/project', async (lease) => {
       operationStarted = true
       lease.markUsed()
     })
@@ -298,7 +327,7 @@ describe("OpenCodeDirectoryInstances", () => {
     expect(fake.instanceDispose).toHaveBeenCalledTimes(1)
   })
 
-  it("does not block a different directory while one directory is disposing", async () => {
+  it('does not block a different directory while one directory is disposing', async () => {
     const fake = buildDirectoryClient()
     const statusStarted = deferred<void>()
     const statusGate = deferred<{ data: unknown }>()
@@ -307,31 +336,31 @@ describe("OpenCodeDirectoryInstances", () => {
       return await statusGate.promise
     })
     const boundary = new OpenCodeDirectoryInstances(() => fake.client)
-    await used(boundary, "/virtual/a")
-    const releaseA = boundary.release("/virtual/a")
+    await used(boundary, '/virtual/a')
+    const releaseA = boundary.release('/virtual/a')
     await statusStarted.promise
 
     let startedB = false
-    await boundary.withOperation("/virtual/b", async (lease) => {
+    await boundary.withOperation('/virtual/b', async (lease) => {
       startedB = true
       lease.markUsed()
     })
     expect(startedB).toBe(true)
-    statusGate.resolve({ data: { session: { type: "busy" } } })
+    statusGate.resolve({ data: { session: { type: 'busy' } } })
     await releaseA
   })
 
-  it("clears old-generation candidates and ignores later old operations", async () => {
+  it('clears old-generation candidates and ignores later old operations', async () => {
     const fake = buildDirectoryClient()
     const boundary = new OpenCodeDirectoryInstances(() => fake.client)
-    await used(boundary, "/virtual/project")
+    await used(boundary, '/virtual/project')
     boundary.resetGeneration()
 
-    expect((await boundary.release("/virtual/project")).outcome).toBe("untracked")
+    expect((await boundary.release('/virtual/project')).outcome).toBe('untracked')
     expect(fake.sessionStatus).not.toHaveBeenCalled()
   })
 
-  it("wakes waiters on generation reset and fences the old disposal result", async () => {
+  it('wakes waiters on generation reset and fences the old disposal result', async () => {
     const fake = buildDirectoryClient()
     const statusStarted = deferred<void>()
     const statusGate = deferred<{ data: unknown }>()
@@ -340,12 +369,12 @@ describe("OpenCodeDirectoryInstances", () => {
       return await statusGate.promise
     })
     const boundary = new OpenCodeDirectoryInstances(() => fake.client)
-    await used(boundary, "/virtual/project")
+    await used(boundary, '/virtual/project')
 
-    const oldRelease = boundary.release("/virtual/project")
+    const oldRelease = boundary.release('/virtual/project')
     await statusStarted.promise
     let operationStarted = false
-    const next = boundary.withOperation("/virtual/project", async (lease) => {
+    const next = boundary.withOperation('/virtual/project', async (lease) => {
       operationStarted = true
       lease.markUsed()
     })
@@ -357,17 +386,17 @@ describe("OpenCodeDirectoryInstances", () => {
 
     statusGate.resolve({ data: {} })
     await oldRelease
-    expect((await boundary.release("/virtual/project")).outcome).toBe("disposed")
+    expect((await boundary.release('/virtual/project')).outcome).toBe('disposed')
     expect(fake.sessionStatus).toHaveBeenCalledTimes(2)
     expect(fake.instanceDispose).toHaveBeenCalledTimes(2)
   })
 
-  it("keeps waiters fenced until a started callback settles across generation reset", async () => {
+  it('keeps waiters fenced until a started callback settles across generation reset', async () => {
     const fake = buildDirectoryClient()
     const boundary = new OpenCodeDirectoryInstances(() => fake.client)
     const callbackStarted = deferred<void>()
     const callbackGate = deferred<void>()
-    const removal = boundary.withRemovalFence("/virtual/untracked", async () => {
+    const removal = boundary.withRemovalFence('/virtual/untracked', async () => {
       callbackStarted.resolve()
       await callbackGate.promise
       return true
@@ -375,7 +404,7 @@ describe("OpenCodeDirectoryInstances", () => {
     await callbackStarted.promise
 
     let operationStarted = false
-    const operation = boundary.withOperation("/virtual/untracked", async (lease) => {
+    const operation = boundary.withOperation('/virtual/untracked', async (lease) => {
       operationStarted = true
       lease.markUsed()
     })
@@ -383,12 +412,12 @@ describe("OpenCodeDirectoryInstances", () => {
     expect(operationStarted).toBe(false)
 
     callbackGate.resolve()
-    await expect(removal).resolves.toEqual({ kind: "completed", value: true })
+    await expect(removal).resolves.toEqual({ kind: 'completed', value: true })
     await operation
     expect(operationStarted).toBe(true)
   })
 
-  it("does not start a removal callback after generation reset invalidates SDK release", async () => {
+  it('does not start a removal callback after generation reset invalidates SDK release', async () => {
     const fake = buildDirectoryClient()
     const statusStarted = deferred<void>()
     const statusGate = deferred<{ data: unknown }>()
@@ -397,14 +426,14 @@ describe("OpenCodeDirectoryInstances", () => {
       return await statusGate.promise
     })
     const boundary = new OpenCodeDirectoryInstances(() => fake.client)
-    await used(boundary, "/virtual/project")
+    await used(boundary, '/virtual/project')
     const callback = vi.fn(async () => true)
-    const removal = boundary.withRemovalFence("/virtual/project", callback)
+    const removal = boundary.withRemovalFence('/virtual/project', callback)
     await statusStarted.promise
 
     boundary.resetGeneration()
     statusGate.resolve({ data: {} })
-    await expect(removal).resolves.toEqual({ kind: "busy" })
+    await expect(removal).resolves.toEqual({ kind: 'busy' })
     expect(callback).not.toHaveBeenCalled()
   })
 })
@@ -426,14 +455,14 @@ class FakeSubscription implements RuntimeEventSubscription {
   }
 }
 
-it("holds the runTurn directory lease until a pending permission reply settles", async () => {
+it('holds the runTurn directory lease until a pending permission reply settles', async () => {
   const subscription = new FakeSubscription()
   const permissionReply = deferred<{ data: boolean }>()
   const permissionFinished = deferred<void>()
   const promptStarted = deferred<void>()
   const prompt = deferred<unknown>()
   const sessionStatus = vi.fn(async () => ({ data: {} }))
-  const sessionCreate = vi.fn(async () => ({ data: { id: "ses_permission" } }))
+  const sessionCreate = vi.fn(async () => ({ data: { id: 'ses_permission' } }))
   const sessionPrompt = vi.fn(async () => {
     promptStarted.resolve()
     return await prompt.promise
@@ -452,36 +481,39 @@ it("holds the runTurn directory lease until a pending permission reply settles",
     instance: { dispose: instanceDispose },
   } as unknown as OpencodeClient
   const server: OpencodeServerHandle = {
-    url: "http://fake",
-    directory: "/virtual/root",
+    url: 'http://fake',
+    directory: '/virtual/root',
     client,
     async close() {},
   }
   const runtime = new OpenCodeRuntime({
-    directory: "/virtual/root",
+    directory: '/virtual/root',
     serverFactory: async () => server,
     eventSubscriptionFactory: () => subscription,
   })
   await runtime.start()
 
-  const turn = runtime.runTurn({
-    target: { runtime: "opencode", runtimeSessionId: null, workDir: "/virtual/project" },
-    prompt: "do",
-  }, new AbortController().signal)
+  const turn = runtime.runTurn(
+    {
+      target: { runtime: 'opencode', runtimeSessionId: null, workDir: '/virtual/project' },
+      prompt: 'do',
+    },
+    new AbortController().signal,
+  )
   await promptStarted.promise
   subscription.emit({
-    type: "permission.asked",
-    sessionID: "ses_permission",
-    directory: "/virtual/project",
-    payload: { id: "permission-1" },
+    type: 'permission.asked',
+    sessionID: 'ses_permission',
+    directory: '/virtual/project',
+    payload: { id: 'permission-1' },
   })
-  prompt.resolve({ data: { parts: [{ type: "text", text: "done" }] } })
+  prompt.resolve({ data: { parts: [{ type: 'text', text: 'done' }] } })
   const result = await turn
 
   expect(result.ok).toBe(true)
   expect(permission).toHaveBeenCalledTimes(1)
   expect(sessionStatus).toHaveBeenCalledTimes(1)
-  expect((await runtime.release("/virtual/project")).outcome).toBe("busy")
+  expect((await runtime.release('/virtual/project')).outcome).toBe('busy')
   expect(sessionStatus).toHaveBeenCalledTimes(1)
   expect(instanceDispose).not.toHaveBeenCalled()
 
@@ -490,17 +522,20 @@ it("holds the runTurn directory lease until a pending permission reply settles",
   expect(instanceDispose).not.toHaveBeenCalled()
 })
 
-it("gets the current Runtime client after waiting behind disposal", async () => {
+it('gets the current Runtime client after waiting behind disposal', async () => {
   const statusGate = deferred<{ data: unknown }>()
   const statusStarted = deferred<void>()
-  const createA = vi.fn(async () => ({ data: { id: "ses_a" } }))
-  const createB = vi.fn(async () => ({ data: { id: "ses_b" } }))
+  const createA = vi.fn(async () => ({ data: { id: 'ses_a' } }))
+  const createB = vi.fn(async () => ({ data: { id: 'ses_b' } }))
   const clientA = {
     global: { health: vi.fn(async () => ({ data: { ok: true } })) },
-    session: { create: createA, status: vi.fn(() => {
-      statusStarted.resolve()
-      return statusGate.promise
-    }) },
+    session: {
+      create: createA,
+      status: vi.fn(() => {
+        statusStarted.resolve()
+        return statusGate.promise
+      }),
+    },
     instance: { dispose: vi.fn(async () => ({ data: true })) },
   } as unknown as OpencodeClient
   const clientB = {
@@ -508,21 +543,21 @@ it("gets the current Runtime client after waiting behind disposal", async () => 
   } as unknown as OpencodeClient
   let currentClient = clientA
   const server = {
-    url: "http://fake",
-    directory: "/virtual/root",
+    url: 'http://fake',
+    directory: '/virtual/root',
     async close() {},
   } as OpencodeServerHandle & { client: OpencodeClient }
-  Object.defineProperty(server, "client", { get: () => currentClient })
+  Object.defineProperty(server, 'client', { get: () => currentClient })
   const runtime = new OpenCodeRuntime({
-    directory: "/virtual/root",
+    directory: '/virtual/root',
     serverFactory: async () => server,
     eventSubscriptionFactory: () => new FakeSubscription(),
   })
   await runtime.start()
 
-  const request = { target: { runtime: "opencode" as const, runtimeSessionId: null, workDir: "/virtual/project" } }
+  const request = { target: { runtime: 'opencode' as const, runtimeSessionId: null, workDir: '/virtual/project' } }
   await runtime.createSession(request)
-  const oldRelease = runtime.release("/virtual/project")
+  const oldRelease = runtime.release('/virtual/project')
   await statusStarted.promise
 
   const next = runtime.createSession(request)

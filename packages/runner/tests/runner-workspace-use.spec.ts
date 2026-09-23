@@ -36,6 +36,21 @@ describe('RunnerWorkspaceUse', () => {
     expect(deleteWork).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['busy', { kind: 'busy' }],
+    ['failed', { kind: 'failed', reason: 'process_termination_unconfirmed' }],
+  ] as const)('refuses removal when process inspection is %s', async (state, result) => {
+    const deleteWork = vi.fn(async () => undefined)
+    const gate = new RunnerWorkspaceUse(
+      async () => 'ready',
+      (path) => path,
+      undefined,
+      () => state,
+    )
+    expect(await gate.withRemovalFence(workspace, deleteWork)).toEqual(result)
+    expect(deleteWork).not.toHaveBeenCalled()
+  })
+
   it('refuses an old directory without previous-generation termination evidence', async () => {
     const deleteWork = vi.fn(async () => undefined)
     const gate = new RunnerWorkspaceUse(async () => 'ready')

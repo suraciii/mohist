@@ -63,9 +63,10 @@ export class NamedWorkspaceCleanupRunner implements CleanupRunner {
     return await this.withValidWorkspace(entry, async () => true)
   }
 
-  async validateAndDeleteWorkspace(entry: NamedWorkspaceRegistryEntry): Promise<boolean> {
+  async validateAndDeleteWorkspace(entry: NamedWorkspaceRegistryEntry, onDeleteStarted?: () => void): Promise<boolean> {
     if (this.eligibleNow && !(await this.eligibleNow(entry.projectId, entry.workspaceName))) return false
     return await this.withValidWorkspace(entry, async (workspacePath) => {
+      onDeleteStarted?.()
       await deleteDirectory(workspacePath)
       return true
     })

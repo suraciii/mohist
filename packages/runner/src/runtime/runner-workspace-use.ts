@@ -18,6 +18,7 @@ export class RunnerWorkspaceUse implements WorkspaceRemovalFence {
     private readonly releaseResources: (workspacePath: string) => Promise<'ready' | 'busy' | 'failed'>,
     private readonly realpath: (path: string) => string = realpathSync,
     private readonly onAdmit?: (workspacePath: string) => void,
+    private readonly inspectProcesses: (workspacePath: string) => 'ready' | 'busy' | 'failed' = () => 'ready',
   ) {}
 
   acquire(workspacePath: string): () => void {
@@ -56,6 +57,9 @@ export class RunnerWorkspaceUse implements WorkspaceRemovalFence {
     try {
       const readiness = await this.releaseResources(key)
       if (readiness !== 'ready') return { kind: readiness }
+      const processes = this.inspectProcesses(key)
+      if (processes !== 'ready')
+        return { kind: processes, ...(processes === 'failed' ? { reason: 'process_termination_unconfirmed' } : {}) }
       return { kind: 'completed', value: await callback() }
     } catch {
       return { kind: 'failed' }

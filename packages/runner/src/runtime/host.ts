@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { isAbsolute, join, relative } from 'node:path'
+import { join } from 'node:path'
 import type { AgentRuntime, RunnerOptions, RunnerRegistration } from '../core/types.js'
 import { ServerConnection } from '../server/connection.js'
 import { runnerTransportDiagnostics } from '../server/connection-errors.js'
@@ -14,6 +14,7 @@ import { NamedWorkspaceRegistry } from './workspace-registry.js'
 import { NamedWorkspaceManager } from './workspace-entity.js'
 import { namedWorkspacePath } from './workspace-entity.js'
 import { RunnerWorkspaceUse, WorkspaceUseConflict } from './runner-workspace-use.js'
+import { inspectWorkspaceProcessUse } from './workspace-process-use.js'
 import { createNamedWorkspaceCleanupLoop, NamedWorkspaceReclaimProbe } from './named-workspace-cleanup.js'
 import {
   createAgentSessionRuntimeEventQueue,
@@ -183,10 +184,9 @@ export class RunnerHost {
         if (piResult !== 'ready') return piResult
         const runtime = this.openCodeRuntime
         if (!runtime) return 'ready'
-        const result = await runtime.reclaimWhere((directory) => {
-          const rel = relative(workspacePath, directory)
-          return rel === '' || (rel !== '..' && !rel.startsWith('../') && !isAbsolute(rel))
-        })
+        const result = await runtime.reclaimWhere(
+          (_directory, owner, unknownHandle) => owner === workspacePath || unknownHandle,
+        )
         return result.failed > 0 ? 'failed' : result.busy > 0 ? 'busy' : 'ready'
       },
       undefined,
@@ -197,6 +197,7 @@ export class RunnerHost {
             log.error('failed to reset Workspace candidate period after admission', { exception: error })
           })
       },
+      inspectWorkspaceProcessUse,
     )
     this.agentSessionRuntimeEventQueue = createAgentSessionRuntimeEventQueue({
       deliver: createServerRuntimeEventDelivery({
@@ -480,6 +481,11 @@ export class RunnerHost {
       const factory = getOpenCodeRuntimeFactory()
       this.openCodeRuntime = factory({
         directory: process.cwd(),
+        ownerForDirectory: (directory) =>
+          this.workspaceUse.ownerForWorkDir(
+            directory,
+            this.namedWorkspaceRegistry.list().map((entry) => entry.workspacePath),
+          ),
         ...(this.options.runtimeIdleGraceMs !== undefined ? { idleGraceMs: this.options.runtimeIdleGraceMs } : {}),
         ...(this.options.quarantineDrainTimeoutMs !== undefined
           ? { quarantineDrainTimeoutMs: this.options.quarantineDrainTimeoutMs }
