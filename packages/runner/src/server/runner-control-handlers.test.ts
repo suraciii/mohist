@@ -15,7 +15,11 @@ const probeParams = {
 describe('createRunnerControlHandlers', () => {
   it('binds all ten methods to the existing transport-neutral domain handlers', async () => {
     const command = vi.fn(async () => ({ ok: true }))
-    const withWorkspaceUse = vi.fn(async (_workDir: string, work: () => Promise<unknown>) => await work())
+    const admittedWorkDirs: string[] = []
+    const withWorkspaceUse = async <T>(workDir: string, work: () => Promise<T>): Promise<T> => {
+      admittedWorkDirs.push(workDir)
+      return await work()
+    }
     const resolveSession = vi.fn(async () => ({
       ok: true,
       value: { runtimeSessionId: 'runtime', workDir: '/work', activeTurn: false },
@@ -85,6 +89,6 @@ describe('createRunnerControlHandlers', () => {
     expect(resolveSession).toHaveBeenCalledWith({
       target: { runtime: 'opencode', runtimeSessionId: 'runtime', workDir: '/work' },
     })
-    expect(withWorkspaceUse).toHaveBeenCalledWith('/work', expect.any(Function))
+    expect(admittedWorkDirs).toContain('/work')
   })
 })
