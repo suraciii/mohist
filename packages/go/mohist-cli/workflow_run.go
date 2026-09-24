@@ -16,8 +16,7 @@ import (
 var workflowListFields = []string{"profileId", "name", "description", "sourceProvenance", "isBuiltIn"}
 var workflowFields = []string{"projectId", "profileId", "name", "description", "sourceProvenance", "isBuiltIn", "definitionSource", "stages"}
 var runListFields = []string{"id", "status", "stage", "currentStage", "issueNumber"}
-var runFields = []string{"id", "status", "currentStage", "stages", "issueRef"}
-var runControlFields = []string{"workflowRunId", "approved", "requested-changes", "retried", "rerun", "rerunFromStage", "paused", "resumed", "stopped", "status", "stage", "issueRef", "decidedBy", "displayName"}
+var runFields = []string{"id", "status", "currentStage", "stages", "issueRef", "pendingWork", "failure", "availableActions", "assignedTo"}
 var artifactFields = []string{"artifactId", "path", "kind", "contentType", "size", "actionAttemptId", "recordedAt"}
 var feedbackFields = []string{"id", "issueNumber", "workflowRunId", "stage", "status", "body", "createdAt", "resolution", "updatedAt"}
 
@@ -133,6 +132,15 @@ func parseRun(args []string) (command, error) {
 			i++
 		case "--yes":
 			c.args = append(c.args, "yes", "true")
+		case "--idempotency-key":
+			if !contains([]string{"approve", "request-changes", "retry", "rerun", "pause", "resume", "stop"}, action) {
+				return command{}, usage(arg + " is only supported for Run controls")
+			}
+			if i+1 >= len(args) {
+				return command{}, usage(arg + " requires a value")
+			}
+			c.args = append(c.args, "idempotency-key", args[i+1])
+			i++
 		case "--json":
 			var err error
 			i, err = jsonFlag(args, i, &c)
@@ -379,17 +387,15 @@ func validateWorkflowFile(deps Dependencies, cmd command, source string) int {
 func runList(ctx context.Context, deps Dependencies, c *client, cmd command) int {
 	project, ok := resolveProject(deps, argValue(cmd.args, "project", ""))
 	if !ok {
-		writeError(deps.Stderr, errors.New("Run 'mo project use <name-or-id>' or pass --project <name-or-id>"))
-		return ExitOperation
+		return commandFailureExit(deps, ctx, cmd, projectNotSelected())
 	}
 	data, err := c.request(ctx, http.MethodGet, "/api/projects/"+url.PathEscape(project)+"/issues", nil)
 	if err != nil {
-		return operationExit(deps, ctx, err)
+		return commandFailureExit(deps, ctx, cmd, err)
 	}
 	var issues []map[string]json.RawMessage
 	if json.Unmarshal(data, &issues) != nil {
-		writeError(deps.Stderr, errors.New("error: issue response has an invalid shape [invalid_response]"))
-		return ExitOperation
+		return commandFailureExit(deps, ctx, cmd, responseShapeError("error: issue response has an invalid shape [invalid_response]"))
 	}
 	runs := make([]map[string]json.RawMessage, 0)
 	for _, issue := range issues {
@@ -425,30 +431,32 @@ func runList(ctx context.Context, deps Dependencies, c *client, cmd command) int
 func resolveRun(ctx context.Context, deps Dependencies, c *client, cmd command) (string, int) {
 	run, issue := argValue(cmd.args, "run", ""), argValue(cmd.args, "issue", "")
 	if run != "" && issue != "" || run == "" && issue == "" {
-		writeError(deps.Stderr, errors.New("provide exactly one Run ID or --issue <number>"))
-		return "", ExitUsage
+		return "", commandUsageExit(deps, cmd, usage("provide exactly one Run ID or --issue <number>"))
 	}
 	if run != "" {
 		return run, ExitOK
 	}
 	project, ok := resolveProject(deps, argValue(cmd.args, "project", ""))
 	if !ok {
-		writeError(deps.Stderr, errors.New("Run 'mo project use <name-or-id>' or pass --project <name-or-id>"))
-		return "", ExitOperation
+		return "", commandFailureExit(deps, ctx, cmd, projectNotSelected())
 	}
 	data, err := c.request(ctx, http.MethodGet, "/api/projects/"+url.PathEscape(project)+"/issues/"+url.PathEscape(issue), nil)
 	if err != nil {
-		return "", operationExit(deps, ctx, err)
+		return "", commandFailureExit(deps, ctx, cmd, err)
 	}
 	var v map[string]json.RawMessage
 	if json.Unmarshal(data, &v) != nil {
-		writeError(deps.Stderr, errors.New("error: issue response has an invalid shape [invalid_response]"))
-		return "", ExitOperation
+		return "", commandFailureExit(deps, ctx, cmd, responseShapeError("error: issue response has an invalid shape [invalid_response]"))
 	}
 	id := stringValueRaw(v["workflowRunId"])
 	if id == "" {
-		writeError(deps.Stderr, errors.New("issue has no active workflow run"))
-		return "", ExitOperation
+		return "", commandFailureExit(deps, ctx, cmd, &operationError{
+			message:    "error: issue " + issue + " has no active workflow run [run_not_found]",
+			code:       "run_not_found",
+			effect:     "none",
+			retrySafe:  boolPtr(true),
+			nextAction: "mo issue start " + issue,
+		})
 	}
 	return id, ExitOK
 }
@@ -461,28 +469,26 @@ func runRunView(ctx context.Context, deps Dependencies, c *client, cmd command) 
 	if hasArg(cmd.args, "yaml") {
 		data, e := c.request(ctx, http.MethodGet, "/api/workflow-runs/"+url.PathEscape(run)+"/yaml", nil)
 		if e != nil {
-			return operationExit(deps, ctx, e)
+			return commandFailureExit(deps, ctx, cmd, e)
 		}
 		var v map[string]any
 		if json.Unmarshal(data, &v) != nil {
-			writeError(deps.Stderr, errors.New("error: invalid YAML response [invalid_response]"))
-			return ExitOperation
+			return commandFailureExit(deps, ctx, cmd, responseShapeError("error: invalid YAML response [invalid_response]"))
 		}
 		fmt.Fprintln(deps.Stdout, stringValueAny(v["yaml"]))
 		return ExitOK
 	}
 	data, e := c.request(ctx, http.MethodGet, "/api/workflow-runs/"+url.PathEscape(run), nil)
 	if e != nil {
-		return operationExit(deps, ctx, e)
+		return commandFailureExit(deps, ctx, cmd, e)
 	}
 	var root map[string]json.RawMessage
 	if json.Unmarshal(data, &root) != nil {
-		writeError(deps.Stderr, errors.New("error: invalid run response [invalid_response]"))
-		return ExitOperation
+		return commandFailureExit(deps, ctx, cmd, responseShapeError("error: invalid run response [invalid_response]"))
 	}
 	status := map[string]json.RawMessage{}
 	_ = json.Unmarshal(root["status"], &status)
-	projected := map[string]json.RawMessage{"id": status["workflowRunId"], "status": status["status"], "currentStage": status["currentStage"], "stages": status["stages"], "issueRef": root["issueRef"]}
+	projected := map[string]json.RawMessage{"id": status["workflowRunId"], "status": status["status"], "currentStage": status["currentStage"], "stages": status["stages"], "issueRef": root["issueRef"], "pendingWork": status["pendingWork"], "failure": status["failure"], "availableActions": status["availableActions"], "assignedTo": status["assignedTo"]}
 	enc, _ := json.Marshal(projected)
 	if cmd.fieldsOnly {
 		for _, f := range cmd.catalog {
@@ -494,21 +500,34 @@ func runRunView(ctx context.Context, deps Dependencies, c *client, cmd command) 
 		s, _ := SelectFields(enc, cmd.fields, false)
 		return writeJSON(deps.Stdout, json.RawMessage(s))
 	}
+	if actions := availableActions(status["availableActions"]); len(actions) > 0 {
+		// The default rendering is one JSON object; the permitted controls
+		// travel as one compact hint line on stderr so stdout stays
+		// machine-readable.
+		fmt.Fprintln(deps.Stderr, "Available actions: "+strings.Join(actions, ", "))
+	}
 	return writeJSON(deps.Stdout, json.RawMessage(enc))
+}
+
+// availableActions decodes the read model's permitted Run controls; a
+// missing or malformed field means no known actions.
+func availableActions(raw json.RawMessage) []string {
+	var actions []string
+	if json.Unmarshal(raw, &actions) != nil {
+		return nil
+	}
+	return actions
 }
 
 func runRunControl(ctx context.Context, deps Dependencies, c *client, cmd command) int {
 	if cmd.kind == "run-request-changes" && strings.TrimSpace(argValue(cmd.args, "message", "")) == "" {
-		writeError(deps.Stderr, errors.New("--message is required and must not be empty"))
-		return ExitOperation
+		return commandFailureExit(deps, ctx, cmd, usage("--message is required and must not be empty"))
 	}
 	if cmd.kind == "run-rerun" && hasArg(cmd.args, "from-stage") && strings.TrimSpace(argValue(cmd.args, "from-stage", "")) == "" {
-		writeError(deps.Stderr, errors.New("--from-stage is required and must not be empty"))
-		return ExitOperation
+		return commandFailureExit(deps, ctx, cmd, usage("--from-stage is required and must not be empty"))
 	}
 	if cmd.kind == "run-stop" && !hasArg(cmd.args, "yes") {
-		writeError(deps.Stderr, errors.New("--yes is required to confirm this irreversible action"))
-		return ExitOperation
+		return commandFailureExit(deps, ctx, cmd, usage("--yes is required to confirm this irreversible action"))
 	}
 	run, code := resolveRun(ctx, deps, c, cmd)
 	if code != 0 {
@@ -528,9 +547,16 @@ func runRunControl(ctx context.Context, deps Dependencies, c *client, cmd comman
 		pathAction = "rerun-from-stage"
 		body["stage"] = argValue(cmd.args, "from-stage", "")
 	}
-	data, e := c.request(ctx, http.MethodPost, "/api/workflow-runs/"+url.PathEscape(run)+"/"+pathAction, body)
+	key := argValue(cmd.args, "idempotency-key", "")
+	if key == "" {
+		key = fmt.Sprintf("%d", deps.Now().UnixNano())
+		// The generated key reaches stderr before the request so a lost
+		// response is still recoverable; stdout stays the result channel.
+		fmt.Fprintln(deps.Stderr, "Idempotency-Key: "+key)
+	}
+	data, e := c.requestHeaders(ctx, http.MethodPost, "/api/workflow-runs/"+url.PathEscape(run)+"/"+pathAction, body, map[string]string{"Idempotency-Key": key}, true)
 	if e != nil {
-		return operationExit(deps, ctx, e)
+		return commandFailureExit(deps, ctx, cmd, keyedRetryHint(e, runControlNextAction(cmd, key)))
 	}
 	if cmd.fieldsOnly {
 		for _, f := range cmd.catalog {
@@ -547,6 +573,48 @@ func runRunControl(ctx context.Context, deps Dependencies, c *client, cmd comman
 		return ExitOK
 	}
 	return writeJSON(deps.Stdout, json.RawMessage(data))
+}
+
+// runControlNextAction rebuilds the same control invocation with the same
+// key, the recovery for a keyed write whose outcome is unknown.
+func runControlNextAction(cmd command, key string) string {
+	parts := []string{"mo run " + strings.TrimPrefix(cmd.kind, "run-")}
+	if run := argValue(cmd.args, "run", ""); run != "" {
+		parts = append(parts, run)
+	} else {
+		parts = append(parts, "--issue", argValue(cmd.args, "issue", ""))
+	}
+	switch cmd.kind {
+	case "run-request-changes":
+		parts = append(parts, "--message", shellWord(argValue(cmd.args, "message", "")))
+		if name := argValue(cmd.args, "display-name", ""); name != "" {
+			parts = append(parts, "--display-name", shellWord(name))
+		}
+	case "run-approve":
+		if name := argValue(cmd.args, "display-name", ""); name != "" {
+			parts = append(parts, "--display-name", shellWord(name))
+		}
+	case "run-rerun":
+		if hasArg(cmd.args, "from-stage") {
+			parts = append(parts, "--from-stage", shellWord(argValue(cmd.args, "from-stage", "")))
+		}
+	case "run-stop":
+		parts = append(parts, "--yes")
+	}
+	return strings.Join(append(parts, "--idempotency-key", key), " ")
+}
+
+// shellWord quotes a value that a shell would otherwise split or expand.
+func shellWord(value string) string {
+	if value == "" {
+		return `""`
+	}
+	for _, r := range value {
+		if strings.ContainsRune(" \t\"'`$\\;&()|<>", r) {
+			return strconv.Quote(value)
+		}
+	}
+	return value
 }
 
 func runWatchRun(ctx context.Context, deps Dependencies, c *client, cmd command) int {
@@ -612,7 +680,7 @@ func runArtifact(ctx context.Context, deps Dependencies, c *client, cmd command)
 	}
 	detail, e := c.request(ctx, http.MethodGet, "/api/workflow-runs/"+url.PathEscape(run), nil)
 	if e != nil {
-		return operationExit(deps, ctx, e)
+		return commandFailureExit(deps, ctx, cmd, e)
 	}
 	var root map[string]json.RawMessage
 	_ = json.Unmarshal(detail, &root)
@@ -626,7 +694,7 @@ func runArtifact(ctx context.Context, deps Dependencies, c *client, cmd command)
 	}
 	data, e := c.request(ctx, http.MethodGet, path, nil)
 	if e != nil {
-		return operationExit(deps, ctx, e)
+		return commandFailureExit(deps, ctx, cmd, e)
 	}
 	if cmd.fieldsOnly {
 		for _, f := range cmd.catalog {
@@ -648,7 +716,7 @@ func runFeedback(ctx context.Context, deps Dependencies, c *client, cmd command)
 	}
 	detail, e := c.request(ctx, http.MethodGet, "/api/workflow-runs/"+url.PathEscape(run), nil)
 	if e != nil {
-		return operationExit(deps, ctx, e)
+		return commandFailureExit(deps, ctx, cmd, e)
 	}
 	var root map[string]json.RawMessage
 	_ = json.Unmarshal(detail, &root)
@@ -664,23 +732,21 @@ func runFeedback(ctx context.Context, deps Dependencies, c *client, cmd command)
 	}
 	data, e := c.request(ctx, http.MethodGet, path, nil)
 	if e != nil {
-		return operationExit(deps, ctx, e)
+		return commandFailureExit(deps, ctx, cmd, e)
 	}
 	if cmd.kind == "run-feedback-view" && hasArg(cmd.args, "latest") {
 		var records []map[string]json.RawMessage
 		if json.Unmarshal(data, &records) != nil || len(records) == 0 {
-			writeError(deps.Stderr, errors.New("no feedback records found"))
-			return ExitOperation
+			return commandFailureExit(deps, ctx, cmd, &operationError{message: "error: no feedback records found [not_found]", code: "not_found", effect: "none", retrySafe: boolPtr(true)})
 		}
 		id := stringValueRaw(records[0]["id"])
 		if id == "" {
-			writeError(deps.Stderr, errors.New("feedback response has an invalid shape [invalid_response]"))
-			return ExitOperation
+			return commandFailureExit(deps, ctx, cmd, responseShapeError("error: feedback response has an invalid shape [invalid_response]"))
 		}
 		path = "/api/projects/" + url.PathEscape(project) + "/issues/" + url.PathEscape(number) + "/feedback/" + url.PathEscape(id)
 		data, e = c.request(ctx, http.MethodGet, path, nil)
 		if e != nil {
-			return operationExit(deps, ctx, e)
+			return commandFailureExit(deps, ctx, cmd, e)
 		}
 	}
 	if cmd.fieldsOnly {
@@ -716,8 +782,7 @@ func runRunVariables(ctx context.Context, deps Dependencies, c *client, cmd comm
 		if cmd.kind == "run-variable-set" {
 			if hasArg(cmd.args, "value-json") {
 				if json.Unmarshal([]byte(argValue(cmd.args, "value-json", "")), &value) != nil {
-					writeError(deps.Stderr, errors.New("invalid JSON value"))
-					return ExitUsage
+					return commandUsageExit(deps, cmd, usage("invalid JSON value"))
 				}
 			} else {
 				value = argValue(cmd.args, "value", "")
@@ -730,7 +795,7 @@ func runRunVariables(ctx context.Context, deps Dependencies, c *client, cmd comm
 	}
 	data, e := c.request(ctx, method, path, body)
 	if e != nil {
-		return operationExit(deps, ctx, e)
+		return commandFailureExit(deps, ctx, cmd, e)
 	}
 	if cmd.fieldsOnly {
 		for _, f := range cmd.catalog {

@@ -1765,7 +1765,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("Projects");
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.DirectApi.DirectApiIdempotencyMappingRow", b =>
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Idempotency.IdempotencyMappingRow", b =>
                 {
                     b.Property<string>("Command")
                         .HasMaxLength(32)

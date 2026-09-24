@@ -1,15 +1,15 @@
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Infrastructure.Data.DirectApi;
+using Mohist.Server.Infrastructure.Data.Idempotency;
 
 namespace Mohist.Server.Infrastructure.Data.Db;
 
 public partial class MohistDbContext
 {
-    public DbSet<DirectApiIdempotencyMappingRow> DirectApiIdempotencyMappings { get; set; } = null!;
+    public DbSet<IdempotencyMappingRow> IdempotencyMappings { get; set; } = null!;
 
     private static void ConfigureDirectApiModels(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<DirectApiIdempotencyMappingRow>(entity =>
+        modelBuilder.Entity<IdempotencyMappingRow>(entity =>
         {
             entity.ToTable("direct_api_idempotency_mappings");
             entity.HasKey(row => new { row.Command, row.ScopeKey });

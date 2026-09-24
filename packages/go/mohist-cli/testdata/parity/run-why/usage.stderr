@@ -1,1 +1,1 @@
-error: unknown JSON field "unknown"; discover fields with run why <run-ref> --json
+{"code":"usage_error","message":"unknown JSON field \"unknown\"; discover fields with run why \u003crun-ref\u003e --json","effect":"none","retrySafe":false}

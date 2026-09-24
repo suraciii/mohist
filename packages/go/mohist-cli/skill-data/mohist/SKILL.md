@@ -62,6 +62,20 @@ For every state-changing action, read the relevant leaf help first:
 `mo <command> --help`. Treat the command's current help as the authority for
 arguments, flags, JSON fields, confirmation, and targeting.
 
+## After a write
+
+`issue start` and the Run controls that change a Run accept `--idempotency-key`.
+When you did not pass one, the command printed the generated key to stderr
+before sending the request. If the response was lost, repeat the identical
+command with the same key: the Server replays the recorded outcome and does not
+execute again. A key already used with different inputs answers
+`idempotency_key_reused`; a distinct operation needs a new key.
+
+Every failure states the stable code, whether the effect is known, whether retry
+is safe, and the next action. With `--json` that statement arrives as one JSON
+object on stderr; never parse the human message to decide whether to retry or
+hand off.
+
 ## CLI handoff
 
 Use the current command tree for all exact syntax. Start at `mo --help`, narrow

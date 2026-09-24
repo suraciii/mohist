@@ -2,32 +2,33 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.DirectApi;
+using Mohist.Server.Infrastructure.Idempotency;
 using Mohist.Server.Tests.Support;
 using Xunit;
 
 namespace Mohist.Server.Tests.DirectApi;
 
 [Trait("level", "L0")]
-public sealed class DirectApiIdempotencyServiceTests
+public sealed class IdempotencyFenceTests
 {
     [Fact]
     public async Task PendingStop_FencesOtherScopesUntilCompletion()
     {
         using var database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(database.Options);
-        var service = new DirectApiIdempotencyService(
+        var service = new IdempotencyFence(
             factory,
             new FakeTimeProvider(new DateTimeOffset(2026, 8, 19, 0, 0, 0, TimeSpan.Zero)));
 
         var first = await service.GetOrCreateAsync(
-            DirectApiCommands.Stop,
+            IdempotencyCommands.Stop,
             "turn-1|caller-a|key-a",
             "caller-a",
             "fingerprint",
             "turn-1",
             "outcome-a");
         var fenced = await service.GetOrCreateAsync(
-            DirectApiCommands.Stop,
+            IdempotencyCommands.Stop,
             "turn-1|caller-b|key-b",
             "caller-b",
             "fingerprint",
@@ -36,15 +37,17 @@ public sealed class DirectApiIdempotencyServiceTests
 
         Assert.True(first.Created);
         Assert.True(fenced.StopOutcomeUnknown);
-        Assert.Equal(first.Mapping.ScopeKey, fenced.Mapping.ScopeKey);
+        // The losing scope must be fenced to caller A's pending row, so it
+        // reads that row's outcome instead of creating a second mapping.
+        Assert.Equal(first.Outcome, fenced.Outcome);
 
         await service.CompleteAsync(
-            DirectApiCommands.Stop,
-            first.Mapping.ScopeKey,
-            DirectApiMappingStates.Completed,
+            IdempotencyCommands.Stop,
+            "turn-1|caller-a|key-a",
+            IdempotencyMappingStates.Completed,
             "completed-a");
         var second = await service.GetOrCreateAsync(
-            DirectApiCommands.Stop,
+            IdempotencyCommands.Stop,
             "turn-1|caller-b|key-b",
             "caller-b",
             "fingerprint",
@@ -54,7 +57,7 @@ public sealed class DirectApiIdempotencyServiceTests
         Assert.True(second.Created);
         Assert.False(second.StopOutcomeUnknown);
         await using var db = factory.CreateDbContext();
-        Assert.Equal(2, await db.DirectApiIdempotencyMappings.CountAsync());
+        Assert.Equal(2, await db.IdempotencyMappings.CountAsync());
     }
 
     [Fact]
@@ -62,31 +65,31 @@ public sealed class DirectApiIdempotencyServiceTests
     {
         using var database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(database.Options);
-        var service = new DirectApiIdempotencyService(
+        var service = new IdempotencyFence(
             factory,
             new FakeTimeProvider(new DateTimeOffset(2026, 8, 19, 0, 0, 0, TimeSpan.Zero)));
         const string scopeKey = "session-1|key-1";
 
         await service.GetOrCreateAsync(
-            DirectApiCommands.Followup,
+            IdempotencyCommands.Followup,
             scopeKey,
             "caller-a",
             "fingerprint",
             turnId: null,
             "pending");
         await service.CompleteAsync(
-            DirectApiCommands.Followup,
+            IdempotencyCommands.Followup,
             scopeKey,
-            DirectApiMappingStates.Completed,
+            IdempotencyMappingStates.Completed,
             "completed");
 
         var frozen = await service.FreezeCompletedOutcomeAsync(
-            DirectApiCommands.Followup,
+            IdempotencyCommands.Followup,
             scopeKey,
             "completed",
             "frozen");
         var staleWriter = await service.FreezeCompletedOutcomeAsync(
-            DirectApiCommands.Followup,
+            IdempotencyCommands.Followup,
             scopeKey,
             "completed",
             "stale");

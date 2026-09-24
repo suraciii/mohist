@@ -435,9 +435,17 @@ write, stop, start, recover, or contact a service.
 
 The reference owns error format, stable codes, and exit status. A stable code
 uses lowercase snake_case and names a product error, not an exception type. A
-transport error distinguishes definitely not submitted from unknown submission.
-The CLI never resends a state-changing request automatically and gives a retry
-hint only when retry is confirmed safe.
+transport error distinguishes definitely not submitted from unknown submission,
+and a state-changing request is never re-sent automatically. The CLI re-sends a
+keyed control write once, because the durable request fence makes that safe;
+see [`agent-operability.md`](agent-operability.md#failures-at-the-cli).
+
+Every failure the CLI reports carries four decision facts beside the cause: the
+stable code, whether the effect is known, whether retry is safe, and the next
+action. Human output states them as a `hint:` line. A caller that selected
+`--json` receives the same facts as one JSON object on stderr instead of prose.
+Neither form changes the exit status or writes to stdout, so a structured caller
+never parses prose to decide whether to retry or hand off.
 
 ## Non-Goals
 

@@ -177,7 +177,7 @@ enter the language.
 - `label`: `list`, `create`, `edit`, `delete`.
 - `workflow`: `list`, `view`, `create`, `edit`, `delete`, `validate`;
   `view --yaml` reads the raw Workflow Definition.
-- `run`: `list`, `view`, `watch`, `approve`, `request-changes`, `retry`,
+- `run`: `list`, `view`, `why`, `watch`, `approve`, `request-changes`, `retry`,
   `rerun`, `pause`, `resume`, `stop`; `view --yaml` reads the complete
   Definition bound to the Run; `feedback list/view`;
   `variable list/get/set/unset`, where `list/get --effective` reads merged
@@ -252,6 +252,13 @@ request failure remains a failure and returns a nonzero exit code.
 repository, Profile selection, and the Issue lifecycle such as Draft, Done,
 Closed, and Archived. `mo issue start <number>` means "start this work." On
 success, it creates and binds one WorkflowRun.
+
+`issue start` accepts `--idempotency-key <key>`. The key identifies one start
+request: retrying a lost response with the same key returns the recorded result
+instead of starting a second Run, and a start without a key still reuses the
+active Run of an already-started Issue. When the key is omitted, the command
+generates one and prints `Idempotency-Key: <key>` to stderr before the request,
+so a caller that lost the response can repeat the command with that key.
 
 `issue create` and `issue edit` use the same typed flags for planning metadata:
 `--priority`, `--risk low|medium|high`, `--label`, `--repo`, `--parent`, and
@@ -349,6 +356,22 @@ availability, or connect to the Server.
 `mo run` views and controls one WorkflowRun. An Issue number can address the
 current Run conveniently, but this does not duplicate control commands under
 Issue.
+
+The controls that change a Run — `approve`, `request-changes`, `retry`,
+`rerun`, `pause`, `resume`, `stop`, and `rerun --from-stage` — accept
+`--idempotency-key <key>`. Retrying a lost response with the same key and the
+same inputs replays the recorded outcome and creates no second effect. Reusing a
+key for the same Run with different inputs is rejected with
+`409 idempotency_key_reused` and changes nothing. When the key is omitted, the
+command generates one and prints `Idempotency-Key: <key>` to stderr before the
+request, exactly as `issue start` does. Read-only targets such as `run view`,
+`run why`, `run watch`, artifacts, feedback, and Variables reject the flag.
+
+`mo run why <run-id>` reads the Run diagnosis: the failure chain, task
+attempts, dispatch facts, and bounded event evidence that explain why a Run is
+stopped or not advancing. Use it after `mo run view` shows a failure, blocker,
+or unexpected stage state. It is a read-only diagnosis and does not retry,
+rerun, pause, or stop the Run.
 
 A command that needs one Run accepts exactly one of these targets:
 
@@ -840,6 +863,16 @@ mo run view --issue 42 --json id,status,currentStage
 - Human output may improve presentation. Scripts and Agents depend only on JSON
   or NDJSON.
 
+A caller decides the next operation from the resource reads. `run view` exposes
+the Run identity and state together with `pendingWork` (the work currently
+waiting or dispatched), `failure` (why a stage stopped), `availableActions` (the
+controls permitted in the current state), and `assignedTo`. Its default
+rendering also prints the permitted actions as one `Available actions:` line on
+stderr, and stays silent when the Run has none. `issue view` exposes
+`canStart`, `blockedReason`, `attention`, `workflowRunId`, and the current stage
+and status. `run why` remains the diagnosis read for a stopped or unexplained
+Run. No separate status or task command exists for this projection.
+
 The initial command surface does not include built-in `--jq`, `--template`, or
 a generic YAML renderer. An Agent can request the smallest JSON field set and
 use existing shell tools. The CLI grows only when repeated needs cannot be
@@ -856,12 +889,13 @@ to a person:
 
 ```text literal
 error: issue 42 has no active workflow run [run_not_found]
-hint: start it with `mo issue start 42`
+hint: mo issue start 42
 ```
 
 - The first line identifies the failed object, cause, and stable error code.
-- `hint:` appears only when a clear recovery action exists. It provides an
-  executable command or missing argument.
+- `hint:` appears only when a clear recovery action exists. It is one
+  executable command line, using `<placeholder>` for a value the caller must
+  supply.
 - An argument error also shows relevant usage, not the complete root help.
 - An unknown area or action is a usage error. It returns `2`, shows only the
   nearest relevant usage, and must not fall back to root help and exit `0`.
@@ -881,8 +915,44 @@ Unknown flags for any Operations or notification leaf produce exit 2 and a
 leaf-specific USAGE block; no request is sent. Slack credential options instead
 receive the protected-file diagnostic.
 
-`--json` does not change errors to another envelope. The caller always uses the
-exit code for success or failure and reads the same diagnostic from stderr.
+Every failure of an Issue or Run command also states whether the effect is
+known, whether retry is safe, and what to do next:
+
+- `effect` is `none` when the operation changed nothing, `unknown` when the
+  caller cannot know — usually because the response was lost — and `applied`
+  when it took effect and the response describes the result.
+- A retry is safe only when repeating the identical request cannot produce a
+  second effect. Repeating a keyed write with the same key is the intended
+  recovery: the Server replays the recorded outcome instead of executing again.
+- `hint:` is that recovery action in human form.
+
+A caller that selected `--json` receives the same facts as one machine-readable
+object on stderr instead of the two text lines, so a structured caller never
+parses prose to decide whether to retry or hand off:
+
+```json
+{"code":"idempotency_key_reused","message":"...","effect":"none","retrySafe":false,
+ "nextAction":"mo run retry wr_abc --idempotency-key <new-key>"}
+```
+
+`nextAction` is absent when no recovery exists. The exit code does not change,
+and a failed command writes nothing to stdout. Other command families keep the
+single-line diagnostic until they need the same contract.
+
+A keyed write reports these stable codes:
+
+- `idempotency_key_invalid`: the key is not 1 to 128 printable ASCII characters.
+- `idempotency_key_reused`: the key already names another request for the same
+  target. The recorded request is unchanged; use a new key to attempt a
+  different operation.
+- `operation_pending`: another request with the same key is still executing.
+  Repeat the same command with the same key later.
+
+Two local stable codes complete the set for these commands:
+
+- `usage_error`: the invocation is invalid and nothing was sent.
+- `project_not_selected`: no Project is selected for a Project-scoped command.
+  The hint shows `mo project use <name-or-id>`.
 
 ## Common Invocations
 

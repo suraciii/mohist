@@ -1211,23 +1211,24 @@ func requestAndRender(ctx context.Context, deps Dependencies, c *client, method,
 }
 
 func (c *client) requestHeaders(ctx context.Context, method, path string, body any, headers map[string]string, retry bool) (json.RawMessage, error) {
+	keyed := headers["Idempotency-Key"] != ""
 	var last error
 	attempts := 1
 	if retry {
 		attempts = 2
 	}
-	for i := 0; i < attempts; i++ {
+	for range attempts {
 		var reader io.Reader
 		if body != nil {
 			b, e := json.Marshal(body)
 			if e != nil {
-				return nil, e
+				return nil, classifyFailure(&operationError{message: "error: request could not be created [request_error]"}, method, keyed, failureLocal, 0)
 			}
 			reader = strings.NewReader(string(b))
 		}
 		req, e := http.NewRequestWithContext(ctx, method, c.base.String()+path, reader)
 		if e != nil {
-			return nil, e
+			return nil, classifyFailure(&operationError{message: "error: request could not be created [request_error]"}, method, keyed, failureLocal, 0)
 		}
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set(operatorIDHeader, c.operatorID)
@@ -1247,17 +1248,17 @@ func (c *client) requestHeaders(ctx context.Context, method, path string, body a
 			if errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded) {
 				return nil, e
 			}
-			last = &operationError{message: "error: Mohist Server request failed [service_unavailable]"}
+			last = classifyFailure(&operationError{message: "error: Mohist Server request failed [service_unavailable]", code: "service_unavailable"}, method, keyed, failureSubmit, 0)
 			continue
 		}
 		b, e := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if e != nil {
-			return nil, e
+			return nil, classifyFailure(&operationError{message: "error: Mohist Server response could not be read [response_error]", code: "response_error"}, method, keyed, failureResponse, resp.StatusCode)
 		}
 		var env envelope
 		if json.Unmarshal(b, &env) != nil {
-			return nil, &operationError{message: responseStatusError(resp.StatusCode)}
+			return nil, classifyFailure(responseStatusFailure(resp.StatusCode), method, keyed, failureResponse, resp.StatusCode)
 		}
 		success := (env.Success == nil && resp.StatusCode >= 200 && resp.StatusCode < 300) || (env.Success != nil && *env.Success)
 		if !success || resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -1269,7 +1270,7 @@ func (c *client) requestHeaders(ctx context.Context, method, path string, body a
 			if message == "" {
 				message = "Mohist Server request failed"
 			}
-			return nil, &operationError{message: "error: " + message + " [" + code + "]", code: code, details: env.Details}
+			return nil, classifyFailure(&operationError{message: "error: " + message + " [" + code + "]", code: code, details: env.Details, effect: env.Effect, retrySafe: env.RetrySafe, nextAction: env.NextAction}, method, keyed, failureServer, resp.StatusCode)
 		}
 		return env.Data, nil
 	}

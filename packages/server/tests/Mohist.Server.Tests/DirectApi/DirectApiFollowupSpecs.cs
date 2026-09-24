@@ -7,9 +7,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Api.DirectApi;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Data.DirectApi;
+using Mohist.Server.Infrastructure.Data.Idempotency;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.DirectApi;
+using Mohist.Server.Infrastructure.Idempotency;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Sessions.Domain;
@@ -130,10 +131,10 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
         await using var db = await fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
             .CreateDbContextAsync();
-        var mapping = await db.DirectApiIdempotencyMappings.SingleAsync(row =>
-            row.Command == DirectApiCommands.Followup
+        var mapping = await db.IdempotencyMappings.SingleAsync(row =>
+            row.Command == IdempotencyCommands.Followup
             && row.ScopeKey == $"{sessionId}|{key}");
-        Assert.Equal(DirectApiMappingStates.Completed, mapping.State);
+        Assert.Equal(IdempotencyMappingStates.Completed, mapping.State);
         Assert.Equal(
             DirectApiWriteValidation.FollowupFingerprint(sessionId, text),
             mapping.Fingerprint);
@@ -148,8 +149,8 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
         var session = AgentSessionJson.Deserialize(row)!;
         Assert.Single(session.Status.Inputs!, input => input.Id == firstInputId);
         Assert.Single(session.Status.Turns!, turn => turn.Id == firstTurnId);
-        Assert.Equal(1, await db.DirectApiIdempotencyMappings.CountAsync(item =>
-            item.Command == DirectApiCommands.Followup
+        Assert.Equal(1, await db.IdempotencyMappings.CountAsync(item =>
+            item.Command == IdempotencyCommands.Followup
             && item.ScopeKey == $"{sessionId}|{key}"));
     }
 
@@ -170,13 +171,13 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
         await using (var scope = fixture.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-            db.DirectApiIdempotencyMappings.Add(new DirectApiIdempotencyMappingRow
+            db.IdempotencyMappings.Add(new IdempotencyMappingRow
             {
-                Command = DirectApiCommands.Followup,
+                Command = IdempotencyCommands.Followup,
                 ScopeKey = DirectApiWriteValidation.FollowupScopeKey(sessionId, key),
                 CallerKeyId = "completed-replay-caller",
                 Fingerprint = DirectApiWriteValidation.FollowupFingerprint(sessionId, text),
-                State = DirectApiMappingStates.Completed,
+                State = IdempotencyMappingStates.Completed,
                 Outcome = JSON.Serialize(new DirectApiFollowupOutcome(
                     projectId,
                     sessionId,
@@ -211,13 +212,13 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
         await using (var scope = fixture.Services.CreateAsyncScope())
         {
             var setupDb = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-            setupDb.DirectApiIdempotencyMappings.Add(new DirectApiIdempotencyMappingRow
+            setupDb.IdempotencyMappings.Add(new IdempotencyMappingRow
             {
-                Command = DirectApiCommands.Followup,
+                Command = IdempotencyCommands.Followup,
                 ScopeKey = $"{sessionId}|{key}",
                 CallerKeyId = "owner-caller",
                 Fingerprint = DirectApiWriteValidation.FollowupFingerprint(sessionId, text),
-                State = DirectApiMappingStates.Completed,
+                State = IdempotencyMappingStates.Completed,
                 Outcome = JSON.Serialize(new DirectApiFollowupOutcome(
                     ownerProjectId,
                     sessionId,
@@ -237,10 +238,10 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
         await using var db = await fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
             .CreateDbContextAsync();
-        var mapping = await db.DirectApiIdempotencyMappings.SingleAsync(row =>
-            row.Command == DirectApiCommands.Followup
+        var mapping = await db.IdempotencyMappings.SingleAsync(row =>
+            row.Command == IdempotencyCommands.Followup
             && row.ScopeKey == $"{sessionId}|{key}");
-        Assert.Equal(DirectApiMappingStates.Completed, mapping.State);
+        Assert.Equal(IdempotencyMappingStates.Completed, mapping.State);
     }
 
     [Fact]
@@ -277,8 +278,8 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
         var session = AgentSessionJson.Deserialize(row)!;
         Assert.Single(session.Status.Inputs!, input => input.Text == "text A");
         Assert.DoesNotContain(session.Status.Inputs!, input => input.Text == "text B");
-        Assert.Equal(1, await db.DirectApiIdempotencyMappings.CountAsync(item =>
-            item.Command == DirectApiCommands.Followup
+        Assert.Equal(1, await db.IdempotencyMappings.CountAsync(item =>
+            item.Command == IdempotencyCommands.Followup
             && item.ScopeKey == $"{sessionId}|{key}"));
     }
 
@@ -321,8 +322,8 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
         await using var db = await fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
             .CreateDbContextAsync();
-        Assert.Equal(1, await db.DirectApiIdempotencyMappings.CountAsync(item =>
-            item.Command == DirectApiCommands.Followup
+        Assert.Equal(1, await db.IdempotencyMappings.CountAsync(item =>
+            item.Command == IdempotencyCommands.Followup
             && item.ScopeKey == $"{sessionId}|{key}"));
         var row = await db.AgentSessions.AsNoTracking().SingleAsync(item => item.Id == sessionId);
         var session = AgentSessionJson.Deserialize(row)!;
@@ -375,10 +376,10 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
         await using var db = await fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
             .CreateDbContextAsync();
-        var mapping = await db.DirectApiIdempotencyMappings.SingleAsync(row =>
-            row.Command == DirectApiCommands.Followup
+        var mapping = await db.IdempotencyMappings.SingleAsync(row =>
+            row.Command == IdempotencyCommands.Followup
             && row.ScopeKey == $"{sessionId}|{key}");
-        Assert.Equal(DirectApiMappingStates.Pending, mapping.State);
+        Assert.Equal(IdempotencyMappingStates.Pending, mapping.State);
         using var outcome = JsonDocument.Parse(mapping.Outcome!);
         Assert.Equal(
             DirectApiWriteValidation.FollowupInputId(sessionId, key),
@@ -420,18 +421,18 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
             .ReadInputAsync(projectId, DirectApiWriteValidation.FollowupInputId(sessionId, key));
         Assert.Equal(PublicReadStatus.Found, observation.Status);
 
-        var idempotency = fixture.Services.GetRequiredService<DirectApiIdempotencyService>();
+        var idempotency = fixture.Services.GetRequiredService<IdempotencyFence>();
         var scopeKey = DirectApiWriteValidation.FollowupScopeKey(sessionId, key);
-        var mapping = await idempotency.FindAsync(DirectApiCommands.Followup, scopeKey);
+        var mapping = await idempotency.FindAsync(IdempotencyCommands.Followup, scopeKey);
         Assert.NotNull(mapping);
-        var outcome = DirectApiIdempotencyService.ReadOutcome<DirectApiFollowupOutcome>(mapping);
+        var outcome = IdempotencyFence.ReadOutcome<DirectApiFollowupOutcome>(mapping.Outcome);
         var frozen = await idempotency.FreezeCompletedOutcomeAsync(
-            DirectApiCommands.Followup,
+            IdempotencyCommands.Followup,
             scopeKey,
             mapping.Outcome!,
             JSON.Serialize(outcome with { SnapshotJson = observation.SnapshotJson }));
-        Assert.NotNull(DirectApiIdempotencyService
-            .ReadOutcome<DirectApiFollowupOutcome>(frozen)
+        Assert.NotNull(IdempotencyFence
+            .ReadOutcome<DirectApiFollowupOutcome>(frozen.Outcome)
             .SnapshotJson);
 
         using var response = await SendAsync(client, projectId, sessionId, key, text);
@@ -636,7 +637,7 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
     {
         await using var scope = fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        return await db.DirectApiIdempotencyMappings.CountAsync();
+        return await db.IdempotencyMappings.CountAsync();
     }
 
     private static async Task AssertErrorAsync(

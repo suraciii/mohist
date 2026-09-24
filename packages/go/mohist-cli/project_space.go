@@ -740,13 +740,13 @@ func (c *client) request(ctx context.Context, method, path string, body any) (js
 	if body != nil {
 		b, e := json.Marshal(body)
 		if e != nil {
-			return nil, e
+			return nil, classifyFailure(&operationError{message: "error: request could not be created [request_error]"}, method, false, failureLocal, 0)
 		}
 		reader = strings.NewReader(string(b))
 	}
 	req, e := http.NewRequestWithContext(ctx, method, c.base.String()+path, reader)
 	if e != nil {
-		return nil, e
+		return nil, classifyFailure(&operationError{message: "error: request could not be created [request_error]"}, method, false, failureLocal, 0)
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set(operatorIDHeader, c.operatorID)
@@ -764,19 +764,19 @@ func (c *client) request(ctx context.Context, method, path string, body any) (js
 		if errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded) {
 			return nil, e
 		}
-		return nil, &operationError{message: "error: Mohist Server request failed [service_unavailable]"}
+		return nil, classifyFailure(&operationError{message: "error: Mohist Server request failed [service_unavailable]", code: "service_unavailable"}, method, false, failureSubmit, 0)
 	}
 	defer resp.Body.Close()
 	b, e := io.ReadAll(resp.Body)
 	if e != nil {
-		return nil, e
+		return nil, classifyFailure(&operationError{message: "error: Mohist Server response could not be read [response_error]", code: "response_error"}, method, false, failureResponse, resp.StatusCode)
 	}
 	if len(b) == 0 && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil, nil
 	}
 	var env envelope
 	if json.Unmarshal(b, &env) != nil {
-		return nil, &operationError{message: responseStatusError(resp.StatusCode)}
+		return nil, classifyFailure(responseStatusFailure(resp.StatusCode), method, false, failureResponse, resp.StatusCode)
 	}
 	success := (env.Success == nil && resp.StatusCode >= 200 && resp.StatusCode < 300) || (env.Success != nil && *env.Success)
 	if !success || resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -788,7 +788,7 @@ func (c *client) request(ctx context.Context, method, path string, body any) (js
 		if message == "" {
 			message = "Mohist Server request failed"
 		}
-		return nil, &operationError{message: "error: " + message + " [" + code + "]", code: code, details: env.Details}
+		return nil, classifyFailure(&operationError{message: "error: " + message + " [" + code + "]", code: code, details: env.Details, effect: env.Effect, retrySafe: env.RetrySafe, nextAction: env.NextAction}, method, false, failureServer, resp.StatusCode)
 	}
 	return env.Data, nil
 }
@@ -898,7 +898,7 @@ func runVariables(ctx context.Context, deps Dependencies, c *client, cmd command
 			writeError(deps.Stderr, e)
 			return ExitOperation
 		}
-		return printVariableValue(deps, data, key)
+		return printVariableValue(ctx, deps, cmd, data, key)
 	case "project-variable-set", "project-variable-unset":
 		if strings.Contains(key, ".") {
 			data, e := c.request(ctx, http.MethodGet, path, nil)
@@ -933,11 +933,10 @@ func runVariables(ctx context.Context, deps Dependencies, c *client, cmd command
 	}
 	return ExitUsage
 }
-func printVariableValue(deps Dependencies, data json.RawMessage, key string) int {
+func printVariableValue(ctx context.Context, deps Dependencies, cmd command, data json.RawMessage, key string) int {
 	var root map[string]any
 	if json.Unmarshal(data, &root) != nil {
-		writeError(deps.Stderr, errors.New("error: invalid variables response [invalid_response]"))
-		return ExitOperation
+		return commandFailureExit(deps, ctx, cmd, responseShapeError("error: invalid variables response [invalid_response]"))
 	}
 	v := any(root)
 	if vars, ok := root["vars"]; ok {

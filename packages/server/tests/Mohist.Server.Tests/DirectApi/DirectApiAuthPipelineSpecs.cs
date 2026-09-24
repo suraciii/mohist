@@ -375,7 +375,7 @@ public sealed class DirectApiAuthPipelineSpecs(DefaultMohistIntegrationFixture f
                 row.ProjectId == projectId || row.ProjectId == outOfGrantProject),
             await db.AgentSessions.CountAsync(row =>
                 row.LabelProjectId == projectId || row.LabelProjectId == outOfGrantProject),
-            await db.DirectApiIdempotencyMappings.CountAsync(row =>
+            await db.IdempotencyMappings.CountAsync(row =>
                 row.ScopeKey == launchScope
                 || row.ScopeKey == outOfGrantLaunchScope
                 || row.ScopeKey == followupScope));

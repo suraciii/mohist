@@ -307,7 +307,7 @@ func TestRunWhyRejectsUnknownFieldBeforeHTTP(t *testing.T) {
 	if code := Run(context.Background(), []string{"run", "why", "wr-1", "--json", "unknown"}, deps); code != ExitUsage {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
-	if calls != 0 || out.Len() != 0 || !strings.Contains(errOut.String(), "run why <run-ref> --json") {
+	if calls != 0 || out.Len() != 0 || !strings.Contains(errOut.String(), `"usage_error"`) || !strings.Contains(errOut.String(), "unknown JSON field") {
 		t.Fatalf("calls=%d stdout=%q stderr=%q", calls, out.String(), errOut.String())
 	}
 }

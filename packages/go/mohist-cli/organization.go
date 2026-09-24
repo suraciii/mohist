@@ -133,6 +133,15 @@ func parseIssueOptions(c command, args []string, action string) (command, error)
 			i++
 		case "--all", "--archived", "--ready", "--draft", "--no-workflow", "--inherit-workflow-profile":
 			c.args = append(c.args, strings.TrimPrefix(arg, "--"), "true")
+		case "--idempotency-key":
+			if action != "start" {
+				return command{}, usage(arg + " is only supported for issue start")
+			}
+			if i+1 >= len(args) {
+				return command{}, usage(arg + " requires a value")
+			}
+			c.args = append(c.args, "idempotency-key", args[i+1])
+			i++
 		case "--json":
 			var err error
 			i, err = jsonFlag(args, i, &c)
@@ -507,21 +516,18 @@ func runOrganization(ctx context.Context, deps Dependencies, c *client, cmd comm
 	case "issue-create", "issue-edit", "issue-comment-create":
 		value, err := resolveTextInput(deps, cmd, "body", "body-file")
 		if err != nil {
-			writeError(deps.Stderr, err)
-			return ExitUsage
+			return commandUsageExit(deps, cmd, err)
 		}
 		cmd.preflightedInput = value
 		if cmd.kind == "issue-create" || cmd.kind == "issue-edit" {
 			models, err := resolveStageModelMap(deps, cmd, "stage-models", "stage-models-file")
 			if err != nil {
-				writeError(deps.Stderr, err)
-				return ExitUsage
+				return commandUsageExit(deps, cmd, err)
 			}
 			cmd.stageModels = models
 			variants, err := resolveStageModelMap(deps, cmd, "stage-model-variants", "stage-model-variants-file")
 			if err != nil {
-				writeError(deps.Stderr, err)
-				return ExitUsage
+				return commandUsageExit(deps, cmd, err)
 			}
 			cmd.stageModelVariants = variants
 		}
@@ -535,37 +541,51 @@ func runOrganization(ctx context.Context, deps Dependencies, c *client, cmd comm
 	}
 	if cmd.kind == "issue-create" || cmd.kind == "issue-edit" {
 		if err := validateIssueLabelTokens(cmd, cmd.kind == "issue-edit"); err != nil {
-			writeError(deps.Stderr, err)
-			return ExitUsage
+			return commandUsageExit(deps, cmd, err)
 		}
 	}
 	project, ok := resolveProject(deps, argValue(cmd.args, "project", ""))
 	if !ok {
-		writeError(deps.Stderr, errors.New("Run 'mo project use <name-or-id>' or pass --project <name-or-id>"))
-		return ExitOperation
+		return commandFailureExit(deps, ctx, cmd, projectNotSelected())
 	}
 	base := "/api/projects/" + url.PathEscape(project)
 	if cmd.kind == "issue-edit" && hasArg(cmd.args, "label") {
 		merged, err := mergedIssueLabels(ctx, c, cmd, base)
 		if err != nil {
-			return operationExit(deps, ctx, err)
+			return commandFailureExit(deps, ctx, cmd, err)
 		}
 		cmd.mergedLabels = merged
 	}
 	path, method, body, collection, err := organizationRequest(cmd, base, deps)
 	if err != nil {
-		writeError(deps.Stderr, err)
-		return ExitUsage
+		return commandUsageExit(deps, cmd, err)
 	}
 	if cmd.kind == "issue-watch-add" || cmd.kind == "issue-watch-remove" {
 		return runWatch(ctx, deps, c, cmd, base, method, path, body)
 	}
-	data, err := c.request(ctx, method, path, body)
-	if err != nil {
-		return operationExit(deps, ctx, err)
+	var data json.RawMessage
+	if cmd.kind == "issue-start" {
+		// The start write is keyed: the CLI always sends a key, generates
+		// and prints one when the caller omits it, and re-sends the keyed
+		// write once when the connection failed because the durable fence
+		// makes that safe.
+		key := argValue(cmd.args, "idempotency-key", "")
+		if key == "" {
+			key = fmt.Sprintf("%d", deps.Now().UnixNano())
+			fmt.Fprintln(deps.Stderr, "Idempotency-Key: "+key)
+		}
+		data, err = c.requestHeaders(ctx, method, path, body, map[string]string{"Idempotency-Key": key}, true)
+		if err != nil {
+			return commandFailureExit(deps, ctx, cmd, keyedRetryHint(err, issueStartNextAction(cmd, key)))
+		}
+	} else {
+		data, err = c.request(ctx, method, path, body)
+		if err != nil {
+			return commandFailureExit(deps, ctx, cmd, err)
+		}
 	}
 	if cmd.kind == "issue-variable-get" {
-		return printVariableValue(deps, data, argValue(cmd.args, "key", ""))
+		return printVariableValue(ctx, deps, cmd, data, argValue(cmd.args, "key", ""))
 	}
 	if cmd.kind == "epic-add" || cmd.kind == "epic-remove" {
 		data, err = unwrapResults(data)
@@ -583,16 +603,14 @@ func runOrganization(ctx context.Context, deps Dependencies, c *client, cmd comm
 	if len(cmd.fields) > 0 {
 		selected, e := SelectFields(data, cmd.fields, collection)
 		if e != nil {
-			writeError(deps.Stderr, e)
-			return ExitOperation
+			return commandFailureExit(deps, ctx, cmd, responseShapeError("error: "+e.Error()+" [invalid_response]"))
 		}
 		return writeJSON(deps.Stdout, json.RawMessage(selected))
 	}
 	if collection {
 		var v []any
 		if json.Unmarshal(data, &v) != nil {
-			writeError(deps.Stderr, errors.New("error: response has an invalid shape [invalid_response]"))
-			return ExitOperation
+			return commandFailureExit(deps, ctx, cmd, responseShapeError("error: response has an invalid shape [invalid_response]"))
 		}
 		if len(v) == 0 {
 			fmt.Fprintln(deps.Stdout, emptyMessage(cmd.kind))
@@ -601,8 +619,7 @@ func runOrganization(ctx context.Context, deps Dependencies, c *client, cmd comm
 	}
 	if cmd.kind == "issue-view" {
 		if err := renderIssueView(deps.Stdout, data); err != nil {
-			writeError(deps.Stderr, err)
-			return ExitOperation
+			return commandFailureExit(deps, ctx, cmd, responseShapeError(err.Error()))
 		}
 		return ExitOK
 	}
@@ -612,10 +629,19 @@ func runOrganization(ctx context.Context, deps Dependencies, c *client, cmd comm
 	}
 	var v any
 	if json.Unmarshal(data, &v) != nil {
-		writeError(deps.Stderr, errors.New("error: response has an invalid shape [invalid_response]"))
-		return ExitOperation
+		return commandFailureExit(deps, ctx, cmd, responseShapeError("error: response has an invalid shape [invalid_response]"))
 	}
 	return writeJSON(deps.Stdout, v)
+}
+
+// issueStartNextAction rebuilds the same start invocation with the same key,
+// the recovery for a keyed write whose outcome is unknown.
+func issueStartNextAction(cmd command, key string) string {
+	parts := []string{"mo issue start " + argValue(cmd.args, "number", "")}
+	if project := argValue(cmd.args, "project", ""); project != "" {
+		parts = append(parts, "--project", shellWord(project))
+	}
+	return strings.Join(append(parts, "--idempotency-key", key), " ")
 }
 
 func renderIssueView(out interface{ Write([]byte) (int, error) }, data json.RawMessage) error {
