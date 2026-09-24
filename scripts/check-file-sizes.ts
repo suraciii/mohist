@@ -63,19 +63,31 @@ export function gitText(args: string[], env: NodeJS.ProcessEnv = process.env): s
   })
 }
 
+// The comparison base is the repository's default branch. `origin/HEAD` is the
+// remote's own answer; the named refs are the fallbacks for checkouts that do
+// not publish it (CI, fresh worktrees). `git merge-base` itself fails on an
+// unfetched ref, which is what moves the loop to the next candidate.
+const defaultBranchRefs = ['origin/HEAD', 'origin/main', 'origin/master']
+
 export function resolveBaseRef(env: NodeJS.ProcessEnv = process.env): string {
   if (env.FILE_SIZE_BASE_REF) return env.FILE_SIZE_BASE_REF
 
-  try {
-    const mergeBase = gitText(['merge-base', 'origin/master', 'HEAD'], env).trim()
-    const head = gitText(['rev-parse', 'HEAD'], env).trim()
-    return mergeBase === head ? head : mergeBase
-  } catch (error) {
-    throw new Error(
-      `Could not resolve the file-size base from origin/master: ${error instanceof Error ? error.message : String(error)}. ` +
-        'Fetch origin/master or set FILE_SIZE_BASE_REF to an explicit commit.',
-    )
+  const failures: string[] = []
+
+  for (const ref of defaultBranchRefs) {
+    try {
+      const mergeBase = gitText(['merge-base', ref, 'HEAD'], env).trim()
+      const head = gitText(['rev-parse', 'HEAD'], env).trim()
+      return mergeBase === head ? head : mergeBase
+    } catch (error) {
+      failures.push(`${ref}: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
+
+  throw new Error(
+    `Could not resolve the file-size base from ${defaultBranchRefs.join(', ')} (${failures.join('; ')}). ` +
+      'Fetch the default branch or set FILE_SIZE_BASE_REF to an explicit commit.',
+  )
 }
 
 export function changedFilesUnder(
