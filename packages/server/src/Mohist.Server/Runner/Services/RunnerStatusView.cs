@@ -34,7 +34,14 @@ public sealed record RunnerActiveWorkView(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] RunnerActiveWorkIssueView? Issue = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? AgentSessionId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? AgentTurnId = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ProcessGeneration = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ProcessGeneration = null,
+    /// <summary>
+    /// Source time of the Runner's current execution confirmation for this work,
+    /// or null when the Runner has not named it recently. The owner ledger keeps
+    /// the row either way; consumers must not read a present row as fresh
+    /// execution evidence.
+    /// </summary>
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] DateTimeOffset? ConfirmedAt = null);
 
 public sealed record RunnerActiveWorkIssueView(
     string ProjectId,

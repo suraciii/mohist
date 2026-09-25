@@ -594,6 +594,82 @@ public class RunnerStatusApiSpecs
         Assert.Contains(unknownRunnerId, payload.GetProperty("error").GetString()!);
     }
 
+    [Fact]
+    public async Task GetRunner_WorkConfirmationIsRenewedOnlyByPollsThatNameTheWork()
+    {
+        await ResetRunnerReadModelsAsync();
+        var projectId = await CreateProjectIdAsync($"proj-confirm-{Guid.NewGuid():N}");
+        var runnerId = $"runner-confirm-{Guid.NewGuid():N}";
+        var workflowId = $"wf-confirm-{Guid.NewGuid():N}";
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "confirm-host",
+            projectId,
+            ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration),
+            TestRunnerGenerationExtensions.ProcessGeneration);
+        await AssignActiveWorkForTestAsync(runnerId, workflowId, "work-confirm-1", "task", "build", "Confirm Task", projectId);
+
+        try
+        {
+            // An owner-ledger row is not execution evidence on its own.
+            var work = await ReadActiveWorkAsync(runnerId);
+            Assert.Equal(global::System.Text.Json.JsonValueKind.Null, work.GetProperty("confirmedAt").ValueKind);
+
+            // Naming the work in a poll is the confirmation, and the poll receipt
+            // time is its source time.
+            var namedAt = _fixture.TimeProvider.GetUtcNow();
+            await runner.PollReportingAsync(_fixture.Services, [WorkKeyOf(work)]);
+            var confirmed = await ReadActiveWorkAsync(runnerId);
+            Assert.Equal(namedAt, confirmed.GetProperty("confirmedAt").GetDateTimeOffset());
+
+            // Reading status never renews it: the row stays owned with its slot,
+            // and the confirmation keeps the time the poll named it.
+            _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(30));
+            var detail = await ReadRunnerDetailAsync(runnerId);
+            var reread = detail.GetProperty("activeWorks").EnumerateArray().Single();
+            Assert.Equal(work.GetProperty("workId").GetString(), reread.GetProperty("workId").GetString());
+            Assert.Equal(namedAt, reread.GetProperty("confirmedAt").GetDateTimeOffset());
+            Assert.Equal(1, detail.GetProperty("capacity").GetProperty("used").GetInt32());
+
+            // An unreported heartbeat neither invents a fresh time nor drops the
+            // claim: the confirmation stays at the last poll that named the work.
+            await runner.PollReportingAsync(_fixture.Services, []);
+            var heartbeat = await ReadRunnerDetailAsync(runnerId);
+            var kept = heartbeat.GetProperty("activeWorks").EnumerateArray().Single();
+            Assert.Equal(namedAt, kept.GetProperty("confirmedAt").GetDateTimeOffset());
+            Assert.Equal(1, heartbeat.GetProperty("capacity").GetProperty("used").GetInt32());
+
+            // Naming it again renews the confirmation to the new poll time.
+            var renamedAt = _fixture.TimeProvider.GetUtcNow();
+            await runner.PollReportingAsync(_fixture.Services, [WorkKeyOf(kept)]);
+            var renewed = await ReadActiveWorkAsync(runnerId);
+            Assert.Equal(renamedAt, renewed.GetProperty("confirmedAt").GetDateTimeOffset());
+        }
+        finally
+        {
+            await runner.UnregisterAsync();
+        }
+    }
+
+    private static string WorkKeyOf(global::System.Text.Json.JsonElement work) =>
+        $"{work.GetProperty("ownerKind").GetString()}:{work.GetProperty("ownerId").GetString()}:{work.GetProperty("workId").GetString()}";
+
+    private async Task<global::System.Text.Json.JsonElement> ReadRunnerDetailAsync(string runnerId)
+    {
+        using var response = await _fixture.Client.GetAsync($"/api/runners/{runnerId}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+        return payload.GetProperty("data").GetProperty("runner");
+    }
+
+    private async Task<global::System.Text.Json.JsonElement> ReadActiveWorkAsync(string runnerId)
+    {
+        var detail = await ReadRunnerDetailAsync(runnerId);
+        return detail.GetProperty("activeWorks").EnumerateArray().Single();
+    }
+
     private async Task ResetRunnerReadModelsAsync()
     {
         _fixture.Services.GetRequiredService<RunnerStatusObservationStore>().Clear();

@@ -185,7 +185,8 @@ public sealed class DispatchService : IScopedService
             req.RuntimeReadiness ?? [],
             ProcessGeneration: processGeneration,
             InFlightCount: DistinctCount(req.InFlight),
-            AwaitingAckCount: DistinctCount(req.AwaitingAck));
+            AwaitingAckCount: DistinctCount(req.AwaitingAck),
+            ReportedWorkKeys: [.. ReportedWorkKeys(req)]);
 
     private async Task<HashSet<string>> AddMissingRedeliveriesAsync(
         string runnerId,
@@ -766,13 +767,13 @@ public sealed class DispatchService : IScopedService
         string.Equals(exception.Error.Code, "pull_request_identity_conflict", StringComparison.Ordinal);
 
     private static string WorkflowWorkKey(string workflowRunId, string workId) =>
-        $"{WorkDispatchOwnerKinds.Workflow}:{workflowRunId}:{workId}";
+        WorkDispatchKeys.WorkKey(WorkDispatchOwnerKinds.Workflow, workflowRunId, workId);
 
     private static string WorkflowOwnerKey(string workflowRunId) =>
         $"{WorkDispatchOwnerKinds.Workflow}:{workflowRunId}";
 
     private static string AgentJobWorkKey(string agentJobId, string? workId) =>
-        $"{WorkDispatchOwnerKinds.AgentJob}:{agentJobId}:{workId}";
+        WorkDispatchKeys.WorkKey(WorkDispatchOwnerKinds.AgentJob, agentJobId, workId ?? string.Empty);
 
     private static WorkDispatch WithIssueFromRun(WorkDispatch dispatch, WorkflowRun run)
     {

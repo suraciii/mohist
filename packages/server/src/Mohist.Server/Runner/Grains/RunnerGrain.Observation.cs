@@ -1,3 +1,5 @@
+using Mohist.Server.Runner.Services;
+
 namespace Mohist.Server.Runner.Grains;
 
 public partial class RunnerGrain
@@ -65,6 +67,21 @@ public partial class RunnerGrain
                 witnesses[runtime] = witness with { Runtime = runtime };
             }
 
+            // A poll that names a work key is the only thing that renews that
+            // work's confirmation. The renewal time is this poll's receipt time,
+            // so a continuing heartbeat alone never keeps a work item confirmed.
+            var previousConfirmations = string.Equals(
+                    _dispatchObservation?.ConnectionGeneration,
+                    normalizedConnectionGeneration,
+                    StringComparison.Ordinal)
+                ? _dispatchObservation?.WorkConfirmations
+                : null;
+            var workConfirmations = RunnerWorkConfirmationLedger.Renew(
+                previousConfirmations,
+                observation.ReportedWorkKeys,
+                processGeneration.Trim(),
+                _timeProvider.GetUtcNow());
+
             _dispatchObservation = new RunnerDispatchObservation(
                 normalizedConnectionGeneration,
                 observation.AdmissionReady,
@@ -72,7 +89,9 @@ public partial class RunnerGrain
                 [.. witnesses.Values],
                 processGeneration.Trim(),
                 Math.Max(0, observation.InFlightCount),
-                Math.Max(0, observation.AwaitingAckCount));
+                Math.Max(0, observation.AwaitingAckCount),
+                observation.ReportedWorkKeys,
+                [.. workConfirmations]);
             PublishStatusObservation();
 
             return CloneDispatchObservation(_dispatchObservation);
@@ -103,6 +122,8 @@ public partial class RunnerGrain
                 .ToList(),
             observation.ProcessGeneration,
             observation.InFlightCount,
-            observation.AwaitingAckCount);
+            observation.AwaitingAckCount,
+            observation.ReportedWorkKeys is null ? null : [.. observation.ReportedWorkKeys],
+            observation.WorkConfirmations is null ? null : [.. observation.WorkConfirmations]);
     }
 }

@@ -8,7 +8,9 @@ namespace Mohist.Server.Runner.Services;
 /// Classifies the current execution observation without changing canonical
 /// Session or Turn state. A recent Session observation can establish a current
 /// Turn, while a quiet Turn stays running only when the current Runner owner
-/// snapshot confirms the same Session, Turn, and process generation.
+/// snapshot confirms the same Session, Turn, and process generation with a
+/// freshness window of its own. Reading the status never renews that
+/// confirmation: only a poll that names the work key does.
 /// </summary>
 internal static class ActivityExecutionEvidencePolicy
 {
@@ -58,39 +60,37 @@ internal static class ActivityExecutionEvidencePolicy
             return Needs("superseded-generation", sourceAt ?? observedAt, turn.Id, session.Runtime.RunnerId);
         }
 
-        if (owner.Kind == OwnerMatchKind.Confirmed)
+        // The owner confirmation is the Runner's direct statement about this
+        // work, and it carries its own time. A stale or future confirmation
+        // confirms nothing, but it stays the freshest known source.
+        if (owner.ConfirmedAt is { } confirmedAt
+            && FreshnessReason(confirmedAt, observedAt) == "fresh")
         {
             return new(
                 "running",
                 new ActivityExecutionEvidenceDto(
                     "owner-confirmed",
-                    observedAt,
+                    confirmedAt,
                     turn.Id,
                     session.Runtime.RunnerId));
         }
 
         if (turn.Status != AgentTurnStatus.Executing)
-        {
-            var reason = sourceAt is null ? "missing" : FreshnessReason(sourceAt.Value, observedAt);
-            return Needs(reason, sourceAt, turn.Id, session.Runtime.RunnerId);
-        }
+            return NeedsFreshest(observedAt, turn, session.Runtime.RunnerId, sourceAt, owner.ConfirmedAt);
 
-        if (sourceAt is null)
-            return Needs("missing", null, turn.Id, session.Runtime.RunnerId);
-
-        var freshness = FreshnessReason(sourceAt.Value, observedAt);
-        if (freshness == "fresh")
+        if (sourceAt is { } activityAt
+            && FreshnessReason(activityAt, observedAt) == "fresh")
         {
             return new(
                 "running",
                 new ActivityExecutionEvidenceDto(
                     "activity",
-                    sourceAt,
+                    activityAt,
                     turn.Id,
                     session.Runtime.RunnerId));
         }
 
-        return Needs(freshness, sourceAt, turn.Id, session.Runtime.RunnerId);
+        return NeedsFreshest(observedAt, turn, session.Runtime.RunnerId, sourceAt, owner.ConfirmedAt);
     }
 
     internal static AgentTurnRecord? CurrentTurn(AgentSession session) =>
@@ -130,6 +130,28 @@ internal static class ActivityExecutionEvidencePolicy
             "needs-verification",
             new ActivityExecutionEvidenceDto(reason, observedAt, turnId, runnerId));
 
+    /// <summary>
+    /// The freshest known source labels the needs-verification read. A
+    /// confirmation the Runner stopped renewing is still better evidence of when
+    /// this work was last observed than older Session data, and a source with no
+    /// time at all reports as missing.
+    /// </summary>
+    private static ActivityExecutionAssessment NeedsFreshest(
+        DateTimeOffset observedAt,
+        AgentTurnRecord turn,
+        string? runnerId,
+        DateTimeOffset? activityAt,
+        DateTimeOffset? confirmedAt)
+    {
+        var freshest = activityAt is { } activity
+            && (confirmedAt is not { } confirmation || activity > confirmation)
+                ? activityAt
+                : confirmedAt;
+        return freshest is { } sourceAt
+            ? Needs(FreshnessReason(sourceAt, observedAt), sourceAt, turn.Id, runnerId)
+            : Needs("missing", null, turn.Id, runnerId);
+    }
+
     private static ActivityExecutionAssessment NotRunning(
         string reason,
         string? turnId = null,
@@ -164,13 +186,16 @@ internal static class ActivityExecutionEvidencePolicy
             return OwnerMatch.None;
 
         var binding = turn.WorkflowExecution;
+        var workflowClaimsThisTurn = binding is not null
+            && string.Equals(binding.AgentTurnId, turn.Id, StringComparison.Ordinal)
+            && !AnotherLiveTurnClaims(record.Session, turn, binding);
         var candidates = runner.ActiveWorks.Where(work =>
             (string.Equals(work.AgentSessionId, record.Session.Id, StringComparison.Ordinal)
                 && string.Equals(work.AgentTurnId, turn.Id, StringComparison.Ordinal))
-            || (binding is not null
+            || (workflowClaimsThisTurn
                 && string.Equals(work.AgentSessionId, record.Session.Id, StringComparison.Ordinal)
-                && string.Equals(work.OwnerId, binding.WorkflowRunId, StringComparison.Ordinal)
-                && string.Equals(work.WorkId, binding.WorkId, StringComparison.Ordinal)));
+                && string.Equals(work.OwnerId, binding!.WorkflowRunId, StringComparison.Ordinal)
+                && string.Equals(work.WorkId, binding!.WorkId, StringComparison.Ordinal)));
         var candidate = candidates.FirstOrDefault();
         if (candidate is null)
             return OwnerMatch.None;
@@ -179,23 +204,44 @@ internal static class ActivityExecutionEvidencePolicy
             || string.IsNullOrWhiteSpace(candidate.ProcessGeneration))
             return OwnerMatch.None;
 
-        return string.Equals(candidate.ProcessGeneration, runner.ProcessGeneration, StringComparison.Ordinal)
-            ? OwnerMatch.ConfirmedMatch
-            : OwnerMatch.GenerationMismatchMatch;
+        if (!string.Equals(candidate.ProcessGeneration, runner.ProcessGeneration, StringComparison.Ordinal))
+            return OwnerMatch.GenerationMismatch;
+
+        // The owner ledger row says the work is owned; only the confirmation says
+        // the Runner is still executing it, and only the confirmation's own time
+        // is evidence. Whether that time is fresh is the caller's decision.
+        return OwnerMatch.Matched(candidate.ConfirmedAt);
     }
+
+    /// <summary>
+    /// Two live turns of one Session must not share one Workflow work identity:
+    /// the Runner confirms that work with a single work key, so the evidence
+    /// cannot be attributed to either turn without guessing.
+    /// </summary>
+    private static bool AnotherLiveTurnClaims(
+        AgentSession session,
+        AgentTurnRecord turn,
+        SessionWorkflowExecutionBinding binding) =>
+        (session.Status.Turns ?? []).Any(other =>
+            !string.Equals(other.Id, turn.Id, StringComparison.Ordinal)
+            && other.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing or AgentTurnStatus.Unknown
+            && other.WorkflowExecution is { } otherBinding
+            && string.Equals(otherBinding.WorkflowRunId, binding.WorkflowRunId, StringComparison.Ordinal)
+            && string.Equals(otherBinding.WorkId, binding.WorkId, StringComparison.Ordinal));
 
     private enum OwnerMatchKind
     {
         None,
-        Confirmed,
+        Matched,
         GenerationMismatch,
     }
 
-    private readonly record struct OwnerMatch(OwnerMatchKind Kind)
+    private readonly record struct OwnerMatch(OwnerMatchKind Kind, DateTimeOffset? ConfirmedAt = null)
     {
         internal static OwnerMatch None => new(OwnerMatchKind.None);
-        internal static OwnerMatch ConfirmedMatch => new(OwnerMatchKind.Confirmed);
-        internal static OwnerMatch GenerationMismatchMatch => new(OwnerMatchKind.GenerationMismatch);
+        internal static OwnerMatch Matched(DateTimeOffset? confirmedAt) =>
+            new(OwnerMatchKind.Matched, confirmedAt);
+        internal static OwnerMatch GenerationMismatch => new(OwnerMatchKind.GenerationMismatch);
     }
 }
 

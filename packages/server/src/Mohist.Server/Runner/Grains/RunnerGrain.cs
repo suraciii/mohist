@@ -675,7 +675,10 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         return new RunnerRuntimeState(
             _status,
             _lastPresenceAt,
-            activeWorks,
+            RunnerWorkConfirmationLedger.Stamp(
+                activeWorks,
+                _dispatchObservation?.WorkConfirmations,
+                _state.State?.CurrentProcessGeneration),
             _draining,
             _state.State?.UpdateInterruptFence?.PendingId,
             _info?.ConnectionGeneration,

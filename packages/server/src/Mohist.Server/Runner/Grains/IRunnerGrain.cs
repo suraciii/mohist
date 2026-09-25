@@ -329,6 +329,17 @@ public static class WorkDispatchOwnerKinds
 }
 
 /// <summary>
+/// The wire identity of one work item. The Server and the Runner must derive the
+/// same string: the Runner reports exactly this key for the work it is executing,
+/// and the Server matches its own owner-ledger rows with it.
+/// </summary>
+public static class WorkDispatchKeys
+{
+    public static string WorkKey(string ownerKind, string ownerId, string workId) =>
+        $"{ownerKind}:{ownerId}:{workId}";
+}
+
+/// <summary>
 /// The process's full level state, sent in every poll body. The DispatchService
 /// reconciles <c>desired − reported</c> to redeliver lost dispatches and decide
 /// new claims.
@@ -375,7 +386,22 @@ public sealed record RunnerDispatchObservation(
     [property: Id(3)] List<RuntimeReadinessWitness> RuntimeReadiness,
     [property: Id(4)] string? ProcessGeneration = null,
     [property: Id(5)] int InFlightCount = 0,
-    [property: Id(6)] int AwaitingAckCount = 0)
+    [property: Id(6)] int AwaitingAckCount = 0,
+    /// <summary>
+    /// Work keys this poll named as in-flight or awaiting ack. They are the
+    /// Runner's own statement that it is executing those work items; the
+    /// renewal time is stamped when the Runner grain accepts the poll.
+    /// </summary>
+    [property: Id(7)] List<string>? ReportedWorkKeys = null,
+    /// <summary>
+    /// Per-work execution confirmations accumulated from the polls that named
+    /// the work key. Each carries its own source time and process generation:
+    /// a heartbeat that does not name the work never renews it, and entries the
+    /// Runner stopped naming age out instead of being replaced by a read time.
+    /// This is an observation fact, not durable state: unknown is never
+    /// confirmation.
+    /// </summary>
+    [property: Id(8)] List<RunnerWorkConfirmation>? WorkConfirmations = null)
 {
     public IReadOnlyList<RuntimeReadinessWitness> Witnesses => RuntimeReadiness;
 
@@ -387,6 +413,18 @@ public sealed record RunnerDispatchObservation(
         && !string.IsNullOrWhiteSpace(ProcessGeneration)
         && string.Equals(ProcessGeneration, processGeneration, StringComparison.Ordinal);
 }
+
+/// <summary>
+/// One work item the Runner named as executing in a poll. The source time is
+/// the poll receipt time: the Runner can only renew it by naming the work again,
+/// so a continuing heartbeat never renews a work item the Runner stopped
+/// reporting.
+/// </summary>
+[GenerateSerializer]
+public sealed record RunnerWorkConfirmation(
+    [property: Id(0)] string WorkKey,
+    [property: Id(1)] DateTimeOffset ConfirmedAt,
+    [property: Id(2)] string ProcessGeneration);
 
 [GenerateSerializer]
 public sealed record RunnerRuntimeReadinessSnapshot(
@@ -516,4 +554,12 @@ public sealed record RunnerActiveWorkItem(
     [property: Id(9)] bool IsAgentWork = false,
     [property: Id(10)] string? AgentSessionId = null,
     [property: Id(11)] string? AgentTurnId = null,
-    [property: Id(12)] string? ProcessGeneration = null);
+    [property: Id(12)] string? ProcessGeneration = null,
+    /// <summary>
+    /// Source time of the Runner's current execution confirmation for this work.
+    /// It is the poll receipt time of the last poll that named this work key, and
+    /// it is null when the Runner has not named the work recently. The owner
+    /// ledger says the work is still owned; only this time says the owner is
+    /// still executing it.
+    /// </summary>
+    [property: Id(13)] DateTimeOffset? ConfirmedAt = null);

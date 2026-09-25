@@ -290,12 +290,16 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
                 : durable?.LastPresenceAt;
         var updateInterruptId = status?.UpdateInterruptId ?? durable?.UpdateInterruptId;
         var draining = status?.Draining == true || !string.IsNullOrWhiteSpace(updateInterruptId);
+        var confirmedWorks = RunnerWorkConfirmationLedger.Stamp(
+            ownerWorks ?? [],
+            status?.DispatchObservation?.WorkConfirmations,
+            status?.DispatchObservation?.ProcessGeneration);
         var runtime = status is null && durable is null
             ? null
             : new RunnerRuntimeState(
                 status?.Status ?? RunnerStatus.Offline,
                 lastPresenceAt ?? default,
-                ownerWorks ?? [],
+                confirmedWorks,
                 draining,
                 updateInterruptId,
                 info?.ConnectionGeneration,
@@ -314,7 +318,7 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
                 ? null
                 : ownerWorks.Count;
         var capacity = new RunnerStatusCapacityView(knownUsage, definition.Slots);
-        var activeWorks = ProjectActiveWorks(ownerWorks);
+        var activeWorks = ProjectActiveWorks(confirmedWorks);
         var observation = CurrentObservation(runtime?.DispatchObservation, connectionGeneration);
         var credentialStatus = await ReadCredentialStatusAsync(definition.Id, ct);
         var reasonCodes = DeriveAdmissionReasons(
@@ -731,7 +735,8 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
                     : new RunnerActiveWorkIssueView(work.Issue.ProjectId, work.Issue.IssueNumber),
                 work.AgentSessionId,
                 work.AgentTurnId,
-                work.ProcessGeneration));
+                work.ProcessGeneration,
+                work.ConfirmedAt));
         }
         return views;
     }

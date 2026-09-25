@@ -69,6 +69,28 @@ public static class DispatchTestExtensions
     }
 
     /// <summary>
+    /// Polls via DispatchService while naming the work keys this round reports
+    /// as in-flight or awaiting ack. Naming a work key is what confirms that
+    /// work's execution; an empty set models a heartbeat that reports nothing.
+    /// </summary>
+    public static async Task<IReadOnlyList<WorkDispatch>> PollReportingAsync(
+        this IRunnerGrain runner,
+        IServiceProvider serviceProvider,
+        IReadOnlyList<string> inFlight,
+        IReadOnlyList<string>? awaitingAck = null)
+    {
+        var dispatch = ResolveScoped<DispatchService>(serviceProvider);
+        var runnerId = runner.GetPrimaryKeyString();
+        var request = ReadyPollRequest() with
+        {
+            InFlight = [.. inFlight],
+            AwaitingAck = [.. awaitingAck ?? []],
+        };
+        var response = await dispatch.PollAsync(runnerId, request);
+        return response.Dispatches;
+    }
+
+    /// <summary>
     /// Reports a workflow work result direct to the owning grain via the
     /// stateless <see cref="WorkflowReportService"/>. Replaces the old
     /// <c>runner.ReportWorkflowResultAsync</c> relay, which the runner grain no

@@ -350,7 +350,10 @@ distinguish that record from confirmed current execution.
   or terminal result. Queued work remains labelled queued, not running.
 - Evidence supporting **Running** must identify the same Session and current
   Turn. A current owner observation must also match its Runner generation;
-  a fresh Runner heartbeat alone does not confirm a Session.
+  a fresh Runner heartbeat alone does not confirm a Session. Owner
+  confirmation is the Runner's own statement about that work — the poll
+  receipt time of the last poll that named the work key — so a retained
+  owner-ledger row, a continuing heartbeat, or a status read cannot renew it.
 - An execution observation is fresh for five minutes after its source
   observation time, inclusive. A later read or page refresh must not renew
   that time. Missing or future source times cannot establish freshness.

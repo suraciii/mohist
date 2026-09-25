@@ -97,24 +97,127 @@ public sealed class ActivityExecutionEvidencePolicySpecs
     }
 
     [Fact]
-    public void QuietLongRunningTurn_WithCurrentOwnerConfirmation_RemainsRunning()
+    public void QuietLongRunningTurn_WithFreshOwnerConfirmation_RemainsRunning()
+    {
+        var record = BuildRecord(AgentTurnStatus.Executing, Now.AddMinutes(-30));
+        var confirmedAt = Now.AddMinutes(-1);
+        var runner = BuildRunner("generation-1", confirmedAt: confirmedAt);
+
+        var assessment = ActivityExecutionEvidencePolicy.Evaluate(record, Now, runner);
+
+        Assert.Equal("running", assessment.ExecutionState);
+        Assert.Equal("owner-confirmed", assessment.Evidence.Reason);
+        // The confirmation's own time is the evidence; the read time is not.
+        Assert.Equal(confirmedAt, assessment.Evidence.ObservedAt);
+        Assert.Equal("turn-1", assessment.Evidence.TurnId);
+        Assert.Equal("runner-1", assessment.Evidence.RunnerId);
+    }
+
+    [Fact]
+    public void QuietLongRunningTurn_WithConfirmationBeyondTheWindow_NeedsVerification()
+    {
+        var record = BuildRecord(AgentTurnStatus.Executing, Now.AddMinutes(-30));
+        var confirmedAt = Now.AddMinutes(-5).AddSeconds(-1);
+        var runner = BuildRunner("generation-1", confirmedAt: confirmedAt);
+
+        var assessment = ActivityExecutionEvidencePolicy.Evaluate(record, Now, runner);
+
+        Assert.Equal("needs-verification", assessment.ExecutionState);
+        Assert.Equal("aged", assessment.Evidence.Reason);
+        Assert.Equal(confirmedAt, assessment.Evidence.ObservedAt);
+    }
+
+    [Fact]
+    public void QuietLongRunningTurn_WithoutOwnerConfirmation_NeedsVerification()
     {
         var record = BuildRecord(AgentTurnStatus.Executing, Now.AddMinutes(-30));
         var runner = BuildRunner("generation-1");
 
         var assessment = ActivityExecutionEvidencePolicy.Evaluate(record, Now, runner);
 
+        Assert.Equal("needs-verification", assessment.ExecutionState);
+        Assert.Equal("aged", assessment.Evidence.Reason);
+    }
+
+    [Fact]
+    public void FutureOwnerConfirmation_DoesNotEstablishRunning()
+    {
+        var record = BuildRecord(AgentTurnStatus.Executing, Now.AddMinutes(-30));
+        var runner = BuildRunner("generation-1", confirmedAt: Now.AddSeconds(1));
+
+        var assessment = ActivityExecutionEvidencePolicy.Evaluate(record, Now, runner);
+
+        Assert.Equal("needs-verification", assessment.ExecutionState);
+        Assert.Equal("future", assessment.Evidence.Reason);
+        Assert.Equal(Now.AddSeconds(1), assessment.Evidence.ObservedAt);
+    }
+
+    [Fact]
+    public void FutureOwnerConfirmation_DoesNotHideFreshActivity()
+    {
+        var record = BuildRecord(AgentTurnStatus.Executing, Now.AddSeconds(-1));
+        var runner = BuildRunner("generation-1", confirmedAt: Now.AddSeconds(1));
+
+        var assessment = ActivityExecutionEvidencePolicy.Evaluate(record, Now, runner);
+
         Assert.Equal("running", assessment.ExecutionState);
-        Assert.Equal("owner-confirmed", assessment.Evidence.Reason);
-        Assert.Equal("turn-1", assessment.Evidence.TurnId);
-        Assert.Equal("runner-1", assessment.Evidence.RunnerId);
+        Assert.Equal("activity", assessment.Evidence.Reason);
+        Assert.Equal(Now.AddSeconds(-1), assessment.Evidence.ObservedAt);
+    }
+
+    [Fact]
+    public void StaleOwnerConfirmation_DoesNotOverrideFreshActivity()
+    {
+        var record = BuildRecord(AgentTurnStatus.Executing, Now.AddSeconds(-1));
+        var runner = BuildRunner("generation-1", confirmedAt: Now.AddMinutes(-30));
+
+        var assessment = ActivityExecutionEvidencePolicy.Evaluate(record, Now, runner);
+
+        Assert.Equal("running", assessment.ExecutionState);
+        Assert.Equal("activity", assessment.Evidence.Reason);
+    }
+
+    [Fact]
+    public void RepeatedReads_DoNotRenewTheOwnerConfirmation()
+    {
+        var record = BuildRecord(AgentTurnStatus.Executing, Now.AddMinutes(-30));
+        var confirmedAt = Now.AddMinutes(-4);
+        // One snapshot: no read can change what the Runner last said.
+        var runner = BuildRunner("generation-1", confirmedAt: confirmedAt);
+
+        var first = ActivityExecutionEvidencePolicy.Evaluate(record, Now, runner);
+        var later = ActivityExecutionEvidencePolicy.Evaluate(record, Now.AddMinutes(4), runner);
+
+        Assert.Equal("running", first.ExecutionState);
+        Assert.Equal(confirmedAt, first.Evidence.ObservedAt);
+        Assert.Equal("needs-verification", later.ExecutionState);
+        Assert.Equal("aged", later.Evidence.Reason);
+        Assert.Equal(confirmedAt, later.Evidence.ObservedAt);
+    }
+
+    [Fact]
+    public void OwnerWorkForAnotherTurn_DoesNotConfirmThisTurn()
+    {
+        var record = BuildRecord(AgentTurnStatus.Executing, Now.AddMinutes(-30));
+        var runner = BuildRunner(
+            "generation-1",
+            confirmedAt: Now.AddSeconds(-1),
+            workTurnId: "turn-2");
+
+        var assessment = ActivityExecutionEvidencePolicy.Evaluate(record, Now, runner);
+
+        Assert.Equal("needs-verification", assessment.ExecutionState);
+        Assert.Equal("aged", assessment.Evidence.Reason);
     }
 
     [Fact]
     public void OwnerGenerationMismatch_NeedsSupersededGenerationVerification()
     {
         var record = BuildRecord(AgentTurnStatus.Executing, Now.AddMinutes(-30));
-        var runner = BuildRunner("generation-2", workGeneration: "generation-1");
+        var runner = BuildRunner(
+            "generation-2",
+            workGeneration: "generation-1",
+            confirmedAt: Now.AddSeconds(-1));
 
         var assessment = ActivityExecutionEvidencePolicy.Evaluate(record, Now, runner);
 
@@ -126,7 +229,10 @@ public sealed class ActivityExecutionEvidencePolicySpecs
     public void OwnerGenerationMismatchWithoutActivityTime_CarriesTheOwnerObservationTime()
     {
         var record = BuildRecord(AgentTurnStatus.Executing, updatedAt: null);
-        var runner = BuildRunner("generation-2", workGeneration: "generation-1");
+        var runner = BuildRunner(
+            "generation-2",
+            workGeneration: "generation-1",
+            confirmedAt: Now.AddSeconds(-1));
 
         var assessment = ActivityExecutionEvidencePolicy.Evaluate(record, Now, runner);
 
@@ -139,12 +245,88 @@ public sealed class ActivityExecutionEvidencePolicySpecs
     public void OwnerGenerationMismatch_OverridesFreshActivityEvidence()
     {
         var record = BuildRecord(AgentTurnStatus.Executing, Now.AddSeconds(-1));
-        var runner = BuildRunner("generation-2", workGeneration: "generation-1");
+        var runner = BuildRunner(
+            "generation-2",
+            workGeneration: "generation-1",
+            confirmedAt: Now.AddSeconds(-1));
 
         var assessment = ActivityExecutionEvidencePolicy.Evaluate(record, Now, runner);
 
         Assert.Equal("needs-verification", assessment.ExecutionState);
         Assert.Equal("superseded-generation", assessment.Evidence.Reason);
+    }
+
+    [Fact]
+    public void WorkflowOwnerWork_WithFreshConfirmation_ConfirmsTheBoundTurn()
+    {
+        var binding = BuildBinding(turnId: "turn-1");
+        var record = BuildRecord(AgentTurnStatus.Executing, Now.AddMinutes(-30), binding: binding);
+        var confirmedAt = Now.AddSeconds(-1);
+        var runner = BuildRunner(
+            "generation-1",
+            confirmedAt: confirmedAt,
+            ownerKind: "workflow",
+            ownerId: "run-1",
+            workId: "work-1",
+            workTurnId: null,
+            workSessionId: "session-1");
+
+        var assessment = ActivityExecutionEvidencePolicy.Evaluate(record, Now, runner);
+
+        Assert.Equal("running", assessment.ExecutionState);
+        Assert.Equal("owner-confirmed", assessment.Evidence.Reason);
+        Assert.Equal(confirmedAt, assessment.Evidence.ObservedAt);
+    }
+
+    [Fact]
+    public void WorkflowOwnerWork_BoundToAnotherTurn_DoesNotConfirmThisTurn()
+    {
+        var binding = BuildBinding(turnId: "turn-2");
+        var record = BuildRecord(AgentTurnStatus.Executing, Now.AddMinutes(-30), binding: binding);
+        var runner = BuildRunner(
+            "generation-1",
+            confirmedAt: Now.AddSeconds(-1),
+            ownerKind: "workflow",
+            ownerId: "run-1",
+            workId: "work-1",
+            workTurnId: null,
+            workSessionId: "session-1");
+
+        var assessment = ActivityExecutionEvidencePolicy.Evaluate(record, Now, runner);
+
+        Assert.Equal("needs-verification", assessment.ExecutionState);
+        Assert.Equal("aged", assessment.Evidence.Reason);
+    }
+
+    [Fact]
+    public void WorkflowOwnerWork_ClaimedByTwoLiveTurns_DoesNotConfirmEither()
+    {
+        var binding = BuildBinding(turnId: "turn-1");
+        var shared = BuildBinding(turnId: "turn-2");
+        var record = BuildRecord(
+            AgentTurnStatus.Executing,
+            Now.AddMinutes(-30),
+            binding: binding,
+            previousTurns: [new AgentTurnRecord(
+                "turn-2",
+                1,
+                ["input-2"],
+                AgentTurnStatus.Executing,
+                UpdatedAt: Now.AddMinutes(-30).UtcDateTime,
+                WorkflowExecution: shared)]);
+        var runner = BuildRunner(
+            "generation-1",
+            confirmedAt: Now.AddSeconds(-1),
+            ownerKind: "workflow",
+            ownerId: "run-1",
+            workId: "work-1",
+            workTurnId: null,
+            workSessionId: "session-1");
+
+        var assessment = ActivityExecutionEvidencePolicy.Evaluate(record, Now, runner);
+
+        Assert.Equal("needs-verification", assessment.ExecutionState);
+        Assert.Equal("aged", assessment.Evidence.Reason);
     }
 
     [Fact]
@@ -154,7 +336,7 @@ public sealed class ActivityExecutionEvidencePolicySpecs
         var status = record.Session.Status;
         var turn = status.Turns![0];
         var labels = record.Labels;
-        var runner = BuildRunner("generation-1");
+        var runner = BuildRunner("generation-1", confirmedAt: Now.AddSeconds(-1));
 
         _ = ActivityExecutionEvidencePolicy.Evaluate(record, Now, runner);
 
@@ -164,9 +346,23 @@ public sealed class ActivityExecutionEvidencePolicySpecs
         Assert.Equal(status, record.Session.Status);
     }
 
+    private static SessionWorkflowExecutionBinding BuildBinding(string turnId) =>
+        new(
+            InputDeliveryId: "delivery-1",
+            WorkflowRunId: "run-1",
+            ActionAttemptId: "attempt-1",
+            WorkId: "work-1",
+            RunnerId: "runner-1",
+            AgentSessionId: "session-1",
+            AgentTurnId: turnId,
+            Runtime: "opencode",
+            RuntimeSessionId: "runtime-session-1");
+
     private static AgentSessionRecord BuildRecord(
         AgentTurnStatus turnStatus,
-        DateTimeOffset? updatedAt)
+        DateTimeOffset? updatedAt,
+        SessionWorkflowExecutionBinding? binding = null,
+        IReadOnlyList<AgentTurnRecord>? previousTurns = null)
     {
         var labels = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -182,15 +378,16 @@ public sealed class ActivityExecutionEvidencePolicySpecs
             now: Now.UtcDateTime);
         var turn = new AgentTurnRecord(
             "turn-1",
-            1,
+            2,
             ["input-1"],
             turnStatus,
-            UpdatedAt: updatedAt?.UtcDateTime);
+            UpdatedAt: updatedAt?.UtcDateTime,
+            WorkflowExecution: binding);
         session.Status = session.Status with
         {
             Activity = AgentSessionActivity.Active,
             LastDataAt = updatedAt?.UtcDateTime,
-            Turns = [turn],
+            Turns = [turn, .. previousTurns ?? []],
         };
         var row = new AgentSessionRow
         {
@@ -206,7 +403,13 @@ public sealed class ActivityExecutionEvidencePolicySpecs
 
     private static RunnerStatusEntry BuildRunner(
         string runnerGeneration,
-        string? workGeneration = null) =>
+        string? workGeneration = null,
+        DateTimeOffset? confirmedAt = null,
+        string ownerKind = "agent-job",
+        string ownerId = "job-1",
+        string workId = "work-1",
+        string? workTurnId = "turn-1",
+        string? workSessionId = "session-1") =>
         new(
             new RunnerIdentityStatusView("runner-1", null, null, null, null, null, null),
             new RunnerPresenceStatusView("online", Now),
@@ -216,13 +419,14 @@ public sealed class ActivityExecutionEvidencePolicySpecs
             [],
             new RunnerStatusCapacityView(1, 1),
             [new RunnerActiveWorkView(
-                "work-1",
-                "agent-job",
-                "job-1",
-                "agent-job",
-                AgentSessionId: "session-1",
-                AgentTurnId: "turn-1",
-                ProcessGeneration: workGeneration ?? runnerGeneration)],
+                workId,
+                ownerKind,
+                ownerId,
+                ownerKind,
+                AgentSessionId: workSessionId,
+                AgentTurnId: workTurnId,
+                ProcessGeneration: workGeneration ?? runnerGeneration,
+                ConfirmedAt: confirmedAt)],
             null,
             [],
             null,
