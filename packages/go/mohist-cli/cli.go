@@ -1355,11 +1355,14 @@ func classifyFailure(e *operationError, method string, keyed bool, stage failure
 		retrySafe = boolPtr(true)
 	case stage == failureLocal:
 	case stage == failureServer && status < http.StatusInternalServerError:
+		// The Server classified this failure: it decided, nothing else applied.
+	case keyed:
+		// The durable fence replays the recorded outcome for the same key, and
+		// the domain guards refuse a second transition, so repeating a keyed
+		// write is safe even when the failure said nothing about the effect.
+		effect, retrySafe = "unknown", boolPtr(true)
 	case stage == failureServer:
 		effect = "unknown"
-	case keyed:
-		// The durable fence replays the recorded outcome for the same key.
-		effect, retrySafe = "unknown", boolPtr(true)
 	default:
 		effect = "unknown"
 	}

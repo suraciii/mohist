@@ -183,3 +183,33 @@ func TestInterruptedReadChangedNothingAndRepeatsSafely(t *testing.T) {
 		}
 	}
 }
+
+func TestKeyedWriteFailureWithoutFactsStaysRetryableWithTheSameKey(t *testing.T) {
+	// A 500 the Server did not describe (a proxy error page, say) says nothing
+	// about the effect, and the fence plus the domain guards make the same key
+	// the safe recovery.
+	attempts := 0
+	deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		attempts++
+		return response(http.StatusInternalServerError, "<html>bad gateway</html>"), nil
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+	code := Run(context.Background(), []string{"run", "retry", "wr-1", "--idempotency-key", "k1", "--json", "status"}, deps)
+
+	if code != ExitOperation {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	for _, want := range []string{
+		`"code":"invalid_response"`,
+		`"effect":"unknown"`,
+		`"retrySafe":true`,
+		`"nextAction":"mo run retry wr-1 --idempotency-key k1"`,
+	} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("stderr=%q missing %s", errOut.String(), want)
+		}
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts=%d: a described response is not a lost one", attempts)
+	}
+}
