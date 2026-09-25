@@ -391,6 +391,38 @@ describe('useUnifiedSessionDataSource — turn control availability', () => {
   })
 })
 
+describe('useUnifiedSessionDataSource — missing Session versus failed read', () => {
+  it('reports a 404 summary as not found instead of a failed read', () => {
+    const deps = makeDependencies({
+      useUnifiedSessionSummary: (() => ({
+        data: undefined,
+        isLoading: false,
+        isError: true,
+        error: new ApiError('Not found', 404, undefined, 'session_not_found'),
+      })) as never,
+    })
+    const { result } = renderUnifiedHook(deps)
+
+    expect(result.current.notFound).toBe(true)
+    expect(result.current.isError).toBe(false)
+  })
+
+  it('keeps a permission failure distinguishable from a missing Session', () => {
+    const deps = makeDependencies({
+      useUnifiedSessionSummary: (() => ({
+        data: undefined,
+        isLoading: false,
+        isError: true,
+        error: new ApiError('Forbidden', 403, undefined, 'forbidden'),
+      })) as never,
+    })
+    const { result } = renderUnifiedHook(deps)
+
+    expect(result.current.isError).toBe(true)
+    expect(result.current.notFound).toBe(false)
+  })
+})
+
 describe('useUnifiedSessionDataSource — recovery command reconciliation', () => {
   it('reconciles the unified summary, transcript, and Session lists when a recovery command succeeds', () => {
     const deps = makeDependencies()

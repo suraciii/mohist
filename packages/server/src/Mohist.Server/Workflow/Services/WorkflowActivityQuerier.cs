@@ -37,13 +37,43 @@ public class WorkflowActivityQuerier : IScopedService
         _timeProvider = timeProvider;
     }
 
-    public async Task<IReadOnlyList<ActiveAgentDto>> ListActiveAgentsAsync(
+    /// <summary>
+    /// Safety read for callers that are about to take an action whose safety depends on
+    /// nothing running. It returns the Issues whose AgentSessions still own possible work
+    /// judged only from canonical Session and Turn state, so lost or aged observation
+    /// evidence never releases a Workspace or enables another unsafe action.
+    /// Presentation surfaces use the freshness-qualified
+    /// <see cref="ListActiveAgentsResultAsync"/> instead.
+    /// </summary>
+    public async Task<IReadOnlySet<int>> ListUnsettledIssueNumbersAsync(
         string? projectId = null,
-        CancellationToken ct = default,
-        RunnerStatusListSnapshot? runnerSnapshot = null)
+        CancellationToken ct = default)
     {
-        var result = await ListActiveAgentsResultAsync(projectId, ct, runnerSnapshot);
-        return result.ActiveAgents;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var sessions = string.IsNullOrWhiteSpace(projectId)
+            ? await ListAllSessionsAsync(db, ct)
+            : await _sessionQuery.ListStatusCandidatesAsync(projectId, ct);
+
+        var issueNumbers = new HashSet<int>();
+        foreach (var record in sessions)
+        {
+            if (!OwnsPossibleWork(record.Session))
+                continue;
+
+            if (record.IssueNumber() is { } issueNumber)
+                issueNumbers.Add(issueNumber);
+        }
+
+        return issueNumbers;
+    }
+
+    private static bool OwnsPossibleWork(AgentSession session)
+    {
+        if (session.Status.Activity == AgentSessionActivity.Active)
+            return true;
+
+        return (session.Status.Turns ?? [])
+            .Any(turn => turn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing);
     }
 
     public async Task<ActiveAgentsListResult> ListActiveAgentsResultAsync(

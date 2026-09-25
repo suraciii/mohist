@@ -232,7 +232,11 @@ function ProjectSwitcher({ onNavigate }: { onNavigate?: () => void }) {
 function AgentStatusFooter() {
   const summary = useRunnerSummary()
   const navigate = useNavigate()
-  const label = summary.isLoading ? 'Checking Runner status' : runnerFleetLabel(summary)
+  const label = summary.isLoading
+    ? 'Checking Runner status'
+    : summary.isError
+      ? 'Runner status unavailable'
+      : runnerFleetLabel(summary)
   const pool = summary.fleet.eligiblePool
   const pct = pool ? Math.min(100, Math.round((pool.used / pool.total) * 100)) : 0
 

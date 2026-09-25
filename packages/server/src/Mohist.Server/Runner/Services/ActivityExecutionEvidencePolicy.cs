@@ -49,13 +49,13 @@ internal static class ActivityExecutionEvidencePolicy
         if (!string.IsNullOrWhiteSpace(activityTurnId)
             && !string.Equals(activityTurnId, turn.Id, StringComparison.Ordinal))
         {
-            return Needs("superseded-generation", sourceAt, turn.Id, session.Runtime.RunnerId);
+            return Needs("superseded-generation", sourceAt ?? observedAt, turn.Id, session.Runtime.RunnerId);
         }
 
         var owner = FindOwner(record, turn, runner);
         if (owner.Kind == OwnerMatchKind.GenerationMismatch)
         {
-            return Needs("superseded-generation", sourceAt, turn.Id, session.Runtime.RunnerId);
+            return Needs("superseded-generation", sourceAt ?? observedAt, turn.Id, session.Runtime.RunnerId);
         }
 
         if (owner.Kind == OwnerMatchKind.Confirmed)

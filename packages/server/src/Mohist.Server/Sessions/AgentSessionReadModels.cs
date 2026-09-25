@@ -514,7 +514,8 @@ public sealed record ActivitySummaryDto(
     int Completed,
     int Failed,
     ActivitySlotUsageDto Slots,
-    int NeedsVerification = 0);
+    int NeedsVerification = 0,
+    int Queued = 0);
 
 public sealed record ActivitySlotUsageDto(int Active, int Max);
 

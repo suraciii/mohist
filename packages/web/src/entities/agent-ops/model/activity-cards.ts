@@ -136,10 +136,9 @@ export interface ActivityCardsState {
   activeCards: SessionCard[]
   needsVerificationCards?: SessionCard[]
   activeCardByIssueNumber: Map<number, SessionCard>
-  sessionCardByIssueNumber?: Map<number, SessionCard>
   recentCards: SessionCard[]
   waitingCards: WaitingCard[]
-  statusCounts: StatusCounts & { needsVerification?: number }
+  statusCounts: StatusCounts & { needsVerification?: number; queued?: number }
   slotUsage: { active: number; max: number }
   isLoading: boolean
   isError: boolean
@@ -159,24 +158,20 @@ export function useActivityCards(): ActivityCardsState {
     for (const card of activeCards) {
       if (card.issueNumber !== null) activeCardByIssueNumber.set(card.issueNumber, card)
     }
-    const sessionCardByIssueNumber = new Map<number, SessionCard>(activeCardByIssueNumber)
-    for (const card of needsVerificationCards) {
-      if (card.issueNumber !== null) sessionCardByIssueNumber.set(card.issueNumber, card)
-    }
 
     return {
       activeCards,
       needsVerificationCards,
       activeCardByIssueNumber,
-      sessionCardByIssueNumber,
       recentCards,
       waitingCards,
       statusCounts: data?.summary ?? {
-        active: activeCards.length,
+        active: activeCards.filter((card) => card.executionState === 'running').length,
         waiting: waitingCards.length,
         completed: 0,
         failed: 0,
         needsVerification: needsVerificationCards.length,
+        queued: activeCards.filter((card) => card.executionState === 'queued').length,
       },
       slotUsage: data?.summary.slots ?? { active: 0, max: 0 },
       isLoading,

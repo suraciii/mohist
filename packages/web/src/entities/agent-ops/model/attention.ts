@@ -13,6 +13,7 @@ export type AttentionItem =
         | 'runner-admission-blocked'
         | 'runner-draining'
         | 'runner-capacity-limited'
+        | 'runner-partial-outage'
       label: string
       detail?: string
     }
@@ -48,7 +49,9 @@ function runnerAttentionItem(summary: RunnerStatusSummary): Exclude<AttentionIte
     case 'availability-unknown':
       return { kind: 'runner-unavailable', label: 'Runner availability unknown', detail: runnerSummaryText(summary) }
     case 'capacity-available':
-      return { kind: 'runner-admission-blocked', label: 'Runner admission blocked', detail: runnerSummaryText(summary) }
+      // Capacity is available, so this is not a dispatch block. Excluded Runners still
+      // need attention: they are unreachable work, not capacity the Project can use.
+      return { kind: 'runner-partial-outage', label: 'Some Runners unavailable', detail: runnerSummaryText(summary) }
   }
 }
 
@@ -73,8 +76,9 @@ export function deriveAttentionItems(
   }
   if (runnerSummary && runnerAffectsActiveWorkflow) {
     if (runnerSummary.isError !== true && runnerSummary.isLoading !== true) {
-      const item = runnerAttentionItem(runnerSummary)
-      if (runnerSummary.fleet.state !== 'capacity-available') items.push(item)
+      const state = runnerSummary.fleet.state
+      const partialOutage = state === 'capacity-available' && runnerSummary.fleet.excludedGroups.length > 0
+      if (state !== 'capacity-available' || partialOutage) items.push(runnerAttentionItem(runnerSummary))
     }
   } else if (agentStatus.runnerAvailable === false && runnerAffectsActiveWorkflow) {
     items.push({

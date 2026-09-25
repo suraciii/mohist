@@ -100,7 +100,7 @@ export function useUnifiedSessionDataSource(dependencies: Partial<UnifiedSession
 
   useDocumentTitle('Session — Mohist')
 
-  const { data: summary, isLoading: summaryLoading, isError: summaryError } = useSummary(sessionId)
+  const { data: summary, isLoading: summaryLoading, error: summaryError } = useSummary(sessionId)
   const { data: transcriptResponse, isFetching: transcriptViewLoading } = useTranscriptResponse(
     sessionId,
     summary?.runtimeSessionId,
@@ -283,10 +283,14 @@ export function useUnifiedSessionDataSource(dependencies: Partial<UnifiedSession
     : summary?.source === 'workflow' && workflowContextPath
       ? `Issue #${issueNumber}`
       : (summary?.agentName ?? 'Agents')
+  // A missing Session is a not-found object, not a failed read. Any other error stays
+  // distinguishable so the page can report a permission or network failure instead.
+  const summaryMissing = summaryError instanceof ApiError && summaryError.status === 404
+  const summaryFailed = summaryError != null && !summaryMissing
   return {
     isLoading: summaryLoading,
-    isError: summaryError,
-    notFound: !sessionId || (!summary && !summaryLoading && !summaryError),
+    isError: summaryFailed,
+    notFound: !sessionId || summaryMissing || (!summary && !summaryLoading && !summaryFailed),
     sessionKey: sessionId,
     runtimeSessionId,
     meta,

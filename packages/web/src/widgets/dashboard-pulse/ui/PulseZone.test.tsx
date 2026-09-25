@@ -42,15 +42,10 @@ const activityCardsHook = (): ActivityCardsState => {
   for (const card of activeCards) {
     if (card.issueNumber !== null) activeCardByIssueNumber.set(card.issueNumber, card)
   }
-  const sessionCardByIssueNumber = new Map(activeCardByIssueNumber)
-  for (const card of needsVerificationCards) {
-    if (card.issueNumber !== null) sessionCardByIssueNumber.set(card.issueNumber, card)
-  }
   return {
     activeCards,
     needsVerificationCards,
     activeCardByIssueNumber,
-    sessionCardByIssueNumber,
     recentCards,
     waitingCards: [],
     statusCounts: _agentActivity?.summary ?? {
@@ -333,6 +328,36 @@ describe('PulseZone — issue-led active production', () => {
       expect(screen.getByTestId('pulse-compact-usage')).toHaveTextContent('15.6k tok')
     })
     expect(screen.getByTestId('pulse-compact-progress')).toHaveTextContent('3/8 tasks')
+  })
+
+  it('keeps a confirmed running session as the issue row when an unverified session claims the same issue', async () => {
+    mockIssuesResponse([makeRunningIssue({ number: 120, title: 'Issue with two sessions' })])
+    mockAgentActivityResponse(
+      makeActivity([
+        makeSession({
+          sessionId: 'session-running',
+          issueNumber: 120,
+          issueTitle: 'Issue with two sessions',
+          executionState: 'running',
+          taskDescription: 'Running now',
+        }),
+        makeSession({
+          sessionId: 'session-unverified',
+          issueNumber: 120,
+          issueTitle: 'Issue with two sessions',
+          executionState: 'needs-verification',
+          evidence: { reason: 'aged', observedAt: '2026-01-01T00:00:00.000Z' },
+          taskDescription: 'Old telemetry',
+        }),
+      ]),
+    )
+
+    renderZone()
+
+    const card = await waitFor(() => screen.getByTestId('pulse-compact-card'))
+    expect(within(card).getByTestId('pulse-compact-execution-state')).toHaveTextContent('Running')
+    expect(within(card).queryByTestId('pulse-compact-evidence')).not.toBeInTheDocument()
+    expect(screen.queryByText('Old telemetry')).not.toBeInTheDocument()
   })
 
   it('shows an active session even when no in-progress issue row exists', async () => {

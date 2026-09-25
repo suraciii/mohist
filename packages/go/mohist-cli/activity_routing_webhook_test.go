@@ -39,6 +39,29 @@ func TestActivityListUsesProjectAndEmptyResult(t *testing.T) {
 	}
 }
 
+func TestActivityListExposesExecutionStateAndEvidence(t *testing.T) {
+	const row = `{"success":true,"data":[{"id":"a1","provenance":"recorded","scope":"session","kind":"agent-session","time":"2026-09-25T10:00:00Z","title":"Session s1 needs verification","status":"active","executionState":"needs-verification","evidence":{"reason":"aged","observedAt":"2026-09-08T00:00:00Z"}}]}`
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(200, row), nil
+	}), map[string]string{"MOHIST_TOKEN": "token"})
+
+	if code := Run(context.Background(), []string{"activity", "list", "--project", "proj", "--json", "executionState,evidence"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if selected := out.String(); !strings.Contains(selected, `"executionState":"needs-verification"`) || !strings.Contains(selected, `"reason":"aged"`) {
+		t.Fatalf("output=%q", selected)
+	}
+
+	*out, *errOut = strings.Builder{}, strings.Builder{}
+	if code := Run(context.Background(), []string{"activity", "list", "--project", "proj"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	human := out.String()
+	if !strings.Contains(human, "state") || !strings.Contains(human, "needs-verification") {
+		t.Fatalf("output=%q", human)
+	}
+}
+
 func TestRoutingCreateResolvesAgentAndPreservesPosition(t *testing.T) {
 	requests := 0
 	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {

@@ -55,7 +55,7 @@ func resolveDoctorCommand(candidate []string) ([]string, bool) {
 	if len(path) == 0 {
 		return nil, false
 	}
-	if _, err := parse(path); err != nil || !helpNamesLeaf(path) {
+	if _, err := parse(append(append([]string(nil), path...), "--help")); err != nil || !helpNamesLeaf(path) {
 		return nil, false
 	}
 	return append([]string(nil), path...), true
@@ -96,10 +96,10 @@ func TestDoctorGuidanceRejectsRemovedProjectCommand(t *testing.T) {
 
 func assertCommandHelpNamesLeaf(t *testing.T, args []string) {
 	t.Helper()
-	if _, err := parse(args); err != nil {
+	path := commandPath(args)
+	if _, err := parse(append(append([]string(nil), path...), "--help")); err != nil {
 		t.Fatalf("parse(%q): %v", args, err)
 	}
-	path := commandPath(args)
 	if !helpNamesLeaf(path) {
 		t.Fatalf("help for %q does not name the intended command leaf %q", args, "mo "+strings.Join(path, " "))
 	}

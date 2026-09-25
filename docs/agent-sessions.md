@@ -471,8 +471,6 @@ concurrent runs applies to launches and Follow-ups. See
 
 ## Implementation Gaps
 
-- Historical active Sessions can still appear as current execution without
-  a freshness or generation qualification.
 - Confirmed-missing recovery is not uniform for safely idle AgentJob Input and
   idle Follow-up. Non-idle reconnect reconciliation can replace a Binding
   without proving that an earlier effect is absent.

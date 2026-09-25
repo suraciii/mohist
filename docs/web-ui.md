@@ -393,9 +393,6 @@ Implementation source: `packages/web/`.
 
 The implementation currently has these gaps:
 
-- The Dashboard can present an old active Session as current execution and
-  link an unattributed Session to Issue zero. Missing Issue details can leave
-  the content pane blank.
 - Agent definitions have no avatar setting or avatar display.
 - Built-in Workflow Agents are not shown in the Agent list or detail page, and
   Customize does not yet materialize a Project override. Project Workflows and

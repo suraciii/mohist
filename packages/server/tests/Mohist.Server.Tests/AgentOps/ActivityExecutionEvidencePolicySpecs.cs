@@ -123,6 +123,19 @@ public sealed class ActivityExecutionEvidencePolicySpecs
     }
 
     [Fact]
+    public void OwnerGenerationMismatchWithoutActivityTime_CarriesTheOwnerObservationTime()
+    {
+        var record = BuildRecord(AgentTurnStatus.Executing, updatedAt: null);
+        var runner = BuildRunner("generation-2", workGeneration: "generation-1");
+
+        var assessment = ActivityExecutionEvidencePolicy.Evaluate(record, Now, runner);
+
+        Assert.Equal("needs-verification", assessment.ExecutionState);
+        Assert.Equal("superseded-generation", assessment.Evidence.Reason);
+        Assert.Equal(Now, assessment.Evidence.ObservedAt);
+    }
+
+    [Fact]
     public void OwnerGenerationMismatch_OverridesFreshActivityEvidence()
     {
         var record = BuildRecord(AgentTurnStatus.Executing, Now.AddSeconds(-1));

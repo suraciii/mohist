@@ -123,6 +123,44 @@ describe('activity event targets', () => {
     expect(event.targets.workflow).toBeUndefined()
   })
 
+  it('labels an unverified snapshot entry by observation state, not by canonical activity', () => {
+    const events = buildActivityEvents({
+      recordedEvents: [],
+      sessions: [
+        makeSession({
+          issueNumber: 42,
+          status: 'active',
+          executionState: 'needs-verification',
+          evidence: { reason: 'aged', observedAt: '2026-01-01T00:00:00.000Z' },
+        }),
+      ],
+      waiting: [],
+      runners: [],
+    })
+
+    const event = events.find((entry) => entry.id === 'session-snapshot-session-1')
+    expect(event?.title).toBe('Issue #42 session needs verification')
+    expect(event?.description).toContain('aged evidence')
+    expect(event?.description).toContain('last evidence 2026-01-01T00:00:00.000Z')
+    expect(event?.description).toContain('Status: active')
+  })
+
+  it('targets an unattributed Session itself instead of a fabricated Issue', () => {
+    const events = buildActivityEvents({
+      recordedEvents: [],
+      sessions: [makeSession({ issueNumber: null, sessionId: 'session-detached', status: 'idle' })],
+      waiting: [],
+      runners: [],
+    })
+
+    const event = events.find((entry) => entry.id === 'session-snapshot-session-detached')
+    expect(event?.title).toBe('Session session-detached idle')
+    expect(event?.targets.issue).toBeUndefined()
+    expect(event?.targets.session?.path).toContain('/sessions/session-detached')
+    expect(event?.targets.primary?.path).toContain('/sessions/session-detached')
+    expect(event?.targets.primary?.path).not.toContain('/issues/0')
+  })
+
   it('uses an event issue number when workflow events have no subject', () => {
     const event = firstRecordedEvent(makeProjectEvent({
       origin: 'workflow-run',

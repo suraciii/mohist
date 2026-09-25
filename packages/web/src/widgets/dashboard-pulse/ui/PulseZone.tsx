@@ -45,14 +45,30 @@ export function PulseZone({
   const {
     activeCards,
     needsVerificationCards = [],
-    activeCardByIssueNumber,
-    sessionCardByIssueNumber = activeCardByIssueNumber,
   } = activityCardsHook()
-  const sessionCards = needsVerificationOnly
-    ? needsVerificationCards
-    : includeNeedsVerification
-      ? [...activeCards, ...needsVerificationCards]
-      : activeCards
+  const sessionCards = useMemo(
+    () =>
+      needsVerificationOnly
+        ? needsVerificationCards
+        : includeNeedsVerification
+          ? [...activeCards, ...needsVerificationCards]
+          : activeCards,
+    [activeCards, includeNeedsVerification, needsVerificationCards, needsVerificationOnly],
+  )
+  // Index the cards this zone actually renders. A card excluded from `sessionCards`
+  // must not replace or resurrect an Issue row, or a historical unverified Session
+  // would appear as current work.
+  const cardByIssueNumber = useMemo(() => {
+    const index = new Map<number, SessionCard>()
+    for (const card of sessionCards) {
+      const issueNumber = normalizeIssueNumber(card.issueNumber)
+      if (issueNumber === null) continue
+      const existing = index.get(issueNumber)
+      if (existing && cardPriority(existing) <= cardPriority(card)) continue
+      index.set(issueNumber, card)
+    }
+    return index
+  }, [sessionCards])
   const toProjectPath = useProjectPath()
   const agentStatus = needsVerificationOnly ? undefined : (agentStatusOverride ?? fetchedAgentStatus)
 
@@ -77,7 +93,7 @@ export function PulseZone({
     const agentRows = deriveAgentStatusRows(agentStatus, coveredIssueNumbers)
 
     return [...runningIssues.map((issue) => ({ kind: 'issue' as const, issue })), ...sessionOnlyRows, ...agentRows]
-  }, [issuesOverride, fetchedIssues, sessionCards, sessionCardByIssueNumber, agentStatus, needsVerificationOnly])
+  }, [issuesOverride, fetchedIssues, sessionCards, cardByIssueNumber, agentStatus, needsVerificationOnly])
 
   const visible = activeRows.slice(0, MAX_VISIBLE_ROWS)
   const overflow = activeRows.length - visible.length
@@ -112,7 +128,7 @@ export function PulseZone({
 
               const issue = row.issue
               const ownerActionItem = classifyIssueAttention(issue)
-              const card = sessionCardByIssueNumber.get(issue.number)
+              const card = cardByIssueNumber.get(issue.number)
               if (card) {
                 return (
                   <CompactSessionCard
@@ -198,6 +214,24 @@ function agentStatusRowFromActiveAgent(
     sessionId: activeAgent.sessionId ?? null,
     stage: stageLabel(activeAgent.progress?.stage ?? null),
     key: activeAgent.sessionId ?? (issueNumber === null ? 'agent-running' : `agent-${issueNumber}`),
+  }
+}
+
+/**
+ * Which Session card represents an Issue when several Sessions claim it. A confirmed
+ * running Session is the current truth; an unverified historical Session must not
+ * displace it.
+ */
+function cardPriority(card: SessionCard): number {
+  switch (card.executionState) {
+    case 'running':
+      return 0
+    case 'queued':
+      return 1
+    case 'needs-verification':
+      return 2
+    default:
+      return 3
   }
 }
 

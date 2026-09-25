@@ -107,10 +107,10 @@ export function deriveRunnerSummary(
       ? 'no-runners-configured'
       : eligible.some((row) => row.capacity!.used! < row.capacity!.total)
         ? 'capacity-available'
-        : eligible.length > 0
-          ? 'capacity-full'
-          : excluded['unknown-occupancy'].length > 0
-            ? 'availability-unknown'
+        : excluded['unknown-occupancy'].length > 0
+          ? 'availability-unknown'
+          : eligible.length > 0
+            ? 'capacity-full'
             : 'admission-blocked'
   const reasons =
     fleetState === 'availability-unknown'

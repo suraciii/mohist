@@ -55,6 +55,7 @@ export function CompactSessionCard({
     ? getTaskProgressPercent(card.taskProgress.completed, card.taskProgress.total)
     : null
   const sessionPath = displayedIssueNumber === null ? `/sessions/${card.sessionId}` : `/issues/${displayedIssueNumber}`
+  const evidenceLine = executionEvidenceLine(executionState, card.evidence)
 
   return (
     <Link
@@ -82,6 +83,12 @@ export function CompactSessionCard({
         >
           {title}
         </h3>
+
+        {evidenceLine && (
+          <p className="mt-1 text-xs text-warning-foreground" data-testid="pulse-compact-evidence">
+            {evidenceLine}
+          </p>
+        )}
 
         {(card.totalTokens != null || card.costAmount != null) && (
           <p className="mt-1 text-xs text-muted-foreground" style={LINE_CLAMP_STYLE} data-testid="pulse-compact-usage">
@@ -194,6 +201,28 @@ function executionStateLabel(state: SessionCard['executionState']): string {
   if (state === 'needs-verification') return 'Needs verification'
   if (state === 'not-running') return 'Not running'
   return state === 'queued' ? 'Queued' : 'Running'
+}
+
+const EVIDENCE_REASON_LABELS: Record<string, string> = {
+  missing: 'missing',
+  aged: 'aged',
+  future: 'future-dated',
+  'superseded-generation': 'superseded generation',
+}
+
+/**
+ * The unverified-execution label keeps its reason and last evidence time visible, so a
+ * reader can tell why an observation is not confirmed current execution.
+ */
+export function executionEvidenceLine(
+  state: SessionCard['executionState'],
+  evidence: SessionCard['evidence'],
+): string | null {
+  if (state !== 'needs-verification' || !evidence) return null
+  const reason = EVIDENCE_REASON_LABELS[evidence.reason] ?? evidence.reason
+  return evidence.observedAt
+    ? `${reason} evidence · last evidence ${evidence.observedAt}`
+    : `${reason} evidence`
 }
 
 function issueAttentionTreatment(item: IssueAttentionItem): {

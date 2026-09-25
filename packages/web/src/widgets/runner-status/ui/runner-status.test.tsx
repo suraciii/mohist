@@ -79,6 +79,18 @@ describe('RunnerSummary', () => {
     expect(screen.getByText('mo install runner --repo-root <path>')).toBeInTheDocument()
     expect(screen.queryByText(/start the installed/i)).not.toBeInTheDocument()
   })
+  it('reports an unavailable status read instead of derived zero counts', () => {
+    render(
+      <MemoryRouter>
+        <RunnerSummary summary={{ ...deriveRunnerSummary([]), isError: true }} />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getAllByText('Runner status unavailable')).toHaveLength(1)
+    expect(screen.queryByText(/active works?/)).not.toBeInTheDocument()
+    expect(screen.queryByText('No Runners configured')).not.toBeInTheDocument()
+  })
+
   it('shows the observed fleet snapshot and a link to inspect Runner reasons', () => {
     render(
       <MemoryRouter>

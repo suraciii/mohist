@@ -135,6 +135,58 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
     })
   })
 
+  it('keeps a partial outage visible beside available capacity without claiming a block', () => {
+    _runners = [
+      {
+        identity: {
+          id: 'runner-ready',
+          hostname: 'host1',
+          kind: 'external',
+          component: null,
+          sourceRevision: null,
+          releaseId: null,
+          generation: null,
+        },
+        presence: { state: 'online', lastObservedAt: null },
+        control: { state: 'connected', generation: null },
+        admission: { state: 'ready', reasonCodes: [] },
+        capabilities: [],
+        runtimes: [],
+        capacity: { used: 0, total: 8 },
+        activeWorks: [],
+        drain: null,
+        nextActions: [],
+      },
+      {
+        identity: {
+          id: 'runner-offline',
+          hostname: 'host2',
+          kind: 'external',
+          component: null,
+          sourceRevision: null,
+          releaseId: null,
+          generation: null,
+        },
+        presence: { state: 'offline', lastObservedAt: null },
+        control: { state: 'disconnected', generation: null },
+        admission: { state: 'blocked', reasonCodes: ['presence-offline'] },
+        capabilities: [],
+        runtimes: [],
+        capacity: { used: null, total: 4 },
+        activeWorks: [],
+        drain: null,
+        nextActions: [],
+      },
+    ]
+
+    renderBoard(makeIssues(1), mockAgentStatus)
+
+    const banner = screen.getByTestId('runner-status-banner')
+    expect(banner).toHaveTextContent('Some Runners are unavailable; capacity is still available.')
+    expect(banner).toHaveTextContent('1 offline / 4 configured slots, occupancy unknown')
+    expect(banner).not.toHaveTextContent(/admission is blocked/i)
+  })
+
   it('does not show runner unavailable banner when connected busy runner exists', async () => {
     _runners = [
       {

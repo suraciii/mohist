@@ -7,7 +7,7 @@ import { AlertTriangleIcon, SearchIcon, XIcon } from 'lucide-react'
 import type { AgentStatus } from '../../../entities/agent'
 import { deriveLabelPairsFromIssues, formatLabelToken, IssueStatus, type Issue } from '../../../entities/issue'
 import { deriveAttentionItems, isIssueAttentionItem, type AttentionItem } from '../../../entities/agent-ops'
-import { runnerSummaryText, useRunnerSummary } from '../../../entities/runner'
+import { runnerSummaryText, useRunnerSummary, type RunnerStatusSummary } from '../../../entities/runner'
 import { StageColumn } from './StageColumn'
 import { IssueCard } from './IssueCard'
 import {
@@ -485,19 +485,22 @@ function NeedsAttentionSummary({ items }: { items: AttentionItem[] }) {
 function attentionFamily(item: Extract<AttentionItem, { issueNumber: number }>): 'danger' | 'warning' {
   return item.kind === 'approval-needed' ? 'warning' : 'danger'
 }
-function RunnerUnavailableBanner({ summary }: { summary: ReturnType<typeof useRunnerSummary> }) {
-  if (summary.isLoading || summary.hasAdmissibleCapacity) return null
+function RunnerUnavailableBanner({ summary }: { summary: RunnerStatusSummary }) {
+  const partialOutage = summary.fleet.state === 'capacity-available' && summary.fleet.excludedGroups.length > 0
+  if (summary.isLoading || (summary.hasAdmissibleCapacity && !partialOutage)) return null
 
   const action = summary.inventory?.nextActions[0] ?? summary.rows.flatMap((row) => row.nextActions)[0]
   const message = summary.isError
     ? 'Runner status is unavailable.'
     : summary.fleet.state === 'no-runners-configured'
       ? 'No Runner definitions.'
-      : summary.fleet.state === 'capacity-full'
-        ? 'Runner capacity is full.'
-        : summary.fleet.state === 'availability-unknown'
-          ? 'Runner availability is unknown.'
-          : 'No Runner has admissible capacity; admission is blocked.'
+      : partialOutage
+        ? 'Some Runners are unavailable; capacity is still available.'
+        : summary.fleet.state === 'capacity-full'
+          ? 'Runner capacity is full.'
+          : summary.fleet.state === 'availability-unknown'
+            ? 'Runner availability is unknown.'
+            : 'No Runner has admissible capacity; admission is blocked.'
 
   return (
     <div

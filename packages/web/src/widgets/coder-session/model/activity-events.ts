@@ -388,11 +388,12 @@ function buildSessionSnapshotEntry(session: AgentActivitySession): ActivityEvent
   const isGeneric = session.agentId != null && session.agentId.length > 0
   const issueNumber = session.issueNumber != null && session.issueNumber > 0 ? session.issueNumber : null
   const status = session.status || 'unknown'
+  const stateLabel = executionStateLabel(session, status)
   const title = isGeneric
-    ? `Agent ${session.agentName ?? session.agentId ?? 'session'} session ${status}`
+    ? `Agent ${session.agentName ?? session.agentId ?? 'session'} session ${stateLabel}`
     : issueNumber != null
-      ? `Issue #${issueNumber} session ${status}`
-      : `Session ${session.sessionId} ${status}`
+      ? `Issue #${issueNumber} session ${stateLabel}`
+      : `Session ${session.sessionId} ${stateLabel}`
 
   const targets: ActivityEventTargets = {}
   if (isGeneric) {
@@ -418,6 +419,11 @@ function buildSessionSnapshotEntry(session: AgentActivitySession): ActivityEvent
       path: sessionPath(session.sessionId, issueNumber, false),
     }
     targets.workflow = workflowTarget(issueNumber)
+  } else {
+    // No Issue attribution: the Session itself is the target, not a fabricated Issue.
+    const path = sessionPath(session.sessionId, null, false)
+    targets.primary = { path, label: 'Session' }
+    targets.session = { sessionId: session.sessionId, label: 'Session', isGeneric: false, path }
   }
 
   return {
@@ -426,9 +432,37 @@ function buildSessionSnapshotEntry(session: AgentActivitySession): ActivityEvent
     attention: 'routine',
     time: session.lastActivityAt ?? session.createdAt,
     title,
-    description: `Status: ${status}`,
+    description: sessionDescription(session, status),
     targets,
   }
+}
+
+function executionStateLabel(session: AgentActivitySession, status: string): string {
+  switch (session.executionState) {
+    case 'running':
+      return 'running'
+    case 'queued':
+      return 'queued'
+    case 'needs-verification':
+      return 'needs verification'
+    default:
+      return status
+  }
+}
+
+function sessionDescription(session: AgentActivitySession, status: string): string {
+  if (session.executionState !== 'needs-verification') return `Status: ${status}`
+  const evidence = session.evidence ?? null
+  const reason = EVIDENCE_REASON_LABELS[evidence?.reason ?? ''] ?? evidence?.reason ?? 'missing'
+  const evidenceTime = evidence?.observedAt ? ` · last evidence ${evidence.observedAt}` : ''
+  return `Needs verification (${reason} evidence)${evidenceTime} · Status: ${status}`
+}
+
+const EVIDENCE_REASON_LABELS: Record<string, string> = {
+  missing: 'missing',
+  aged: 'aged',
+  future: 'future-dated',
+  'superseded-generation': 'superseded generation',
 }
 
 function buildWaitingEntry(waiting: AgentActivityWaiting): ActivityEvent {

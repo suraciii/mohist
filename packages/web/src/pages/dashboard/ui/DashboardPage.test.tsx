@@ -69,7 +69,6 @@ const NO_AGENT_ACTIVITY: ActivityCardsState = {
   activeCards: [],
   needsVerificationCards: [],
   activeCardByIssueNumber: new Map(),
-  sessionCardByIssueNumber: new Map(),
   recentCards: [],
   waitingCards: [],
   statusCounts: { active: 0, waiting: 0, completed: 0, failed: 0 },
@@ -768,7 +767,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       activeCards: [activeCard],
       needsVerificationCards: [needsVerificationCard],
       activeCardByIssueNumber: new Map([[activeCard.issueNumber!, activeCard]]),
-      sessionCardByIssueNumber: new Map([[activeCard.issueNumber!, activeCard]]),
     }
 
     renderPage()

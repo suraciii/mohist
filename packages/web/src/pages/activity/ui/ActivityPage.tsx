@@ -210,6 +210,7 @@ export function ActivityPage({
     <div className="flex-1 flex flex-col min-h-0">
       <StatusBar
         active={statusCounts.active}
+        queued={statusCounts.queued}
         waiting={statusCounts.waiting}
         completed={evidenceCounts.completed}
         failed={evidenceCounts.failed}

@@ -100,6 +100,16 @@ describe('CompactSessionCard', () => {
     expect(state).toHaveTextContent('Needs verification')
     expect(state).toHaveAttribute('title', 'aged')
     expect(screen.queryByTestId('pulse-compact-paused-dot')).toBeInTheDocument()
+
+    const evidence = screen.getByTestId('pulse-compact-evidence')
+    expect(evidence).toHaveTextContent('aged evidence')
+    expect(evidence).toHaveTextContent('last evidence 2026-01-01T00:00:00Z')
+  })
+
+  it('keeps confirmed running work free of evidence lines', () => {
+    renderCard(makeCard({ executionState: 'running', evidence: null }))
+
+    expect(screen.queryByTestId('pulse-compact-evidence')).not.toBeInTheDocument()
   })
 
   it('falls back to task description when title is missing', () => {

@@ -185,7 +185,7 @@ public sealed class DoctorCheckService : IScopedService
     private static DoctorCheck EvaluateVerification(IReadOnlyList<string> missing) =>
         missing.Count == 0
             ? new DoctorCheck("verification-command", "ok", "All Projects have a verification command", null)
-            : Fail("verification-command", $"Projects missing verification commands: {string.Join(", ", missing)}", "For each Project listed in the diagnostic details, choose its real verification command, then follow mo project workflow verification set --help to set it.");
+            : Fail("verification-command", $"Projects missing verification commands: {string.Join(", ", missing)}", "For each Project listed in the diagnostic details, choose its real verification command, then follow mo project workflow verification set --help.");
 
     private static DoctorCheck EvaluateCatalog(IReadOnlyList<string> incomplete) =>
         incomplete.Count == 0

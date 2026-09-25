@@ -385,6 +385,7 @@ export interface AgentActivity {
     completed: number
     failed: number
     needsVerification?: number
+    queued?: number
     slots: {
       active: number
       max: number

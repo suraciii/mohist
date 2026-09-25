@@ -73,6 +73,11 @@ export function runnerFleetLabel(summary: RunnerStatusSummary): string {
 }
 
 export function runnerSummaryFacts(summary: RunnerStatusSummary): string[] {
+  // A failed or in-flight read has no facts. Rendering derived counts would describe
+  // missing telemetry as a confirmed report of Runner state, and the fleet label
+  // already carries the read state.
+  if (summary.isError || summary.isLoading) return []
+
   const facts: string[] = []
   const pool = summary.fleet.eligiblePool
   if (pool) facts.push(`${pool.used}/${pool.total} occupied`)

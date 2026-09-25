@@ -142,7 +142,8 @@ public sealed class AgentActivityFeedAssembler : IScopedService
             0,
             0,
             slots,
-            cards.Count(c => string.Equals(c.ExecutionState, "needs-verification", StringComparison.Ordinal)));
+            cards.Count(c => string.Equals(c.ExecutionState, "needs-verification", StringComparison.Ordinal)),
+            cards.Count(c => string.Equals(c.ExecutionState, "queued", StringComparison.Ordinal)));
 
         var amplification = new AgentAmplificationDto(
             Candidates: candidatesCount,

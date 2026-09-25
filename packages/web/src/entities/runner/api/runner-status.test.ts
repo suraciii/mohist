@@ -167,6 +167,24 @@ describe('deriveRunnerSummary', () => {
     expect(summary.hasAdmissibleCapacity).toBe(false)
   })
 
+  it('reports availability unknown when a full pool sits beside unknown occupancy', () => {
+    const summary = deriveRunnerSummary([
+      makeRow({
+        admission: { state: 'blocked', reasonCodes: ['capacity-full'] },
+        capacity: { used: 2, total: 2 },
+      }),
+      makeRow({
+        identity: { ...makeRow().identity, id: 'runner-unknown' },
+        admission: { state: 'blocked', reasonCodes: ['admission-observation-missing'] },
+        capacity: { used: null, total: 3 },
+      }),
+    ])
+
+    expect(summary.fleet.state).toBe('availability-unknown')
+    expect(summary.fleet.reasons).toContain('capacity-unknown')
+    expect(summary.hasAdmissibleCapacity).toBe(false)
+  })
+
   it('reports all offline as blocked with separately configured capacity', () => {
     const summary = deriveRunnerSummary([
       makeRow({
