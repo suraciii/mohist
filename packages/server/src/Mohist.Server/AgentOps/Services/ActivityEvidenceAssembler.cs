@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions;
@@ -29,7 +30,13 @@ public sealed class ActivityEvidenceAssembler : IScopedService
         var waiting = await _waiting.ListAsync(projectId, ct);
         var runnerSnapshot = await _runnerStatus.GetGlobalRunnersAsync(ct);
         var capacity = RunnerStatusService.ProjectAvailability(runnerSnapshot).Capacity;
-        var activity = await _agentActivity.GetActivityAsync(projectId, SourceLimit, waiting, capacity, ct);
+        var activity = await _agentActivity.GetActivityAsync(
+            projectId,
+            SourceLimit,
+            waiting,
+            capacity,
+            runnerSnapshot,
+            ct);
         var events = await _events.ListAsync(projectId, SourceLimit, ct: ct);
 
         return events.Select(ActivityEntryDto.FromRecorded)
@@ -53,11 +60,13 @@ public sealed record ActivityEntryDto(
     string Title,
     string Description,
     string? EventType = null,
-    int? IssueNumber = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? IssueNumber = null,
     string? WorkflowRunId = null,
     string? SessionId = null,
     string? RunnerId = null,
-    string? Status = null)
+    string? Status = null,
+    string? ExecutionState = null,
+    ActivityExecutionEvidenceDto? Evidence = null)
 {
     public static ActivityEntryDto FromRecorded(ProjectEventEnvelope entry) =>
         new(
@@ -82,11 +91,13 @@ public sealed record ActivityEntryDto(
             "project",
             "agent-session",
             ParseTime(entry.LastActivityAt),
-            entry.Title ?? $"Agent session {entry.SessionId}",
-            $"{entry.Status} session for Issue #{entry.IssueNumber}",
+            entry.Title ?? entry.IssueTitle,
+            SessionDescription(entry),
             IssueNumber: entry.IssueNumber,
             SessionId: entry.SessionId,
-            Status: entry.Status);
+            Status: entry.Status,
+            ExecutionState: entry.ExecutionState,
+            Evidence: entry.Evidence);
 
     public static ActivityEntryDto FromWaiting(ActivityWaitingCardDto entry) =>
         new(
@@ -99,6 +110,10 @@ public sealed record ActivityEntryDto(
             $"{entry.Label}{(string.IsNullOrWhiteSpace(entry.Stage) ? string.Empty : $" at {entry.Stage}")}",
             IssueNumber: entry.IssueNumber,
             Status: "waiting");
+    private static string SessionDescription(ActivityCardDto entry) =>
+        entry.IssueNumber is int issueNumber
+            ? $"{entry.ExecutionState ?? entry.Status} session for Issue #{issueNumber}"
+            : $"{entry.ExecutionState ?? entry.Status} session";
 
     public static ActivityEntryDto FromRunner(RunnerStatusEntry entry) =>
         new(

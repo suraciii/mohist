@@ -283,7 +283,8 @@ function buildAgentSessionEventEntry(
   const session = sessionById.get(sessionId)
   const agentId = event.agentId ?? session?.agentId ?? readString(event.data, ['agentId'])
   const agentName = event.agentName ?? session?.agentName ?? readString(event.data, ['agentName'])
-  const issueNumber = session && session.issueNumber > 0 ? session.issueNumber : readIssueNumber(event)
+  const issueNumber =
+    session && session.issueNumber != null && session.issueNumber > 0 ? session.issueNumber : readIssueNumber(event)
   const sourceKind = event.sessionSourceKind ?? (session?.agentId ? 'agent-launch' : session ? 'workflow' : null)
   const isGeneric = sourceKind === 'agent-launch' || (sourceKind == null && (agentId != null || issueNumber == null))
 
@@ -385,7 +386,7 @@ function buildRunnerEventEntry(event: ProjectEventDto): ActivityEvent | null {
 
 function buildSessionSnapshotEntry(session: AgentActivitySession): ActivityEvent {
   const isGeneric = session.agentId != null && session.agentId.length > 0
-  const issueNumber = session.issueNumber > 0 ? session.issueNumber : null
+  const issueNumber = session.issueNumber != null && session.issueNumber > 0 ? session.issueNumber : null
   const status = session.status || 'unknown'
   const title = isGeneric
     ? `Agent ${session.agentName ?? session.agentId ?? 'session'} session ${status}`

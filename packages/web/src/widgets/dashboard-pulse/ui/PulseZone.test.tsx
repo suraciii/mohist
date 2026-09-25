@@ -6,12 +6,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '@/entities/project/model/ProjectContext'
 import { IssueHealth, IssueStatus, WorkflowStage, type Issue } from '@/entities/issue'
-import type {
-  AgentStatus,
-  AgentActivity,
-  AgentActivitySession,
-} from '@/entities/agent/model/types'
-import { sessionToCard, useActivityCards } from '@/entities/agent-ops'
+import type { AgentStatus, AgentActivity, AgentActivitySession } from '@/entities/agent/model/types'
+import { sessionToCard, type ActivityCardsState } from '@/entities/agent-ops'
 import { TEST_PROJECT } from '../../../../tests/test-utils'
 import { useMswServer } from '../../../../tests/support/msw'
 import { PulseZone } from './PulseZone'
@@ -21,12 +17,8 @@ let _agentStatus: AgentStatus
 let _agentActivity: AgentActivity | null = null
 
 useMswServer(
-  http.get('*/api/projects/:projectId/issues', () =>
-    HttpResponse.json({ success: true, data: _issues }),
-  ),
-  http.get('*/api/projects/:projectId/agent/status', () =>
-    HttpResponse.json({ success: true, data: _agentStatus }),
-  ),
+  http.get('*/api/projects/:projectId/issues', () => HttpResponse.json({ success: true, data: _issues })),
+  http.get('*/api/projects/:projectId/agent/status', () => HttpResponse.json({ success: true, data: _agentStatus })),
 )
 
 function mockIssuesResponse(issues: Issue[]) {
@@ -41,18 +33,24 @@ function mockAgentActivityResponse(data: AgentActivity | null) {
   _agentActivity = data
 }
 
-const activityCardsHook = (): ReturnType<typeof useActivityCards> => {
+const activityCardsHook = (): ActivityCardsState => {
   const cards = (_agentActivity?.sessions ?? []).map(sessionToCard)
-  const activeCards = cards.filter((card) => card.status === 'active')
-  const recentCards = cards.filter((card) => card.status !== 'active')
+  const activeCards = cards.filter((card) => card.executionState === 'running' || card.executionState === 'queued')
+  const needsVerificationCards = cards.filter((card) => card.executionState === 'needs-verification')
+  const recentCards = cards.filter((card) => card.executionState === 'not-running')
   const activeCardByIssueNumber = new Map<number, (typeof activeCards)[number]>()
   for (const card of activeCards) {
-    const issueNumber = Number(card.issueNumber)
-    if (Number.isFinite(issueNumber)) activeCardByIssueNumber.set(issueNumber, card)
+    if (card.issueNumber !== null) activeCardByIssueNumber.set(card.issueNumber, card)
+  }
+  const sessionCardByIssueNumber = new Map(activeCardByIssueNumber)
+  for (const card of needsVerificationCards) {
+    if (card.issueNumber !== null) sessionCardByIssueNumber.set(card.issueNumber, card)
   }
   return {
     activeCards,
+    needsVerificationCards,
     activeCardByIssueNumber,
+    sessionCardByIssueNumber,
     recentCards,
     waitingCards: [],
     statusCounts: _agentActivity?.summary ?? {
@@ -60,6 +58,7 @@ const activityCardsHook = (): ReturnType<typeof useActivityCards> => {
       waiting: 0,
       completed: 0,
       failed: 0,
+      needsVerification: needsVerificationCards.length,
       slots: { active: activeCards.length, max: 0 },
     },
     slotUsage: _agentActivity?.summary.slots ?? { active: 0, max: 0 },
@@ -135,10 +134,7 @@ function makeSession(overrides: Partial<AgentActivitySession> = {}): AgentActivi
   }
 }
 
-function makeActivity(
-  sessions: AgentActivitySession[],
-  summary?: Partial<AgentActivity['summary']>,
-): AgentActivity {
+function makeActivity(sessions: AgentActivitySession[], summary?: Partial<AgentActivity['summary']>): AgentActivity {
   const active = sessions.filter((s) => s.status === 'active').length
   return {
     summary: {
@@ -363,6 +359,28 @@ describe('PulseZone — issue-led active production', () => {
     expect(within(card).getByTestId('pulse-compact-title')).toHaveTextContent('Continue active session')
     expect(within(card).getByTestId('pulse-compact-stage')).toHaveTextContent('Check')
   })
+  it('keeps a needs-verification session without an issue visible and links to its session route', async () => {
+    mockIssuesResponse([])
+    mockAgentActivityResponse(
+      makeActivity([
+        makeSession({
+          sessionId: 'session-without-issue',
+          issueNumber: null,
+          issueTitle: 'Session',
+          executionState: 'needs-verification',
+          evidence: { reason: 'aged', observedAt: '2026-01-01T00:00:00.000Z' },
+        }),
+      ]),
+    )
+
+    renderZone()
+
+    const card = await waitFor(() => screen.getByTestId('pulse-compact-card'))
+    expect(card).toHaveAttribute('data-issue-number', 'unknown')
+    expect(card).toHaveAttribute('href', `/${encodeURIComponent(TEST_PROJECT.name)}/sessions/session-without-issue`)
+    expect(within(card).getByTestId('pulse-compact-execution-state')).toHaveTextContent('Needs verification')
+    expect(card.textContent).not.toContain('#0')
+  })
 
   it('renders an active-agent placeholder when runner status has active work but activity cards are empty', async () => {
     mockIssuesResponse([])
@@ -393,7 +411,7 @@ describe('PulseZone — issue-led active production', () => {
     expect(within(card).getByTestId('pulse-agent-status-stage')).toHaveTextContent('Check')
   })
 
-  it('renders a generic active-agent placeholder when runner status has no issue number', async () => {
+  it('renders an unlinked active-agent placeholder when runner status has no target identity', async () => {
     mockIssuesResponse([])
     mockAgentActivityResponse(makeActivity([]))
     mockAgentStatusResponse(makeAgentStatus({ running: true, issueNumber: null }))
@@ -402,7 +420,8 @@ describe('PulseZone — issue-led active production', () => {
 
     const card = await waitFor(() => screen.getByTestId('pulse-agent-status-card'))
     expect(card).toHaveAttribute('data-issue-number', 'unknown')
-    expect(card.getAttribute('href')).toMatch(/\/activity$/)
+    expect(card).not.toHaveAttribute('href')
+    expect(within(card).getByTestId('pulse-agent-status-target-unavailable')).toHaveTextContent('Target unavailable')
   })
 
   it('uses the current issue title and workflow stage when session telemetry is stale', async () => {
@@ -453,9 +472,7 @@ describe('PulseZone — issue-led active production', () => {
         health: IssueHealth.Paused,
       }),
     ])
-    mockAgentActivityResponse(
-      makeActivity([makeSession({ sessionId: 'unrelated', issueNumber: 999, })]),
-    )
+    mockAgentActivityResponse(makeActivity([makeSession({ sessionId: 'unrelated', issueNumber: 999 })]))
 
     renderZone()
 

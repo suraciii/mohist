@@ -491,9 +491,13 @@ function RunnerUnavailableBanner({ summary }: { summary: ReturnType<typeof useRu
   const action = summary.inventory?.nextActions[0] ?? summary.rows.flatMap((row) => row.nextActions)[0]
   const message = summary.isError
     ? 'Runner status is unavailable.'
-    : summary.rows.length === 0
+    : summary.fleet.state === 'no-runners-configured'
       ? 'No Runner definitions.'
-      : 'No Runner has admissible capacity.'
+      : summary.fleet.state === 'capacity-full'
+        ? 'Runner capacity is full.'
+        : summary.fleet.state === 'availability-unknown'
+          ? 'Runner availability is unknown.'
+          : 'No Runner has admissible capacity; admission is blocked.'
 
   return (
     <div

@@ -134,6 +134,18 @@ function makeComponents(): Partial<SessionDetailShellComponents> {
 }
 
 describe('SessionDetailShell timeline integration', () => {
+  it('offers a return link when a deep-linked session is not found', () => {
+    render(
+      <MemoryRouter>
+        <SessionDetailShell data={{ ...makeData(), notFound: true }} />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('Session not found')).toBeInTheDocument()
+    expect(screen.getByTestId('session-not-found-back-link')).toHaveAttribute('href', '/agents')
+    expect(screen.getByTestId('session-not-found-back-link')).toHaveTextContent('Back to Agents')
+  })
+
   afterEach(() => cleanup())
 
   it('removes duplicated input and recovery first-screen regions after timeline facts cover them', () => {

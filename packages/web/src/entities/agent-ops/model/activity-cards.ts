@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useAgentActivity } from '../../agent/@x/activity'
-import type { AgentActivitySession, AgentActivityWaiting } from '../../agent/@x/activity'
+import type { ActivityExecutionState, AgentActivitySession, AgentActivityWaiting } from '../../agent/@x/activity'
 import type { ContextUsageHistoryEntry } from '../../coder-session/@x/activity'
 
 export interface TaskProgress {
@@ -34,11 +34,13 @@ export interface WaitingCard {
 export type SessionCardUsageHistoryEntry = ContextUsageHistoryEntry
 
 export interface SessionCard {
-  issueNumber: number
+  issueNumber: number | null
   issueTitle: string
   issueStage: string
   sessionId: string
   status: string
+  executionState?: ActivityExecutionState
+  evidence?: AgentActivitySession['evidence']
   model: string | null
   resolvedModel: string | null
   taskDescription: string | null
@@ -79,8 +81,6 @@ export interface StatusCounts {
   failed: number
 }
 
-const ACTIVE_STATUSES = new Set(['active'])
-
 export function sessionToCard(s: AgentActivitySession): SessionCard {
   const usage = s.usage
   const eventSummary = s.eventSummary
@@ -92,6 +92,8 @@ export function sessionToCard(s: AgentActivitySession): SessionCard {
     issueStage: s.issueStage,
     sessionId: s.sessionId,
     status: s.status,
+    executionState: s.executionState ?? (s.status === 'active' ? 'running' : 'not-running'),
+    evidence: s.evidence ?? null,
     model: s.model,
     resolvedModel: eventSummary?.resolvedModel ?? null,
     taskDescription: s.taskDescription,
@@ -130,24 +132,43 @@ function waitingToCard(w: AgentActivityWaiting): WaitingCard {
   }
 }
 
-export function useActivityCards() {
+export interface ActivityCardsState {
+  activeCards: SessionCard[]
+  needsVerificationCards?: SessionCard[]
+  activeCardByIssueNumber: Map<number, SessionCard>
+  sessionCardByIssueNumber?: Map<number, SessionCard>
+  recentCards: SessionCard[]
+  waitingCards: WaitingCard[]
+  statusCounts: StatusCounts & { needsVerification?: number }
+  slotUsage: { active: number; max: number }
+  isLoading: boolean
+  isError: boolean
+}
+
+export function useActivityCards(): ActivityCardsState {
   const { data, isLoading = false, isError = false } = useAgentActivity()
 
   return useMemo(() => {
     const cards = (data?.sessions ?? []).map(sessionToCard)
-    const activeCards = cards.filter((c) => ACTIVE_STATUSES.has(c.status))
-    const recentCards = cards.filter((c) => !ACTIVE_STATUSES.has(c.status))
+    const activeCards = cards.filter((c) => c.executionState === 'running' || c.executionState === 'queued')
+    const needsVerificationCards = cards.filter((c) => c.executionState === 'needs-verification')
+    const recentCards = cards.filter((c) => c.executionState === 'not-running')
     const waitingCards = (data?.waiting ?? []).map(waitingToCard)
 
     const activeCardByIssueNumber = new Map<number, SessionCard>()
     for (const card of activeCards) {
-      const n = Number(card.issueNumber)
-      if (Number.isFinite(n)) activeCardByIssueNumber.set(n, card)
+      if (card.issueNumber !== null) activeCardByIssueNumber.set(card.issueNumber, card)
+    }
+    const sessionCardByIssueNumber = new Map<number, SessionCard>(activeCardByIssueNumber)
+    for (const card of needsVerificationCards) {
+      if (card.issueNumber !== null) sessionCardByIssueNumber.set(card.issueNumber, card)
     }
 
     return {
       activeCards,
+      needsVerificationCards,
       activeCardByIssueNumber,
+      sessionCardByIssueNumber,
       recentCards,
       waitingCards,
       statusCounts: data?.summary ?? {
@@ -155,6 +176,7 @@ export function useActivityCards() {
         waiting: waitingCards.length,
         completed: 0,
         failed: 0,
+        needsVerification: needsVerificationCards.length,
       },
       slotUsage: data?.summary.slots ?? { active: 0, max: 0 },
       isLoading,

@@ -8,10 +8,16 @@ import {
   LayersIcon,
   ShieldOffIcon,
 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { useIssues, type Issue } from '../../../entities/issue'
 import { useCostRollup, type AgentCostMetricDto } from '../../../entities/agent'
 import { useProject } from '../../../entities/project'
-import { runnerSummaryText, useRunnerSummary, type RunnerStatusSummary } from '../../../entities/runner'
+import {
+  runnerFleetLabel,
+  runnerSummaryText,
+  useRunnerSummary,
+  type RunnerStatusSummary,
+} from '../../../entities/runner'
 import { cn } from '@/shared/lib/utils'
 import { formatCost } from '@/shared/lib/format-compact'
 import { deriveFactoryStatus } from '../model/factory-status'
@@ -37,25 +43,14 @@ export function FactoryStatusHeadline(props: FactoryStatusHeadlineProps = {}) {
   const status = useMemo(() => deriveFactoryStatus(issues, todayCost), [issues, todayCost])
 
   const runnerReady =
-    runnerSummary.rows.length > 0 &&
-    runnerSummary.blockedCount === 0 &&
-    runnerSummary.isLoading !== true &&
-    runnerSummary.isError !== true
+    runnerSummary.hasAdmissibleCapacity && runnerSummary.isLoading !== true && runnerSummary.isError !== true
   const runnerStatusLabel = runnerSummary.isLoading
     ? 'Checking'
-    : runnerSummary.rows.length === 0
-      ? runnerSummary.inventory?.state === 'first-install'
-        ? 'No definitions'
-        : 'Unavailable'
-      : runnerSummary.blockedCount > 0
-        ? 'Admission blocked'
-        : 'Admission ready'
-  const runnerCapacity =
-    runnerSummary.rows.length === 0
-      ? 'unknown'
-      : runnerSummary.hasUnknownCapacity
-        ? `unknown/${runnerSummary.capacityTotal}`
-        : `${runnerSummary.capacityUsed ?? 0}/${runnerSummary.capacityTotal}`
+    : runnerSummary.isError
+      ? 'Unavailable'
+      : runnerFleetLabel(runnerSummary)
+  const eligiblePool = runnerSummary.fleet.eligiblePool
+  const runnerCapacity = eligiblePool ? `${eligiblePool.used}/${eligiblePool.total} occupied` : 'unknown'
   const todayCostHasSample = (todayCost?.sampleCount ?? 0) > 0
   const todayCostDisplay = todayCostHasSample ? formatCost(todayCost?.amount ?? null, todayCost?.currency ?? null) : '—'
 
@@ -73,7 +68,11 @@ export function FactoryStatusHeadline(props: FactoryStatusHeadlineProps = {}) {
           label="Runner"
           value={runnerStatusLabel}
           valueClassName={
-            runnerReady ? 'text-emerald-700' : runnerSummary.blockedCount > 0 ? 'text-warning' : 'text-muted-foreground'
+            runnerReady
+              ? 'text-emerald-700'
+              : runnerSummary.fleet.state === 'admission-blocked'
+                ? 'text-warning'
+                : 'text-muted-foreground'
           }
         />
         <Stat
@@ -125,8 +124,17 @@ export function FactoryStatusHeadline(props: FactoryStatusHeadlineProps = {}) {
           label="Today cost"
           value={todayCostDisplay}
           valueClassName={todayCostHasSample ? 'tabular-nums' : 'text-muted-foreground/70'}
-          valueAriaLabel={todayCostHasSample ? 'Today cost' : 'Today cost unavailable'}
         />
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] leading-4 text-muted-foreground">
+          {runnerSummary.fleet.observedAt && (
+            <time dateTime={runnerSummary.fleet.observedAt} data-testid="factory-status-runner-observed-at">
+              Observed {runnerSummary.fleet.observedAt}
+            </time>
+          )}
+          <Link to="/runners" className="underline hover:no-underline">
+            Inspect Runner reasons
+          </Link>
+        </div>
       </div>
       {runnerSummary.rows.length > 0 && (
         <p className="mt-3 text-[10px] leading-4 text-muted-foreground" data-testid="factory-status-runner-facts">

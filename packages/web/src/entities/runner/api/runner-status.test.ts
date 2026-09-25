@@ -71,9 +71,13 @@ describe('deriveRunnerSummary', () => {
     expect(summary.hasAdmissibleCapacity).toBe(true)
   })
 
-  it('does not infer admissible capacity from unknown used capacity', () => {
-    const summary = deriveRunnerSummary([makeRow({ capacity: { used: null, total: 2 } })])
-    expect(summary.hasAdmissibleCapacity).toBe(false)
+  it('preserves source observation time instead of synthesizing refresh time', () => {
+    const summary = deriveRunnerSummary({
+      observedAt: '2026-09-25T12:00:00Z',
+      inventory: { state: 'ready', nextActions: [] },
+      runners: [makeRow()],
+    })
+    expect(summary.fleet.observedAt).toBe('2026-09-25T12:00:00Z')
   })
 
   it('retains presence, control, drain, full-capacity, and active-work facts in one summary', () => {
@@ -113,9 +117,90 @@ describe('deriveRunnerSummary', () => {
     expect(summary.fullCount).toBe(1)
     expect(summary.activeWorkCount).toBe(1)
     expect(summary.capacityUsed).toBeNull()
-    expect(summary.capacityTotal).toBe(6)
+    expect(summary.capacityTotal).toBe(0)
     expect(summary.hasUnknownCapacity).toBe(true)
     expect(runnerSummaryText(summary)).toContain('1 capacity full')
     expect(runnerSummaryText(summary)).toContain('1 active work')
+  })
+
+  it('keeps available capacity separate from offline historical capacity', () => {
+    const source = {
+      observedAt: '2026-09-25T12:00:00Z',
+      inventory: { state: 'ready', nextActions: [] },
+      runners: [
+        makeRow({ capacity: { used: 0, total: 8 } }),
+        ...Array.from({ length: 6 }, (_, index) =>
+          makeRow({
+            identity: { ...makeRow().identity, id: `offline-${index}` },
+            presence: { state: 'offline', lastObservedAt: null },
+            admission: { state: 'blocked', reasonCodes: ['presence-offline'] },
+            capacity: { used: null, total: index === 0 ? 4 : 1 },
+          }),
+        ),
+      ],
+    }
+    const summary = deriveRunnerSummary(source)
+
+    expect(summary.fleet).toEqual({
+      state: 'capacity-available',
+      eligiblePool: { used: 0, total: 8 },
+      excludedGroups: [{ kind: 'offline', count: 6, configuredSlots: 9 }],
+      reasons: [],
+      observedAt: '2026-09-25T12:00:00Z',
+    })
+    expect(summary.hasAdmissibleCapacity).toBe(true)
+    expect(runnerSummaryText(summary)).toContain('0/8 occupied')
+    expect(runnerSummaryText(summary)).toContain('6 offline / 9 configured slots, occupancy unknown')
+    expect(runnerSummaryText(summary)).not.toContain('unknown/17')
+  })
+
+  it('reports capacity full when every otherwise eligible Runner is full', () => {
+    const summary = deriveRunnerSummary([
+      makeRow({
+        admission: { state: 'blocked', reasonCodes: ['capacity-full'] },
+        capacity: { used: 2, total: 2 },
+      }),
+    ])
+
+    expect(summary.fleet.state).toBe('capacity-full')
+    expect(summary.fleet.eligiblePool).toEqual({ used: 2, total: 2 })
+    expect(summary.hasAdmissibleCapacity).toBe(false)
+  })
+
+  it('reports all offline as blocked with separately configured capacity', () => {
+    const summary = deriveRunnerSummary([
+      makeRow({
+        presence: { state: 'offline', lastObservedAt: null },
+        admission: { state: 'blocked', reasonCodes: ['presence-offline'] },
+        capacity: { used: null, total: 8 },
+      }),
+    ])
+
+    expect(summary.fleet.state).toBe('admission-blocked')
+    expect(summary.fleet.excludedGroups).toEqual([{ kind: 'offline', count: 1, configuredSlots: 8 }])
+    expect(summary.fleet.reasons).toContain('presence-offline')
+  })
+
+  it('reports missing occupancy evidence when no known pool is available', () => {
+    const summary = deriveRunnerSummary([
+      makeRow({
+        admission: { state: 'blocked', reasonCodes: ['admission-observation-missing'] },
+        capacity: { used: null, total: 3 },
+      }),
+    ])
+
+    expect(summary.fleet.state).toBe('availability-unknown')
+    expect(summary.fleet.eligiblePool).toBeNull()
+    expect(summary.fleet.reasons).toContain('capacity-unknown')
+    expect(summary.fleet.reasons).toContain('admission-observation-missing')
+    expect(summary.capacityUsed).toBeNull()
+  })
+
+  it('reports no configured runners without fabricating an occupancy pool', () => {
+    const summary = deriveRunnerSummary([])
+
+    expect(summary.fleet.state).toBe('no-runners-configured')
+    expect(summary.fleet.eligiblePool).toBeNull()
+    expect(summary.fleet.excludedGroups).toEqual([])
   })
 })

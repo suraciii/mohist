@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { IssueHealth, IssueStatus, type Issue } from '../../../entities/issue'
@@ -121,9 +122,15 @@ function renderHeadline(runnerSummary = makeRunnerSummary(), issues?: Issue[]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[demoProject]}>
-        <FactoryStatusHeadline issues={issues} runnerSummary={runnerSummary} runnerSummaryHook={() => runnerSummary} />
-      </ProjectProvider>
+      <MemoryRouter>
+        <ProjectProvider initialProjectId="proj-1" initialProjects={[demoProject]}>
+          <FactoryStatusHeadline
+            issues={issues}
+            runnerSummary={runnerSummary}
+            runnerSummaryHook={() => runnerSummary}
+          />
+        </ProjectProvider>
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }
@@ -141,8 +148,8 @@ describe('FactoryStatusHeadline rendering', () => {
   it('renders the headline with all fields', async () => {
     renderHeadline()
 
-    expect(await screen.findByText('Admission ready')).toBeInTheDocument()
-    expect(screen.getByTestId('factory-status-runner')).toHaveTextContent('Admission ready')
+    expect(await screen.findByText('Capacity available')).toBeInTheDocument()
+    expect(screen.getByTestId('factory-status-runner')).toHaveTextContent('Capacity available')
     expect(screen.getByTestId('factory-status-in-flight')).toHaveTextContent('0')
     expect(screen.getByTestId('factory-status-awaiting-approval')).toHaveTextContent('0')
     expect(screen.getByTestId('factory-status-shipped-today')).toHaveTextContent('0')
@@ -153,7 +160,7 @@ describe('FactoryStatusHeadline rendering', () => {
     mockIssues([])
     renderHeadline()
 
-    expect(await screen.findByText('Admission ready')).toBeInTheDocument()
+    expect(await screen.findByText('Capacity available')).toBeInTheDocument()
     expect(screen.getByTestId('factory-status-in-flight')).toHaveTextContent('0')
     expect(screen.getByTestId('factory-status-awaiting-approval')).toHaveTextContent('0')
     expect(screen.getByTestId('factory-status-shipped-today')).toHaveTextContent('0')
@@ -175,7 +182,7 @@ describe('FactoryStatusHeadline rendering', () => {
       makeIssue({ status: IssueStatus.Done, health: IssueHealth.Done, completedAt: todayIso, updatedAt: todayIso }),
     ])
 
-    expect(await screen.findByText('Admission ready')).toBeInTheDocument()
+    expect(await screen.findByText('Capacity available')).toBeInTheDocument()
     expect(screen.getByTestId('factory-status-in-flight')).toHaveTextContent('2')
     expect(screen.getByTestId('factory-status-awaiting-approval')).toHaveTextContent('1')
     expect(screen.getByTestId('factory-status-shipped-today')).toHaveTextContent('1')
@@ -203,18 +210,48 @@ describe('FactoryStatusHeadline rendering', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="proj-1" initialProjects={[demoProject]}>
-          <FactoryStatusHeadline
-            issues={[]}
-            runnerSummary={makeRunnerSummary()}
-            runnerSummaryHook={() => makeRunnerSummary()}
-          />
-        </ProjectProvider>
+        <MemoryRouter>
+          <ProjectProvider initialProjectId="proj-1" initialProjects={[demoProject]}>
+            <FactoryStatusHeadline
+              issues={[]}
+              runnerSummary={makeRunnerSummary()}
+              runnerSummaryHook={() => makeRunnerSummary()}
+            />
+          </ProjectProvider>
+        </MemoryRouter>
       </QueryClientProvider>,
     )
 
-    expect(screen.getByTestId('factory-status-runner')).toHaveTextContent('Admission ready')
+    expect(screen.getByTestId('factory-status-runner')).toHaveTextContent('Capacity available')
     expect(screen.getByTestId('factory-status-in-flight')).toHaveTextContent('0')
+  })
+
+  it('keeps an online ready pool available while offline capacity is excluded', () => {
+    const availableRunner = makeRunner({ capacity: { used: 0, total: 8 } })
+    const offlineRunners = Array.from({ length: 6 }, (_, index) =>
+      makeRunner({
+        identity: { ...makeRunner().identity, id: `offline-${index}` },
+        presence: { state: 'offline', lastObservedAt: null },
+        admission: { state: 'blocked', reasonCodes: ['presence-offline'] },
+        capacity: { used: null, total: index === 0 ? 4 : 1 },
+      }),
+    )
+    const summary = deriveRunnerSummary({
+      observedAt: '2026-09-25T12:00:00Z',
+      inventory: { state: 'ready', nextActions: [] },
+      runners: [availableRunner, ...offlineRunners],
+    })
+
+    renderHeadline(summary)
+
+    expect(screen.getByTestId('factory-status-runner')).toHaveTextContent('Capacity available')
+    expect(screen.getByTestId('factory-status-runner-capacity')).toHaveTextContent('0/8 occupied')
+    expect(screen.getByTestId('factory-status-runner-facts')).toHaveTextContent(
+      '6 offline / 9 configured slots, occupancy unknown',
+    )
+    expect(screen.getByTestId('factory-status-runner-facts')).not.toHaveTextContent('unknown/17')
+    expect(screen.getByText('Observed 2026-09-25T12:00:00Z')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Inspect Runner reasons' })).toHaveAttribute('href', '/runners')
   })
 })
 
@@ -265,9 +302,11 @@ describe('FactoryStatusHeadline today-cost', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="proj-1" initialProjects={[demoProject]}>
-          <FactoryStatusHeadline todayCost={makeTodayCost({ amount: 0.5, currency: 'EUR', sampleCount: 1 })} />
-        </ProjectProvider>
+        <MemoryRouter>
+          <ProjectProvider initialProjectId="proj-1" initialProjects={[demoProject]}>
+            <FactoryStatusHeadline todayCost={makeTodayCost({ amount: 0.5, currency: 'EUR', sampleCount: 1 })} />
+          </ProjectProvider>
+        </MemoryRouter>
       </QueryClientProvider>,
     )
 
@@ -288,7 +327,7 @@ describe('FactoryStatusHeadline today-cost', () => {
     renderHeadline()
 
     expect(await screen.findByText('$1.25')).toBeInTheDocument()
-    expect(screen.getByTestId('factory-status-runner')).toHaveTextContent('Admission ready')
+    expect(screen.getByTestId('factory-status-runner')).toHaveTextContent('Capacity available')
     expect(screen.getByTestId('factory-status-in-flight')).toHaveTextContent('1')
     expect(screen.getByTestId('factory-status-awaiting-approval')).toHaveTextContent('1')
     expect(screen.getByTestId('factory-status-shipped-today')).toHaveTextContent('1')

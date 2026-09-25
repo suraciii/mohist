@@ -164,7 +164,7 @@ public sealed class DoctorCheckService : IScopedService
         }
         catch (Exception ex)
         {
-            return Fail(name, $"Unable to read {name} facts: {ex.Message}", $"Repair the {name} fact source and run mo doctor again.");
+            return Fail(name, $"Unable to read {name} facts: {ex.Message}", $"Repair the {name} fact source, then rerun the doctor check.");
         }
     }
 
@@ -174,7 +174,7 @@ public sealed class DoctorCheckService : IScopedService
         var distinct = known.Select(pair => pair.Value!).Distinct(StringComparer.Ordinal).ToArray();
         return distinct.Length <= 1
             ? new DoctorCheck("revision-alignment", "ok", "Known component revisions are aligned", null)
-            : Fail("revision-alignment", $"Component revisions differ: {string.Join(", ", known.Select(pair => $"{pair.Key}={pair.Value}"))}", "Deploy the same revision to CLI, Server, Runner, and Slack, then run mo doctor again.");
+            : Fail("revision-alignment", $"Component revisions differ: {string.Join(", ", known.Select(pair => $"{pair.Key}={pair.Value}"))}", "Deploy the same revision to CLI, Server, Runner, and Slack, then rerun the doctor check.");
     }
 
     private static DoctorCheck EvaluateMigrations(bool current) =>
@@ -185,12 +185,12 @@ public sealed class DoctorCheckService : IScopedService
     private static DoctorCheck EvaluateVerification(IReadOnlyList<string> missing) =>
         missing.Count == 0
             ? new DoctorCheck("verification-command", "ok", "All Projects have a verification command", null)
-            : Fail("verification-command", $"Projects missing verification commands: {string.Join(", ", missing)}", "Set a verification command for each listed Project with mo project set-verification-command.");
+            : Fail("verification-command", $"Projects missing verification commands: {string.Join(", ", missing)}", "For each Project listed in the diagnostic details, choose its real verification command, then follow mo project workflow verification set --help to set it.");
 
     private static DoctorCheck EvaluateCatalog(IReadOnlyList<string> incomplete) =>
         incomplete.Count == 0
             ? new DoctorCheck("model-catalog", "ok", "All discovered runtime catalogs are complete", null)
-            : Fail("model-catalog", $"Runtime catalogs are empty or incomplete: {string.Join(", ", incomplete)}", "Reconnect or refresh the affected Runner runtime catalogs, then run mo doctor again.");
+            : Fail("model-catalog", $"Runtime catalogs are empty or incomplete: {string.Join(", ", incomplete)}", "Reconnect or refresh the affected Runner runtime catalogs, then rerun the doctor check.");
 
     private static DoctorCheck Fail(string name, string detail, string nextAction) =>
         new(name, "fail", detail, nextAction);

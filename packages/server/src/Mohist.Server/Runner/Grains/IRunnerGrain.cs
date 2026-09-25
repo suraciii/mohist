@@ -513,4 +513,7 @@ public sealed record RunnerActiveWorkItem(
     [property: Id(6)] WorkIssueRef? Issue = null,
     [property: Id(7)] DateTimeOffset? TakenAt = null,
     [property: Id(8)] string? ActionAttemptId = null,
-    [property: Id(9)] bool IsAgentWork = false);
+    [property: Id(9)] bool IsAgentWork = false,
+    [property: Id(10)] string? AgentSessionId = null,
+    [property: Id(11)] string? AgentTurnId = null,
+    [property: Id(12)] string? ProcessGeneration = null);

@@ -24,7 +24,10 @@ public static class AgentStatusHandlers
 
         var runnerSnapshot = await runnerStatus.GetGlobalRunnersAsync(ct);
         var runnerAvailability = RunnerStatusService.ProjectAvailability(runnerSnapshot);
-        var activeAgents = await projection.ListActiveAgentsResultAsync(project.Id, ct);
+        var activeAgents = await projection.ListActiveAgentsResultAsync(
+            project.Id,
+            ct: ct,
+            runnerSnapshot: runnerSnapshot);
         scope?.AddCandidates(activeAgents.Candidates);
         scope?.AddProcessed(activeAgents.ActiveAgents.Count);
 
@@ -54,6 +57,7 @@ public static class AgentStatusHandlers
             limit,
             waiting: waiting,
             capacity: capacity,
+            runnerSnapshot: runnerSnapshot,
             ct: ct);
         var scope = RequestWorkScope.Current;
         scope?.AddCandidates(activity.Amplification.Candidates);

@@ -96,6 +96,7 @@ async function mockRunnerApi(page: Page, runners: unknown[] = [offlineRunner, li
     const path = url.pathname.replace(/^\/api/, '')
     if (route.request().method() !== 'GET')
       return route.fulfill({ status: 404, json: { success: false, error: 'Unhandled method' } })
+    if (path === '/auth/session') return route.fulfill({ json: response(null) })
     if (path === '/projects') return route.fulfill({ json: response([]) })
     if (path === '/runners') {
       return route.fulfill({

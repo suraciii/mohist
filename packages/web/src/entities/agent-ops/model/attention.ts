@@ -22,25 +22,34 @@ export function isIssueAttentionItem(item: AttentionItem): item is IssueAttentio
 }
 
 function runnerAttentionItem(summary: RunnerStatusSummary): Exclude<AttentionItem, IssueAttentionItem> {
-  if (summary.rows.length === 0) {
-    return { kind: 'runner-unavailable', label: 'Runner unavailable', detail: 'No Runner definitions.' }
+  switch (summary.fleet.state) {
+    case 'no-runners-configured':
+      return { kind: 'runner-unavailable', label: 'Runner unavailable', detail: 'No Runner definitions.' }
+    case 'capacity-full':
+      return { kind: 'runner-capacity-limited', label: 'Runner capacity full', detail: runnerSummaryText(summary) }
+    case 'admission-blocked': {
+      const hasReason = (reason: string) =>
+        summary.fleet.reasons.includes(reason) || summary.rows.some((row) => row.admission.reasonCodes.includes(reason))
+      if (
+        hasReason('draining') ||
+        summary.drainingCount > 0 ||
+        summary.rows.some((row) => row.drain?.active === true)
+      ) {
+        return { kind: 'runner-draining', label: 'Runner draining', detail: runnerSummaryText(summary) }
+      }
+      if (hasReason('control-disconnected') || summary.disconnectedCount > 0) {
+        return { kind: 'runner-disconnected', label: 'Runner disconnected', detail: runnerSummaryText(summary) }
+      }
+      if (hasReason('presence-offline') || summary.offlineCount > 0) {
+        return { kind: 'runner-offline', label: 'Runner offline', detail: runnerSummaryText(summary) }
+      }
+      return { kind: 'runner-admission-blocked', label: 'Runner admission blocked', detail: runnerSummaryText(summary) }
+    }
+    case 'availability-unknown':
+      return { kind: 'runner-unavailable', label: 'Runner availability unknown', detail: runnerSummaryText(summary) }
+    case 'capacity-available':
+      return { kind: 'runner-admission-blocked', label: 'Runner admission blocked', detail: runnerSummaryText(summary) }
   }
-  if (summary.offlineCount > 0) {
-    return { kind: 'runner-offline', label: 'Runner offline', detail: runnerSummaryText(summary) }
-  }
-  if (summary.disconnectedCount > 0) {
-    return { kind: 'runner-disconnected', label: 'Runner control disconnected', detail: runnerSummaryText(summary) }
-  }
-  if (summary.drainingCount > 0) {
-    return { kind: 'runner-draining', label: 'Runner draining', detail: runnerSummaryText(summary) }
-  }
-  if (summary.fullCount > 0) {
-    return { kind: 'runner-capacity-limited', label: 'Runner capacity full', detail: runnerSummaryText(summary) }
-  }
-  if (summary.blockedCount > 0) {
-    return { kind: 'runner-admission-blocked', label: 'Runner admission blocked', detail: runnerSummaryText(summary) }
-  }
-  return { kind: 'runner-admission-blocked', label: 'Runner admission blocked', detail: runnerSummaryText(summary) }
 }
 
 export function deriveAttentionItems(
@@ -50,6 +59,9 @@ export function deriveAttentionItems(
 ): AttentionItem[] {
   const items: AttentionItem[] = []
   const seen = new Set<string>()
+  const runnerAffectsActiveWorkflow = issues.some(
+    (issue) => issue.status === IssueStatus.InProgress && issue.health !== IssueHealth.Blocked,
+  )
   for (const issue of issues) {
     const issueKey = `${issue.projectId}:${issue.number}`
     if (seen.has(issueKey)) continue
@@ -59,13 +71,10 @@ export function deriveAttentionItems(
       items.push(item)
     }
   }
-  const runnerAffectsActiveWorkflow = issues.some(
-    (issue) => issue.status === IssueStatus.InProgress && issue.health === IssueHealth.Active,
-  )
   if (runnerSummary && runnerAffectsActiveWorkflow) {
     if (runnerSummary.isError !== true && runnerSummary.isLoading !== true) {
       const item = runnerAttentionItem(runnerSummary)
-      if (runnerSummary.blockedCount > 0 || runnerSummary.rows.length === 0) items.push(item)
+      if (runnerSummary.fleet.state !== 'capacity-available') items.push(item)
     }
   } else if (agentStatus.runnerAvailable === false && runnerAffectsActiveWorkflow) {
     items.push({

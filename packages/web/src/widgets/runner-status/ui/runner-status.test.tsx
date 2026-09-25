@@ -50,7 +50,7 @@ describe('RunnerSummary', () => {
         <RunnerSummary summary={makeSummary([row])} />
       </MemoryRouter>,
     )
-    expect(screen.getByText('Runner admission blocked')).toBeInTheDocument()
+    expect(screen.getByText('Capacity full')).toBeInTheDocument()
     expect(screen.getByText(/0 active works/)).toBeInTheDocument()
     expect(screen.queryByText(/Runner (idle|busy)/i)).not.toBeInTheDocument()
   })
@@ -78,6 +78,23 @@ describe('RunnerSummary', () => {
     expect(screen.getByText('Install and start the first Runner.')).toBeInTheDocument()
     expect(screen.getByText('mo install runner --repo-root <path>')).toBeInTheDocument()
     expect(screen.queryByText(/start the installed/i)).not.toBeInTheDocument()
+  })
+  it('shows the observed fleet snapshot and a link to inspect Runner reasons', () => {
+    render(
+      <MemoryRouter>
+        <RunnerSummary
+          summary={deriveRunnerSummary({
+            observedAt: '2026-09-25T12:00:00Z',
+            inventory: { state: 'ready', nextActions: [] },
+            runners: [makeRow({ capacity: { used: 0, total: 8 } })],
+          })}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('Capacity available')).toBeInTheDocument()
+    expect(screen.getByText('Observed 2026-09-25T12:00:00Z')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Inspect Runner reasons/ })).toBeInTheDocument()
   })
 })
 

@@ -338,8 +338,6 @@ For a long-running Runner managed as a service instead of foreground
 
 ## Implementation Gaps
 
-- Fleet summaries can let offline records determine the overall admission
-  label and combine their unknown occupancy with eligible capacity.
 - Original-outcome recovery is not uniform for Follow-up, Stop, Session
   commands, and Workspace removal when the connection drops after delivery.
 - Workflow terminal status reconciles after a lost notification, but other live

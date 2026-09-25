@@ -35,7 +35,7 @@ public abstract class WorkflowActivityHistoryTestSupport : IAsyncLifetime
     }
 
     protected WorkflowActivityQuerier CreateQuerier(AgentSessionQuery? sessionQuery = null) =>
-        new(DbFactory, WorkflowStatuses, sessionQuery ?? SessionQuery);
+        new(DbFactory, WorkflowStatuses, sessionQuery ?? SessionQuery, TimeProvider);
 
     private sealed class TestDbContextFactory(DbContextOptions<MohistDbContext> options)
         : IDbContextFactory<MohistDbContext>

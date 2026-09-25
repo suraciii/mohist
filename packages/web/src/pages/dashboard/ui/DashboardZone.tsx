@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-export type DashboardZoneId = 'pulse' | 'digest'
+export type DashboardZoneId = 'pulse' | 'needs-verification' | 'digest'
 
 interface DashboardZoneProps {
   id: DashboardZoneId

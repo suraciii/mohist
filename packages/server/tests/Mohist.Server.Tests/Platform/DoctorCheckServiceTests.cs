@@ -62,6 +62,25 @@ public sealed class DoctorCheckServiceTests
     }
 
     [Fact]
+    public void Evaluate_MissingVerificationCommands_ProvidesCanonicalRecoveryCommand()
+    {
+        var check = DoctorCheckService.Evaluate(new DoctorFactSnapshot(
+            new DoctorRevisionFacts(new Dictionary<string, string?> { ["server"] = "r1" }),
+            true,
+            ["alpha", "beta"],
+            []))
+            .Single(result => result.Name == "verification-command");
+
+        Assert.Equal("fail", check.Status);
+        Assert.Contains("alpha", check.Detail);
+        Assert.Contains("beta", check.Detail);
+        Assert.Contains("Project listed in the diagnostic details", check.NextAction);
+        Assert.Contains("choose its real verification command", check.NextAction);
+        Assert.Contains("mo project workflow verification set --help", check.NextAction);
+        Assert.DoesNotContain("set-verification-command", check.NextAction);
+    }
+
+    [Fact]
     public async Task GetChecksAsync_SourceFailure_DoesNotSuppressOtherChecks()
     {
         var source = new ThrowingRevisionSource();

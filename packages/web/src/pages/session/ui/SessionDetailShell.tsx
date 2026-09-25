@@ -321,6 +321,13 @@ export function SessionDetailShell({
       <div className="flex items-center justify-center flex-1">
         <div className="text-center space-y-3">
           <div className="text-muted-foreground text-lg">Session not found</div>
+          <Link
+            to={backPath}
+            data-testid="session-not-found-back-link"
+            className="inline-flex text-sm text-blue-600 hover:text-blue-800 hover:underline"
+          >
+            Back to {backLabel}
+          </Link>
         </div>
       </div>
     )

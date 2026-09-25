@@ -299,7 +299,8 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
                 draining,
                 updateInterruptId,
                 info?.ConnectionGeneration,
-                status?.DispatchObservation);
+                status?.DispatchObservation,
+                status?.DispatchObservation?.ProcessGeneration);
         var connectionId = _connectionTracker.GetConnectionId(definition.Id);
         var connectionGeneration = _connectionTracker.GetConnectionGeneration(definition.Id);
         var connected = connectionId is not null;
@@ -354,7 +355,8 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
                 reasonCodes,
                 runtimes,
                 capacity),
-            environment);
+            environment,
+            runtime?.ProcessGeneration);
     }
 
     private async Task<RunnerCredentialStatus> ReadCredentialStatusAsync(
@@ -726,7 +728,10 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
                 work.Title,
                 work.Issue is null
                     ? null
-                    : new RunnerActiveWorkIssueView(work.Issue.ProjectId, work.Issue.IssueNumber)));
+                    : new RunnerActiveWorkIssueView(work.Issue.ProjectId, work.Issue.IssueNumber),
+                work.AgentSessionId,
+                work.AgentTurnId,
+                work.ProcessGeneration));
         }
         return views;
     }

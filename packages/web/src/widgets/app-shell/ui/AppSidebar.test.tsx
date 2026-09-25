@@ -359,3 +359,28 @@ describe('AppSidebar unread inbox count badge', () => {
     expect(screen.queryByTestId('nav-inbox-badge')).not.toBeInTheDocument()
   })
 })
+describe('AppSidebar fleet summary', () => {
+  it('shows a linked fleet summary with the source observation time', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    queryClient.setQueryData(['runners'], {
+      observedAt: '2026-09-25T12:00:00Z',
+      inventory: { state: 'ready', nextActions: [] },
+      runners: [],
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+          <MemoryRouter initialEntries={['/demo']}>
+            <SidebarProvider>
+              <AppSidebar onCreateIssue={vi.fn()} />
+            </SidebarProvider>
+          </MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(screen.getByText('No Runners configured')).toBeInTheDocument()
+    expect(screen.getByText('Observed 2026-09-25T12:00:00Z')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Inspect Runner reasons/ })).toBeInTheDocument()
+  })
+})

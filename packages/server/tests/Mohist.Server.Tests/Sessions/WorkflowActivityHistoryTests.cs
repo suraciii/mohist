@@ -278,7 +278,13 @@ public sealed class WorkflowActivityHistoryTests : WorkflowActivityHistoryTestSu
                     BoundAt: now,
                     LastDataAt: now,
                     AgentRuntimeSessionId: id,
-                    Activity: AgentSessionActivity.Active),
+                    Activity: AgentSessionActivity.Active,
+                    Turns: [new AgentTurnRecord(
+                        $"turn-{id}",
+                        1,
+                        [$"input-{id}"],
+                        AgentTurnStatus.Executing,
+                        UpdatedAt: now)]),
                 Metadata = new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
@@ -405,7 +411,15 @@ public sealed class WorkflowActivityHistoryTests : WorkflowActivityHistoryTestSu
             Status = new AgentSessionStatusSnapshot(
                 CreatedAt: now,
                 BoundAt: now,
-                AgentRuntimeSessionId: sessionId),
+                LastDataAt: now,
+                AgentRuntimeSessionId: sessionId,
+                Activity: AgentSessionActivity.Active,
+                Turns: [new AgentTurnRecord(
+                    $"turn-{sessionId}",
+                    1,
+                    [$"input-{sessionId}"],
+                    AgentTurnStatus.Executing,
+                    UpdatedAt: now)]),
             Metadata = new AgentSessionMetadata(labels),
         };
         await using var db = await DbFactory.CreateDbContextAsync();
@@ -443,7 +457,15 @@ public sealed class WorkflowActivityHistoryTests : WorkflowActivityHistoryTestSu
                 Status = new AgentSessionStatusSnapshot(
                     CreatedAt: now.AddTicks(index),
                     BoundAt: now.AddTicks(index),
-                    AgentRuntimeSessionId: id),
+                    LastDataAt: now.AddTicks(index),
+                    AgentRuntimeSessionId: id,
+                    Activity: AgentSessionActivity.Active,
+                    Turns: [new AgentTurnRecord(
+                        $"turn-{id}",
+                        1,
+                        [$"input-{id}"],
+                        AgentTurnStatus.Executing,
+                        UpdatedAt: now.AddTicks(index))]),
                 Metadata = new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     [AgentSessionQueryMetadataKeys.ProjectId] = projectId,

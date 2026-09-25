@@ -127,7 +127,9 @@ public class AgentSessionRecordAccessorTests
     [InlineData("not-a-number")]
     [InlineData("12.5")]
     [InlineData("12abc")]
-    public void IssueNumber_AbsentOrNonNumeric_ReturnsZero(string? issueLabel)
+    [InlineData("0")]
+    [InlineData("-1")]
+    public void IssueNumber_AbsentOrNonPositive_ReturnsNull(string? issueLabel)
     {
         var recordLabels = new Dictionary<string, string>(StringComparer.Ordinal);
         var metadataLabels = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -136,7 +138,7 @@ public class AgentSessionRecordAccessorTests
 
         var record = BuildRecord(recordLabels, metadataLabels);
 
-        Assert.Equal(0, record.IssueNumber());
+        Assert.Null(record.IssueNumber());
     }
 
     private static AgentSessionRecord BuildRecord(

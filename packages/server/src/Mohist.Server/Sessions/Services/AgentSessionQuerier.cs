@@ -763,7 +763,7 @@ public partial class AgentSessionQuerier : IScopedService
         var agentRefs = AgentSessionContextRefs.TryBuild(record);
         var workflowIssue = record.IssueNumber();
 
-        var issueNumber = agentRefs?.IssueNumber ?? (workflowIssue > 0 ? workflowIssue : null);
+        var issueNumber = agentRefs?.IssueNumber ?? workflowIssue;
         var epicNumber = agentRefs?.EpicNumber;
         var repository = agentRefs?.Repository;
         var workspaceName = agentRefs?.WorkspaceName;
@@ -944,7 +944,7 @@ public partial class AgentSessionQuerier : IScopedService
         s.Status.AgentRuntimeSessionId,
         s.Runtime.Runtime,
         record.Label(AgentSessionQueryMetadataKeys.ProjectId),
-        issueNumber == 0 ? null : issueNumber,
+        issueNumber,
         s.Runtime.RunnerId,
         activity, record.Label(AgentSessionQueryMetadataKeys.Stage), s.Settings.Model, s.Runtime.WorkDir, null,
         s.Status.CreatedAt.ToString("o"), s.Status.BoundAt?.ToString("o"), s.Status.LastDataAt?.ToString("o"),
@@ -1003,11 +1003,11 @@ public partial class AgentSessionQuerier : IScopedService
             .ToList();
     }
 }
-
 internal sealed record TranscriptEventProjection
 {
     public long Id { get; init; }
     public long TurnId { get; init; }
+    public long TurnSequence { get; init; }
     public string SessionId { get; init; } = string.Empty;
     public long Sequence { get; init; }
     public string Type { get; init; } = string.Empty;

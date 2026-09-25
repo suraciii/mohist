@@ -12,14 +12,12 @@ import {
   ChevronDownIcon,
   FolderIcon,
   FolderGit2Icon,
-  PowerIcon,
-  PowerOffIcon,
   InboxIcon,
   BotIcon,
   SparklesIcon,
 } from 'lucide-react'
 import { useProject, useProjectPath } from '../../../entities/project'
-import { runnerSummaryText, useRunnerSummary } from '../../../entities/runner'
+import { runnerFleetLabel, runnerSummaryText, useRunnerSummary } from '../../../entities/runner'
 import { useDeleteProject } from '../../../entities/project'
 import { useUnreadInboxCount } from '../../../entities/inbox'
 import {
@@ -233,46 +231,41 @@ function ProjectSwitcher({ onNavigate }: { onNavigate?: () => void }) {
 
 function AgentStatusFooter() {
   const summary = useRunnerSummary()
-  const hasRows = summary.rows.length > 0
-  const label = summary.isLoading
-    ? 'Checking Runner status'
-    : !hasRows && summary.inventory?.state === 'first-install'
-      ? 'No Runner definitions'
-      : !hasRows || summary.isError
-        ? 'Runner status unavailable'
-        : summary.blockedCount > 0
-          ? 'Runner admission blocked'
-          : 'Runner admission ready'
-  const pct =
-    summary.capacityTotal > 0 && !summary.hasUnknownCapacity
-      ? Math.min(100, Math.round(((summary.capacityUsed ?? 0) / summary.capacityTotal) * 100))
-      : 0
+  const navigate = useNavigate()
+  const label = summary.isLoading ? 'Checking Runner status' : runnerFleetLabel(summary)
+  const pool = summary.fleet.eligiblePool
+  const pct = pool ? Math.min(100, Math.round((pool.used / pool.total) * 100)) : 0
 
   return (
-    <div className="rounded-md px-2 py-2 text-xs space-y-1.5" data-testid="runner-sidebar-summary">
-      <div className="flex items-center gap-2">
-        {hasRows && !summary.isLoading && !summary.isError && summary.blockedCount === 0 ? (
-          <PowerIcon className="size-3.5 text-green-600" />
-        ) : (
-          <PowerOffIcon className="size-3.5 text-muted-foreground" />
-        )}
-        <span className="font-medium text-sidebar-foreground">{label}</span>
-      </div>
-      <div className="text-[10px] leading-4 text-sidebar-foreground/70" data-testid="runner-sidebar-status-facts">
-        {hasRows ? runnerSummaryText(summary) : 'No Runner snapshot available'}
-      </div>
-      <div className="flex items-center justify-between text-sidebar-foreground/70">
-        <span>Capacity</span>
-        <span className="font-mono">
-          {hasRows && !summary.hasUnknownCapacity
-            ? `${summary.capacityUsed ?? 0} / ${summary.capacityTotal}`
-            : 'unknown'}
+    <button
+      type="button"
+      onClick={() => navigate('/runners')}
+      className="w-full rounded-md px-2 py-2 text-xs space-y-1.5 text-left hover:bg-sidebar-accent"
+      data-testid="runner-sidebar-summary"
+    >
+      <span className="block font-medium text-sidebar-foreground">{label}</span>
+      <span
+        className="block text-[10px] leading-4 text-sidebar-foreground/70"
+        data-testid="runner-sidebar-status-facts"
+      >
+        {runnerSummaryText(summary)}
+      </span>
+      {summary.fleet.observedAt && (
+        <time dateTime={summary.fleet.observedAt} className="block text-[10px] text-sidebar-foreground/70">
+          Observed {summary.fleet.observedAt}
+        </time>
+      )}
+      <span className="flex items-center justify-between text-sidebar-foreground/70">
+        <span>Eligible capacity</span>
+        <span className="font-mono">{pool ? `${pool.used} / ${pool.total} occupied` : 'unknown'}</span>
+      </span>
+      {pool && (
+        <span className="block h-1 rounded-full bg-sidebar-accent overflow-hidden">
+          <span className="block h-full bg-blue-500" style={{ width: `${pct}%` }} />
         </span>
-      </div>
-      <div className="h-1 rounded-full bg-sidebar-accent overflow-hidden">
-        <div className="h-full bg-blue-500 transition-all" style={{ width: `${pct}%` }} />
-      </div>
-    </div>
+      )}
+      <span className="block text-[10px] text-sidebar-foreground/70">Inspect Runner reasons</span>
+    </button>
   )
 }
 

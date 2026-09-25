@@ -95,6 +95,13 @@ function makeRunnerSummary(kind: 'draining' | 'full'): RunnerStatusSummary {
     nextActions: [],
   }
   return {
+    fleet: {
+      state: kind === 'full' ? 'capacity-full' : 'admission-blocked',
+      eligiblePool: kind === 'full' ? { used: 1, total: 1 } : null,
+      excludedGroups: [],
+      reasons: [],
+      observedAt: '2026-06-18T00:00:00.000Z',
+    },
     readyCount: 0,
     blockedCount: 1,
     onlineCount: 1,

@@ -12,6 +12,8 @@ function makeCard(overrides: Partial<SessionCard> = {}): SessionCard {
     issueStage: 'Build',
     sessionId: 'session-1',
     status: 'active',
+    executionState: 'running',
+    evidence: null,
     model: 'claude-opus-4-7',
     resolvedModel: null,
     taskDescription: 'Implement CLI active project state',
@@ -70,6 +72,36 @@ describe('CompactSessionCard', () => {
     expect(screen.getByTestId('pulse-compact-title')).toHaveTextContent('Draft implementation plan')
   })
 
+  it('deep-links a session without an issue to the session route instead of #0', () => {
+    renderCard(
+      makeCard({
+        issueNumber: null,
+        sessionId: 'session-without-issue',
+        issueTitle: 'Session',
+      }),
+    )
+
+    const card = screen.getByTestId('pulse-compact-card')
+    expect(card).toHaveAttribute('href', '/sessions/session-without-issue')
+    expect(screen.getByText('Session')).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('#0')
+  })
+
+  it('shows needs-verification state and its evidence reason without presenting it as running', () => {
+    renderCard(
+      makeCard({
+        executionState: 'needs-verification',
+        evidence: { reason: 'aged', observedAt: '2026-01-01T00:00:00Z' },
+      }),
+    )
+
+    const state = screen.getByTestId('pulse-compact-execution-state')
+    expect(state).toHaveAttribute('data-state', 'needs-verification')
+    expect(state).toHaveTextContent('Needs verification')
+    expect(state).toHaveAttribute('title', 'aged')
+    expect(screen.queryByTestId('pulse-compact-paused-dot')).toBeInTheDocument()
+  })
+
   it('falls back to task description when title is missing', () => {
     renderCard(makeCard({ title: null, taskDescription: 'Implement the foobar handler' }))
 
@@ -116,9 +148,7 @@ describe('CompactSessionCard', () => {
   })
 
   it('renders token usage and cost on a single compact line when both are present', () => {
-    renderCard(
-      makeCard({ totalTokens: 15_600, costAmount: 0.18, costCurrency: 'USD' }),
-    )
+    renderCard(makeCard({ totalTokens: 15_600, costAmount: 0.18, costCurrency: 'USD' }))
 
     const usage = screen.getByTestId('pulse-compact-usage')
     expect(usage).toHaveTextContent('15.6k tok')
@@ -126,9 +156,7 @@ describe('CompactSessionCard', () => {
   })
 
   it('renders only cost when tokens are absent', () => {
-    renderCard(
-      makeCard({ totalTokens: null, costAmount: 0.42, costCurrency: 'USD' }),
-    )
+    renderCard(makeCard({ totalTokens: null, costAmount: 0.42, costCurrency: 'USD' }))
 
     const usage = screen.getByTestId('pulse-compact-usage')
     expect(usage).toHaveTextContent('$0.42')
@@ -136,9 +164,7 @@ describe('CompactSessionCard', () => {
   })
 
   it('renders only tokens when cost is absent', () => {
-    renderCard(
-      makeCard({ totalTokens: 9_500, costAmount: null, costCurrency: null }),
-    )
+    renderCard(makeCard({ totalTokens: 9_500, costAmount: null, costCurrency: null }))
 
     const usage = screen.getByTestId('pulse-compact-usage')
     expect(usage).toHaveTextContent('9.5k tok')
@@ -146,9 +172,7 @@ describe('CompactSessionCard', () => {
   })
 
   it('omits the usage line when neither tokens nor cost are present', () => {
-    renderCard(
-      makeCard({ totalTokens: null, costAmount: null, costCurrency: null }),
-    )
+    renderCard(makeCard({ totalTokens: null, costAmount: null, costCurrency: null }))
 
     expect(screen.queryByTestId('pulse-compact-usage')).not.toBeInTheDocument()
   })

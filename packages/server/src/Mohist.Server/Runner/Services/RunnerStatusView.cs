@@ -31,7 +31,10 @@ public sealed record RunnerActiveWorkView(
     string WorkType,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? Stage = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? Title = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] RunnerActiveWorkIssueView? Issue = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] RunnerActiveWorkIssueView? Issue = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? AgentSessionId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? AgentTurnId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ProcessGeneration = null);
 
 public sealed record RunnerActiveWorkIssueView(
     string ProjectId,
@@ -48,7 +51,8 @@ public sealed record RunnerStatusEntry(
     IReadOnlyList<RunnerActiveWorkView> ActiveWorks,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] RunnerDrainStatusView? Drain,
     IReadOnlyList<RunnerNextActionView> NextActions,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] RunnerEnvironmentStatusView? Environment = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] RunnerEnvironmentStatusView? Environment = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ProcessGeneration = null);
 
 public sealed record RunnerEnvironmentStatusView(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ActiveVersion,

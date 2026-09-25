@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -5,6 +6,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Runner.Services;
 
 namespace Mohist.Server.Workflow.Services;
 
@@ -13,24 +15,41 @@ public class WorkflowActivityQuerier : IScopedService
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IWorkflowStatusReader _workflowStatuses;
     private readonly AgentSessionQuery _sessionQuery;
+    private readonly TimeProvider _timeProvider;
 
     public WorkflowActivityQuerier(
         IDbContextFactory<MohistDbContext> dbFactory,
         IWorkflowStatusReader workflowStatuses,
         AgentSessionQuery sessionQuery)
+        : this(dbFactory, workflowStatuses, sessionQuery, TimeProvider.System)
+    {
+    }
+
+    public WorkflowActivityQuerier(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        IWorkflowStatusReader workflowStatuses,
+        AgentSessionQuery sessionQuery,
+        TimeProvider timeProvider)
     {
         _dbFactory = dbFactory;
         _workflowStatuses = workflowStatuses;
         _sessionQuery = sessionQuery;
+        _timeProvider = timeProvider;
     }
 
-    public async Task<IReadOnlyList<ActiveAgentDto>> ListActiveAgentsAsync(string? projectId = null, CancellationToken ct = default)
+    public async Task<IReadOnlyList<ActiveAgentDto>> ListActiveAgentsAsync(
+        string? projectId = null,
+        CancellationToken ct = default,
+        RunnerStatusListSnapshot? runnerSnapshot = null)
     {
-        var result = await ListActiveAgentsResultAsync(projectId, ct);
+        var result = await ListActiveAgentsResultAsync(projectId, ct, runnerSnapshot);
         return result.ActiveAgents;
     }
 
-    public async Task<ActiveAgentsListResult> ListActiveAgentsResultAsync(string? projectId = null, CancellationToken ct = default)
+    public async Task<ActiveAgentsListResult> ListActiveAgentsResultAsync(
+        string? projectId = null,
+        CancellationToken ct = default,
+        RunnerStatusListSnapshot? runnerSnapshot = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         IReadOnlyList<AgentSessionRecord> sessions;
@@ -43,6 +62,11 @@ public class WorkflowActivityQuerier : IScopedService
             sessions = await _sessionQuery.ListStatusCandidatesAsync(projectId, ct);
         }
         var candidatesCount = sessions.Count;
+        var observedAt = runnerSnapshot?.ObservedAt ?? _timeProvider.GetUtcNow();
+        var runners = runnerSnapshot?.Runners
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Identity.Id))
+            .ToDictionary(entry => entry.Identity.Id, StringComparer.Ordinal)
+            ?? new Dictionary<string, RunnerStatusEntry>(StringComparer.Ordinal);
         var workflowStatuses = await LoadRunningWorkflowStatusesAsync(db, sessions, projectId, ct);
         var result = new List<ActiveAgentDto>();
 
@@ -57,10 +81,22 @@ public class WorkflowActivityQuerier : IScopedService
             var workType = record.Label(AgentSessionQueryMetadataKeys.WorkType) ?? string.Empty;
             var stage = record.Label(AgentSessionQueryMetadataKeys.Stage);
             var lastActivity = LastActivityAt(session).ToString("o");
+            var runner = runners.TryGetValue(session.Runtime.RunnerId, out var runnerEntry)
+                ? runnerEntry
+                : null;
+            var activityObservedAt = session.Status.LastDataAt is { } lastDataAt
+                ? (DateTimeOffset?)new DateTimeOffset(DateTime.SpecifyKind(lastDataAt, DateTimeKind.Utc))
+                : null;
+            var assessment = ActivityExecutionEvidencePolicy.Evaluate(
+                record,
+                observedAt,
+                runner,
+                activityObservedAt);
 
             if (string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal))
             {
-                if (session.Status.Activity != AgentSessionActivity.Active)
+                if (session.Status.Activity != AgentSessionActivity.Active
+                    || assessment.ExecutionState != "running")
                     continue;
 
                 var agentId = record.Label(GenericAgentSessionMetadata.AgentId) ?? string.Empty;
@@ -95,6 +131,10 @@ public class WorkflowActivityQuerier : IScopedService
 
             var pending = status?.PendingWork;
             if (status is null || pending is null || pending.WorkId != workId) continue;
+
+            if (assessment.ExecutionState != "running")
+                continue;
+
 
             var currentStage = status.Stages.FirstOrDefault(s => s.Stage == pending.Stage);
             var completed = currentStage?.Tasks.Count(t => string.Equals(t.Status, WorkflowActionAttemptStatus.Completed.ToString(), StringComparison.Ordinal)) ?? 0;
@@ -182,7 +222,7 @@ public class WorkflowActivityQuerier : IScopedService
     }
 }
 
-public sealed record ActiveAgentDto(string RunnerId, int IssueNumber, string ProjectId, string WorkflowRunId, string WorkId, string WorkType, string? Stage, string? Title, string SessionId, string StartedAt, string LastActivityAt, ActiveAgentProgressDto Progress, string? AgentId, string? AgentName);
+public sealed record ActiveAgentDto(string RunnerId, [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? IssueNumber, string ProjectId, string WorkflowRunId, string WorkId, string WorkType, string? Stage, string? Title, string SessionId, string StartedAt, string LastActivityAt, ActiveAgentProgressDto Progress, string? AgentId, string? AgentName);
 public sealed record ActiveAgentProgressDto(string? Stage, ActiveWorkItemDto CurrentWorkItem, TaskProgressDto? TaskProgress, string LastActivityAt);
 public sealed record ActiveWorkItemDto(string Type, string Id, string Title);
 public sealed record TaskProgressDto(int Completed, int Total);

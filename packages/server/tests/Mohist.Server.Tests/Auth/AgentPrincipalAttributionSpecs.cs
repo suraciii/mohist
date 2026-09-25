@@ -106,7 +106,7 @@ public class AgentPrincipalAttributionSpecs : AgentSessionLaunchRoutesTestSuppor
     private sealed record AgentActivitySummaryPayload(int Active, int Waiting, int Completed, int Failed, JsonElement Slots);
 
     private sealed record AgentActivityCardPayload(
-        int IssueNumber,
+        int? IssueNumber,
         string IssueTitle,
         string IssueStage,
         string? IssueRuntimeStatus,

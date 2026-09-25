@@ -17,11 +17,7 @@ export type IssueDecisionActionKind =
   | 'ask-agent'
   | 'view-transcript'
 
-export type IssueDecisionInteractionMode =
-  | 'immediate'
-  | 'confirmation'
-  | 'feedback'
-  | 'navigation'
+export type IssueDecisionInteractionMode = 'immediate' | 'confirmation' | 'feedback' | 'navigation'
 
 export interface IssueDecisionAction {
   kind: IssueDecisionActionKind
@@ -42,7 +38,10 @@ export interface IssueDecisionSessionSelection {
   transcriptPath: string
 }
 
-type TranscriptSession = Pick<WorkflowRunSession, 'sessionName' | 'activity' | 'startedAt' | 'createdAt'> & { id?: string; status?: string }
+type TranscriptSession = Pick<WorkflowRunSession, 'sessionName' | 'activity' | 'startedAt' | 'createdAt'> & {
+  id?: string
+  status?: string
+}
 
 export interface IssueDecisionContextInput {
   decision: RuntimeDecision | null
@@ -100,9 +99,7 @@ function activePriority(activity: WorkflowRunSession['activity'] | undefined): n
   return activity === 'active' ? 0 : activity === 'unknown' ? 1 : 2
 }
 
-export function selectTranscriptSession(
-  sessions: ReadonlyArray<TranscriptSession>,
-): TranscriptSession | null {
+export function selectTranscriptSession(sessions: ReadonlyArray<TranscriptSession>): TranscriptSession | null {
   if (sessions.length === 0) return null
   let best: { session: TranscriptSession; activeRank: number; ts: number } | null = null
   for (const session of sessions) {
@@ -129,9 +126,12 @@ export function selectTranscriptSession(
   return best ? best.session : null
 }
 
-function isAgentRunningOnThis(issue: IssueDecisionContextInput['issue'], agentStatus: IssueDecisionContextInput['agentStatus']): boolean {
+function isAgentRunningOnThis(
+  issue: IssueDecisionContextInput['issue'],
+  agentStatus: IssueDecisionContextInput['agentStatus'],
+): boolean {
   const activeAgents = agentStatus?.activeAgents ?? []
-  return activeAgents.some((agent: { issueNumber: number }) => agent.issueNumber === issue.number)
+  return activeAgents.some((agent) => agent.issueNumber === issue.number)
 }
 
 function buildWaitReason(input: IssueDecisionContextInput): string | null {
@@ -143,8 +143,7 @@ function buildWaitReason(input: IssueDecisionContextInput): string | null {
     return `Waiting for #${blocker.issue.number} ${blocker.issue.title}`.trim()
   }
   if (input.agentStatus?.runnerAvailable === false) {
-    return input.agentStatus.runnerMessage
-      ?? 'No runner is connected. Start a runner before this issue can run.'
+    return input.agentStatus.runnerMessage ?? 'No runner is connected. Start a runner before this issue can run.'
   }
   const capacity = input.agentStatus?.capacity
   if (capacity && capacity.max > 0 && capacity.active >= capacity.max) {
@@ -171,11 +170,7 @@ function isWorkflowClosed(issue: IssueDecisionContextInput['issue']): boolean {
   return issue.status === IssueStatus.Done || issue.status === IssueStatus.Cancelled
 }
 
-function copyWorkflowAction(
-  action: RuntimeAvailableAction,
-  primary: boolean,
-  order: number,
-): IssueDecisionAction {
+function copyWorkflowAction(action: RuntimeAvailableAction, primary: boolean, order: number): IssueDecisionAction {
   const kind = action.kind as IssueDecisionActionKind
   return {
     kind,
@@ -250,9 +245,7 @@ export function deriveIssueDecisionActions(input: IssueDecisionContextInput): {
     }
 
     orderedRuntimeKinds.forEach((kind, idx) => {
-      const runtimeAction = kind === primaryKind
-        ? decision.primary
-        : decision.actions.find((a) => a.kind === kind)
+      const runtimeAction = kind === primaryKind ? decision.primary : decision.actions.find((a) => a.kind === kind)
       if (!runtimeAction) return
       actions.push(copyWorkflowAction(runtimeAction, kind === primaryKind, idx))
     })
@@ -261,30 +254,22 @@ export function deriveIssueDecisionActions(input: IssueDecisionContextInput): {
   let order = actions.length > 0 ? actions.length : 0
   const markReadyEnabled = !!issue.isDraft && !issueArchived && !issueTerminal
   if (markReadyEnabled) {
-    actions.push(lifecycleAction(
-      'mark-ready',
-      'Mark ready',
-      true,
-      null,
-      order++,
-    ))
+    actions.push(lifecycleAction('mark-ready', 'Mark ready', true, null, order++))
   }
 
-  const closeEnabled = !issueArchived
-    && !issueTerminal
-    && !agentOnThis
-    && issue.health === IssueHealth.Active
+  const closeEnabled = !issueArchived && !issueTerminal && !agentOnThis && issue.health === IssueHealth.Active
   if (closeEnabled) {
     actions.push(lifecycleAction('close', 'Close', true, null, order++))
   }
 
-  const markDoneEnabled = !issueArchived
-    && !issueTerminal
-    && !compositeParent
-    && !agentOnThis
-    && !workflowClosed
-    && issue.status === IssueStatus.InProgress
-    && (issue.workflowStatus === 'stopped' || issue.workflowStatus === 'completed')
+  const markDoneEnabled =
+    !issueArchived &&
+    !issueTerminal &&
+    !compositeParent &&
+    !agentOnThis &&
+    !workflowClosed &&
+    issue.status === IssueStatus.InProgress &&
+    (issue.workflowStatus === 'stopped' || issue.workflowStatus === 'completed')
   if (markDoneEnabled) {
     actions.push(lifecycleAction('mark-as-done', 'Mark as done', true, null, order++))
   }
@@ -305,8 +290,8 @@ export function deriveIssueDecisionActions(input: IssueDecisionContextInput): {
     })
   }
 
-  const transcriptSession = (issue.workflowRunId ?? null) !== null
-    && input.workflowSessions.length > 0
+  const transcriptSession =
+    (issue.workflowRunId ?? null) !== null && input.workflowSessions.length > 0
       ? selectTranscriptSession(input.workflowSessions)
       : null
 
@@ -321,18 +306,18 @@ export function deriveIssueDecisionActions(input: IssueDecisionContextInput): {
       primary: false,
       destructive: false,
       mode: 'navigation',
-       to: input.projectPath(`/sessions/${encodeURIComponent(transcriptSessionId)}`),
-       order: order++,
-
+      to: input.projectPath(`/sessions/${encodeURIComponent(transcriptSessionId)}`),
+      order: order++,
     })
   }
 
-  const queuedStartEnabled = decision === null
-    && issue.status === IssueStatus.Backlog
-    && !!issue.canStart
-    && !issue.isDraft
-    && !issueArchived
-    && !issueTerminal
+  const queuedStartEnabled =
+    decision === null &&
+    issue.status === IssueStatus.Backlog &&
+    !!issue.canStart &&
+    !issue.isDraft &&
+    !issueArchived &&
+    !issueTerminal
   if (queuedStartEnabled) {
     const waitReason = buildWaitReason(input)
     const startAction: IssueDecisionAction = {
@@ -356,22 +341,24 @@ export function deriveIssueDecisionActions(input: IssueDecisionContextInput): {
   const selectedTranscriptSessionId = transcriptSession?.id ?? transcriptSession?.sessionName ?? null
 
   const sortedActions = [...actions].sort((a, b) => a.order - b.order)
-  const primary = sortedActions.find((action) => action.primary && action.enabled)
-    ?? sortedActions.find((action) => action.primary)
-    ?? sortedActions.find((action) => action.kind === 'ask-agent' || action.kind === 'view-transcript' || action.kind === 'mark-ready')
-    ?? null
+  const primary =
+    sortedActions.find((action) => action.primary && action.enabled) ??
+    sortedActions.find((action) => action.primary) ??
+    sortedActions.find(
+      (action) => action.kind === 'ask-agent' || action.kind === 'view-transcript' || action.kind === 'mark-ready',
+    ) ??
+    null
 
   return {
     actions: sortedActions,
     primary,
-     transcript: transcriptSession
-       ? {
-           sessionId: selectedTranscriptSessionId!,
-           sessionName: transcriptSession.sessionName,
-           transcriptPath: input.projectPath(`/sessions/${encodeURIComponent(selectedTranscriptSessionId!)}`),
-         }
-       : null,
-
+    transcript: transcriptSession
+      ? {
+          sessionId: selectedTranscriptSessionId!,
+          sessionName: transcriptSession.sessionName,
+          transcriptPath: input.projectPath(`/sessions/${encodeURIComponent(selectedTranscriptSessionId!)}`),
+        }
+      : null,
   }
 }
 
