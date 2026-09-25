@@ -11,14 +11,48 @@ interface StatusBarProps {
 }
 
 const counts = [
-  { key: 'active', label: 'Active', color: 'bg-info-subtle text-info border border-info-border', tone: 'info' as const },
-  { key: 'queued', label: 'Queued', color: 'bg-muted text-muted-foreground border border-border', tone: 'muted' as const },
-  { key: 'waiting', label: 'Waiting', color: 'bg-warning-subtle text-warning border border-warning-border', tone: 'warning' as const },
-  { key: 'completed', label: 'Completed', color: 'bg-success-subtle text-success border border-success-border', tone: 'success' as const },
-  { key: 'failed', label: 'Failed', color: 'bg-danger-subtle text-danger border border-danger-border', tone: 'danger' as const },
+  {
+    key: 'active',
+    label: 'Active',
+    color: 'bg-info-subtle text-info border border-info-border',
+    tone: 'info' as const,
+  },
+  {
+    key: 'queued',
+    label: 'Queued',
+    color: 'bg-muted text-muted-foreground border border-border',
+    tone: 'muted' as const,
+  },
+  {
+    key: 'waiting',
+    label: 'Waiting',
+    color: 'bg-warning-subtle text-warning border border-warning-border',
+    tone: 'warning' as const,
+  },
+  {
+    key: 'completed',
+    label: 'Completed',
+    color: 'bg-success-subtle text-success border border-success-border',
+    tone: 'success' as const,
+  },
+  {
+    key: 'failed',
+    label: 'Failed',
+    color: 'bg-danger-subtle text-danger border border-danger-border',
+    tone: 'danger' as const,
+  },
 ] as const
 
-export function StatusBar({ active, waiting, completed, failed, activeSlots, maxSlots, queued, children }: StatusBarProps) {
+export function StatusBar({
+  active,
+  waiting,
+  completed,
+  failed,
+  activeSlots,
+  maxSlots,
+  queued,
+  children,
+}: StatusBarProps) {
   const values = { active, queued: queued ?? 0, waiting, completed, failed }
   const visible = counts.filter(({ key }) => key !== 'queued' || queued != null)
 

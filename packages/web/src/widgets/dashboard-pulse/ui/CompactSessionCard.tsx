@@ -220,9 +220,7 @@ export function executionEvidenceLine(
 ): string | null {
   if (state !== 'needs-verification' || !evidence) return null
   const reason = EVIDENCE_REASON_LABELS[evidence.reason] ?? evidence.reason
-  return evidence.observedAt
-    ? `${reason} evidence · last evidence ${evidence.observedAt}`
-    : `${reason} evidence`
+  return evidence.observedAt ? `${reason} evidence · last evidence ${evidence.observedAt}` : `${reason} evidence`
 }
 
 function issueAttentionTreatment(item: IssueAttentionItem): {

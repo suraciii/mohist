@@ -42,10 +42,7 @@ export function PulseZone({
   const { projectId } = useProject()
   const { data: fetchedIssues } = useIssues(projectId ? { projectId } : undefined)
   const { data: fetchedAgentStatus } = useAgentStatus()
-  const {
-    activeCards,
-    needsVerificationCards = [],
-  } = activityCardsHook()
+  const { activeCards, needsVerificationCards = [] } = activityCardsHook()
   const sessionCards = useMemo(
     () =>
       needsVerificationOnly

@@ -5,7 +5,11 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { ProjectProvider } from '../../../entities/project'
 import { useUnifiedSessionDataSource, type UnifiedSessionDataSourceDependencies } from './useUnifiedSessionDataSource'
-import type { AgentSessionTranscriptResponse, SessionFollowupResult, UnifiedSessionSummaryDto } from '../../../entities/coder-session'
+import type {
+  AgentSessionTranscriptResponse,
+  SessionFollowupResult,
+  UnifiedSessionSummaryDto,
+} from '../../../entities/coder-session'
 import type { TurnControlResult } from '../../../entities/agent'
 import { ApiError } from '../../../shared/api/client'
 
@@ -44,8 +48,16 @@ function makeSummary(overrides: Partial<UnifiedSessionSummaryDto> = {}): Unified
   }
 }
 
-interface CapturedFollowup { sessionId: string; text: string; attachments: string[] | undefined; idempotencyKey: string }
-interface CapturedTurnControl { sessionId: string; turnId: string }
+interface CapturedFollowup {
+  sessionId: string
+  text: string
+  attachments: string[] | undefined
+  idempotencyKey: string
+}
+interface CapturedTurnControl {
+  sessionId: string
+  turnId: string
+}
 
 let followupSequence: SessionFollowupResult[] = []
 const followupCalls: CapturedFollowup[] = []
@@ -55,9 +67,10 @@ const turnControlCalls: CapturedTurnControl[] = []
 const followupMock = {
   mutateAsync: vi.fn(async (input: CapturedFollowup): Promise<SessionFollowupResult> => {
     followupCalls.push(input)
-    const next = followupSequence.length > 0
-      ? followupSequence.shift()!
-      : { status: 'accepted' as const, inputId: 'input-1', turnId: 'turn-1' }
+    const next =
+      followupSequence.length > 0
+        ? followupSequence.shift()!
+        : { status: 'accepted' as const, inputId: 'input-1', turnId: 'turn-1' }
     return next
   }),
   isPending: false,
@@ -72,7 +85,9 @@ const turnControlMock = {
   isPending: false,
 }
 
-function makeDependencies(overrides: Partial<UnifiedSessionDataSourceDependencies> = {}): UnifiedSessionDataSourceDependencies {
+function makeDependencies(
+  overrides: Partial<UnifiedSessionDataSourceDependencies> = {},
+): UnifiedSessionDataSourceDependencies {
   return {
     useSessionTranscript: (() => ({
       turns: [],
@@ -85,7 +100,9 @@ function makeDependencies(overrides: Partial<UnifiedSessionDataSourceDependencie
       isStreaming: false,
     })) as never,
     useUnifiedSessionSummary: (() => ({ data: makeSummary(), isLoading: false, isError: false })) as never,
-    useUnifiedSessionTranscript: (() => ({ data: { turns: [], partCount: 0, lastActivityAt: null } as AgentSessionTranscriptResponse })) as never,
+    useUnifiedSessionTranscript: (() => ({
+      data: { turns: [], partCount: 0, lastActivityAt: null } as AgentSessionTranscriptResponse,
+    })) as never,
     useGenericFollowup: (() => followupMock) as never,
     useGenericTurnControl: (() => turnControlMock) as never,
     ...overrides,
@@ -126,9 +143,12 @@ function renderUnifiedHook(
 }
 
 function renderWithSummary(overrides: Partial<UnifiedSessionSummaryDto>, initialEntry?: string) {
-  return renderUnifiedHook(makeDependencies({
-    useUnifiedSessionSummary: (() => ({ data: makeSummary(overrides), isLoading: false, isError: false })) as never,
-  }), initialEntry)
+  return renderUnifiedHook(
+    makeDependencies({
+      useUnifiedSessionSummary: (() => ({ data: makeSummary(overrides), isLoading: false, isError: false })) as never,
+    }),
+    initialEntry,
+  )
 }
 
 beforeEach(() => {
@@ -210,7 +230,8 @@ describe('useUnifiedSessionDataSource — follow-up commands', () => {
   })
 
   it('discards the idempotency key after a known 4xx rejection so retry uses a fresh key', async () => {
-    const mutateAsync = vi.fn()
+    const mutateAsync = vi
+      .fn()
       .mockRejectedValueOnce(new ApiError('Conflict', 409))
       .mockResolvedValueOnce({ status: 'accepted', inputId: 'input-z', turnId: 'turn-z' })
     const deps = makeDependencies({
@@ -232,7 +253,8 @@ describe('useUnifiedSessionDataSource — follow-up commands', () => {
   })
 
   it('retains the idempotency key after a network error with an ambiguous outcome', async () => {
-    const mutateAsync = vi.fn()
+    const mutateAsync = vi
+      .fn()
       .mockRejectedValueOnce(new ApiError('Internal error', 503))
       .mockResolvedValueOnce({ status: 'accepted', inputId: 'input-z', turnId: 'turn-z' })
     const deps = makeDependencies({
@@ -265,7 +287,9 @@ describe('useUnifiedSessionDataSource — follow-up commands', () => {
       await expect(result.current.sendFollowup('Retry after rejection')).rejects.toThrow('Session is active')
     })
 
-    const invalidatedKeys = invalidateSpy.mock.calls.map((call) => JSON.stringify((call[0] as { queryKey: unknown[] }).queryKey))
+    const invalidatedKeys = invalidateSpy.mock.calls.map((call) =>
+      JSON.stringify((call[0] as { queryKey: unknown[] }).queryKey),
+    )
     expect(invalidatedKeys.some((key) => key.includes('"unified-session","proj-1","session-1"'))).toBe(true)
     expect(invalidatedKeys.some((key) => key.includes('"agent-sessions"'))).toBe(true)
   })
@@ -279,9 +303,13 @@ describe('useUnifiedSessionDataSource — follow-up commands', () => {
       await result.current.sendFollowup('Continue')
     })
 
-    const invalidatedKeys = invalidateSpy.mock.calls.map((call) => JSON.stringify((call[0] as { queryKey: unknown[] }).queryKey))
+    const invalidatedKeys = invalidateSpy.mock.calls.map((call) =>
+      JSON.stringify((call[0] as { queryKey: unknown[] }).queryKey),
+    )
     expect(invalidatedKeys.some((key) => key.includes('"unified-session","proj-1","session-1"'))).toBe(true)
-    expect(invalidatedKeys.some((key) => key.includes('"unified-session","proj-1","session-1","transcript"'))).toBe(true)
+    expect(invalidatedKeys.some((key) => key.includes('"unified-session","proj-1","session-1","transcript"'))).toBe(
+      true,
+    )
     expect(invalidatedKeys.some((key) => key.includes('"agent-sessions"'))).toBe(true)
     expect(invalidatedKeys.some((key) => key.includes('"workflow-runs"'))).toBe(true)
   })
@@ -290,7 +318,8 @@ describe('useUnifiedSessionDataSource — follow-up commands', () => {
 describe('useUnifiedSessionDataSource — turn control availability', () => {
   it('exposes the single stop handle when the current turn is queued', () => {
     const { result } = renderWithSummary({
-      activity: 'active', currentTurnId: 'turn-queued',
+      activity: 'active',
+      currentTurnId: 'turn-queued',
       turns: [{ id: 'turn-queued', sequence: 1, inputIds: [], status: 'queued' }],
     })
     expect(result.current.stop).not.toBeNull()
@@ -300,7 +329,9 @@ describe('useUnifiedSessionDataSource — turn control availability', () => {
 
   it('exposes stop for a queued turn even when the activity field is idle', () => {
     const { result } = renderWithSummary({
-      activity: 'idle', recoveryAvailable: false, currentTurnId: 'turn-queued',
+      activity: 'idle',
+      recoveryAvailable: false,
+      currentTurnId: 'turn-queued',
       turns: [{ id: 'turn-queued', sequence: 1, inputIds: [], status: 'queued' }],
     })
     expect(result.current.stop?.turnId).toBe('turn-queued')
@@ -309,7 +340,8 @@ describe('useUnifiedSessionDataSource — turn control availability', () => {
 
   it('exposes stop when the current turn is executing', () => {
     const { result } = renderWithSummary({
-      activity: 'active', currentTurnId: 'turn-running',
+      activity: 'active',
+      currentTurnId: 'turn-running',
       turns: [{ id: 'turn-running', sequence: 1, inputIds: ['input-1'], status: 'executing' }],
       inputs: [{ id: 'input-1', sequence: 1, source: 'web', acceptance: 'accepted' }],
     })
@@ -328,7 +360,9 @@ describe('useUnifiedSessionDataSource — turn control availability', () => {
 
   it('keeps recovery actions gated off when the Session has a queued or executing turn', () => {
     const { result } = renderWithSummary({
-      activity: 'active', currentTurnId: 'turn-running', recoveryAvailable: false,
+      activity: 'active',
+      currentTurnId: 'turn-running',
+      recoveryAvailable: false,
       turns: [{ id: 'turn-running', sequence: 1, inputIds: [], status: 'executing' }],
     })
     expect(result.current.recoveryAvailable).toBe(false)
@@ -352,7 +386,11 @@ describe('useUnifiedSessionDataSource — turn control availability', () => {
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
 
     act(() => {
-      result.current.stop?.mutate({ onSuccess: ({ state }) => { expect(state).toBe('cancelled') } })
+      result.current.stop?.mutate({
+        onSuccess: ({ state }) => {
+          expect(state).toBe('cancelled')
+        },
+      })
     })
 
     expect(turnControlCalls).toHaveLength(1)
@@ -382,7 +420,11 @@ describe('useUnifiedSessionDataSource — turn control availability', () => {
     let observedState: string | undefined
 
     act(() => {
-      result.current.stop?.mutate({ onSuccess: ({ state }) => { observedState = state } })
+      result.current.stop?.mutate({
+        onSuccess: ({ state }) => {
+          observedState = state
+        },
+      })
     })
 
     expect(observedState).toBe('stop-requested')
