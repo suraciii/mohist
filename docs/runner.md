@@ -119,6 +119,42 @@ and ledgers may change while it is assembled, and a later claim remains the
 final authority. Status rendering must not mutate work or treat the snapshot as
 a reservation.
 
+### Fleet summary
+
+An offline Runner can need attention while another Runner can accept work.
+Dashboard, sidebar, board warnings, and CLI summaries must not turn a partial
+outage into a claim that all dispatch is blocked.
+
+- Show **Capacity available** when at least one online Runner has ready
+  admission and known unused slots. Show other blocked or offline Runners as
+  a separate warning. This is not a promise that every Agent can execute.
+- When none qualifies, show **Capacity full** only if all otherwise eligible
+  Runners have known full capacity. If eligibility or capacity cannot be
+  established, show **Availability unknown** with the missing evidence. When
+  all Runners have known admission blockers, show **Admission blocked** with
+  those reasons. No registered Runners means **No Runners configured**.
+- Show occupied and total slots for online, admission-ready Runners with
+  known capacity. Include a Runner blocked only by `capacity-full` in this
+  pool so a full pool remains visible. Do not label occupied slots as free.
+- Show excluded Runner counts and their configured capacity separately,
+  distinguishing offline, other admission blockers, and unknown occupancy.
+  Do not count unknown occupancy as zero or add excluded capacity to the
+  currently eligible denominator. If no occupancy is known, display unknown,
+  not a fabricated zero-capacity pool.
+- Each summary must retain the snapshot's `observedAt` and a link or command
+  to inspect the underlying Runner reasons. Refreshing a page must not make
+  an old source observation fresh.
+- Agent-specific availability remains the Server's decision for that Agent's
+  Runtime, model, and concurrency requirements. Fleet capacity cannot override
+  that decision or reserve a slot.
+
+For example, one ready Runner with zero of eight slots occupied and six
+offline records with nine configured slots must show **Capacity available**,
+**0/8 occupied**, and **6 offline / 9 configured slots, occupancy unknown**.
+The primary summary must not say **Admission blocked** or **unknown/17**.
+Keeping those six records must not prevent the summary from being correct.
+Status reads must not delete, re-enroll, or otherwise repair Runner records.
+
 ## Concurrent Capacity
 
 Server gives each Runner one shared execution slot by default. At most one
@@ -302,6 +338,8 @@ For a long-running Runner managed as a service instead of foreground
 
 ## Implementation Gaps
 
+- Fleet summaries can let offline records determine the overall admission
+  label and combine their unknown occupancy with eligible capacity.
 - Original-outcome recovery is not uniform for Follow-up, Stop, Session
   commands, and Workspace removal when the connection drops after delivery.
 - Workflow terminal status reconciles after a lost notification, but other live
