@@ -15,7 +15,11 @@ public sealed class GitHubConnectionUpdateSpecs
     private const string RepoName = "hello-world";
     private readonly GitHubCommandFixture _fixture;
 
-    public GitHubConnectionUpdateSpecs(GitHubCommandFixture fixture) => _fixture = fixture;
+    public GitHubConnectionUpdateSpecs(GitHubCommandFixture fixture)
+    {
+        _fixture = fixture;
+        fixture.Comments.Reset();
+    }
     private HttpClient Client => _fixture.Client;
 
     [Fact]

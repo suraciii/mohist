@@ -30,33 +30,7 @@ public sealed partial class GitHubSyncSpecs
     public GitHubSyncSpecs(GitHubCommandFixture fixture)
     {
         _fixture = fixture;
-        fixture.Comments.Comments.Clear();
-        fixture.Comments.CreatedIssues.Clear();
-        fixture.Comments.UpdatedIssues.Clear();
-        fixture.Comments.StateLabels.Clear();
-        fixture.Comments.Closes.Clear();
-        fixture.Comments.MarkerMatches.Clear();
-        fixture.Comments.CreateFailure = null;
-        fixture.Comments.FindFailure = null;
-        fixture.Comments.ConfirmationFailure = null;
-        fixture.Comments.PostFailure = null;
-        fixture.Comments.PostThenThrow = false;
-        fixture.Comments.PostEntered = null;
-        fixture.Comments.ReleasePost = null;
-        fixture.Comments.FindEntered = null;
-        fixture.Comments.FindEnteredFilter = null;
-        fixture.Comments.ReleaseFind = null;
-        fixture.Comments.UpdateFailure = null;
-        fixture.Comments.UpdateFailures.Clear();
-        fixture.Comments.LabelFailure = null;
-        fixture.Comments.CloseFailure = null;
-        fixture.Comments.CloseThenThrow = false;
-        fixture.Comments.CloseEntered = null;
-        fixture.Comments.ReleaseClose = null;
-        fixture.Comments.CreateThenThrow = false;
-        fixture.Comments.MarkerMatchCount = 0;
-        fixture.Comments.CreateIssueNumberOverride = null;
-        fixture.Comments.Issues.Clear();
+        fixture.Comments.Reset();
     }
 
     [Fact]

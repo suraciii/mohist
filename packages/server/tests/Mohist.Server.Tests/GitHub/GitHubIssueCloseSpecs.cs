@@ -38,13 +38,7 @@ public sealed class GitHubIssueCloseSpecs
     public GitHubIssueCloseSpecs(GitHubCommandFixture fixture)
     {
         _fixture = fixture;
-        fixture.Comments.Comments.Clear();
-        fixture.Comments.StateLabels.Clear();
-        fixture.Comments.Closes.Clear();
-        fixture.Comments.ConfirmationFailure = null;
-        fixture.Comments.PostThenThrow = false;
-        fixture.Comments.CloseFailure = null;
-        fixture.Comments.CloseThenThrow = false;
+        fixture.Comments.Reset();
     }
 
     private HttpClient Client => _fixture.Client;
