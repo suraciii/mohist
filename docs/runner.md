@@ -109,8 +109,11 @@ stamps it when it accepts the poll; reading status never renews it, and a
 confirmation is retained for ten minutes after it was last named so a stale time
 stays reportable. `confirmedAt` is `null` when the Runner has not named the work
 recently, and it never confirms work owned by a different process generation.
-Consumers that need "is this work still executing" must read `confirmedAt`
-against its freshness window instead of treating a present row as fresh.
+Confirmations are observation facts, not durable state: a Server restart or a
+lost observation drops them until the next poll names the work again, and
+unknown is never confirmation. Consumers that need "is this work still
+executing" must read `confirmedAt` against its freshness window instead of
+treating a present row as fresh.
 
 Server-owned admission reason codes include `presence-offline`,
 `presence-stale`, `credential-revoked`, `credential-missing`,

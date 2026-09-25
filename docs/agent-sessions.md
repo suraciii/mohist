@@ -354,6 +354,8 @@ distinguish that record from confirmed current execution.
   confirmation is the Runner's own statement about that work — the poll
   receipt time of the last poll that named the work key — so a retained
   owner-ledger row, a continuing heartbeat, or a status read cannot renew it.
+  After a restart or a lost observation, no confirmation exists: unknown is
+  never confirmation.
 - An execution observation is fresh for five minutes after its source
   observation time, inclusive. A later read or page refresh must not renew
   that time. Missing or future source times cannot establish freshness.
