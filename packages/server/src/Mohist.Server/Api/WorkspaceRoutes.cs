@@ -282,10 +282,10 @@ public static class WorkspaceRoutes
                 return ApiResults.Conflict("Cannot clean workflow workspace while the issue workflow is active", "workspace_active");
             }
 
-            var activeAgents = await projection.ListActiveAgentsAsync(pid);
-            if (activeAgents.Any(a => a.IssueNumber == number))
+            var unsettledIssueNumbers = await projection.ListUnsettledIssueNumbersAsync(pid);
+            if (unsettledIssueNumbers.Contains(number))
             {
-                return ApiResults.Conflict("Cannot clean workflow workspace while an agent is running", "workspace_agent_running");
+                return ApiResults.Conflict("Cannot clean workflow workspace while an agent still owns work", "workspace_agent_running");
             }
 
             if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))

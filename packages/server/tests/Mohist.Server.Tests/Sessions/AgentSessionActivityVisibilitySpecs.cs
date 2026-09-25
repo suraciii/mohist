@@ -51,14 +51,15 @@ public class AgentSessionActivityVisibilitySpecs : IClassFixture<DefaultMohistIn
         var sessions = activity.GetProperty("sessions").EnumerateArray()
             .ToList();
 
+        var genericCard = Assert.Single(sessions, s => s.GetProperty("sessionId").GetString() == genericSessionId);
         var wfCard = Assert.Single(sessions, s => s.GetProperty("sessionId").GetString() == workflowSessionId);
         Assert.False(wfCard.TryGetProperty("agentId", out _), "Workflow card must not carry agentId");
         Assert.False(wfCard.TryGetProperty("agentName", out _), "Workflow card must not carry agentName");
 
-        var genericCard = Assert.Single(sessions, s => s.GetProperty("sessionId").GetString() == genericSessionId);
         Assert.Equal(agentId, genericCard.GetProperty("agentId").GetString());
         Assert.Equal(agentName, genericCard.GetProperty("agentName").GetString());
-        Assert.Equal(0, genericCard.GetProperty("issueNumber").GetInt32());
+        Assert.True(genericCard.TryGetProperty("issueNumber", out var issueNumber));
+        Assert.Equal(JsonValueKind.Null, issueNumber.ValueKind);
     }
 
     /// <summary>
@@ -107,7 +108,13 @@ public class AgentSessionActivityVisibilitySpecs : IClassFixture<DefaultMohistIn
                 BoundAt: startedAt.AddSeconds(1),
                 LastDataAt: _fixture.TimeProvider.GetUtcNow().UtcDateTime,
                 AgentRuntimeSessionId: sessionId,
-                Activity: AgentSessionActivity.Active),
+                Activity: AgentSessionActivity.Active,
+                Turns: [new AgentTurnRecord(
+                    $"turn-{sessionId}",
+                    1,
+                    [$"input-{sessionId}"],
+                    AgentTurnStatus.Executing,
+                    UpdatedAt: _fixture.TimeProvider.GetUtcNow().UtcDateTime)]),
             Metadata = new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 [AgentSessionQueryMetadataKeys.ProjectId] = projectId,

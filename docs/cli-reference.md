@@ -53,6 +53,29 @@ Help must not show internal service names, communication paths, source
 locations, historical Issues, or migration aliases. It describes the current
 product behavior of the command.
 
+## Diagnostic recovery guidance
+
+A failed diagnostic must give a usable next step rather than send the caller
+to a command that the installed product does not recognize.
+
+`mo doctor` must distinguish the failed check from its recovery action. Every
+suggested `mo` command must use the canonical command path supported by the
+same release's CLI, including its required context and arguments. If a value
+must come from the user, state what value is needed instead of presenting an
+incomplete command as ready to execute. Guidance does not execute a mutation.
+
+For a missing Project verification command, direct the user to
+`mo project workflow verification set --help`, naming the affected Projects
+and explaining that they must choose their Project's real verification command.
+Do not recommend `mo project set-verification-command` or change unrelated
+Projects automatically.
+
+Release validation must check suggested command paths and argument shapes
+against the same release's CLI parser. A help-only check must resolve the
+intended leaf, not merely print generic help. This check must not run repairs
+or require live services. Text assertions alone do not establish that the
+recovery action is usable.
+
 ## Command Language
 
 Commands have only two shapes:

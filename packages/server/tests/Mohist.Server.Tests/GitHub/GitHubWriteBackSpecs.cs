@@ -30,10 +30,7 @@ public sealed class GitHubWriteBackSpecs
     public GitHubWriteBackSpecs(GitHubCommandFixture fixture)
     {
         _fixture = fixture;
-        fixture.Comments.Comments.Clear();
-        fixture.Comments.StateLabels.Clear();
-        fixture.Comments.Closes.Clear();
-        fixture.Comments.DeliveryPrUrl = null;
+        fixture.Comments.Reset();
     }
 
     private HttpClient Client => _fixture.Client;

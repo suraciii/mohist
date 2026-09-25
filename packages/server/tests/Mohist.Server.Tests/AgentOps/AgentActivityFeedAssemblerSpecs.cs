@@ -34,7 +34,7 @@ namespace Mohist.Server.Tests.AgentOps;
 [Trait("level", "L0")]
 public sealed class AgentActivityFeedAssemblerSpecs : IClassFixture<MohistDbFixture>
 {
-    private static readonly DateTime PinnedNow = new(2026, 6, 30, 12, 0, 0, DateTimeKind.Utc);
+    private static readonly DateTime PinnedNow = TestTime.UtcDateTime;
 
     private readonly MohistDbFixture _fixture;
 
@@ -95,7 +95,7 @@ public sealed class AgentActivityFeedAssemblerSpecs : IClassFixture<MohistDbFixt
     }
 
     [Fact]
-    public async Task GetActivityAsync_GenericSessionWithoutIssueRef_KeepsZeroIssueNumberAndAgentAttribution()
+    public async Task GetActivityAsync_GenericSessionWithoutIssueRef_UsesNullableIssueAndSessionTitle()
     {
         var project = await CreateProjectAsync();
         var agentId = "agent_noIssueRef";
@@ -108,8 +108,9 @@ public sealed class AgentActivityFeedAssemblerSpecs : IClassFixture<MohistDbFixt
         var result = await assembler.GetActivityAsync(project.Id, limit: 10);
 
         var card = Assert.Single(result.Sessions, c => c.SessionId == sessionId);
-        Assert.Equal(0, card.IssueNumber);
-        Assert.Equal("Issue #0", card.IssueTitle);
+        Assert.Null(card.IssueNumber);
+        Assert.DoesNotContain("#0", card.IssueTitle);
+        Assert.Equal(sessionId, card.IssueTitle);
         Assert.Equal(agentId, card.AgentId);
         Assert.Equal(agentName, card.AgentName);
     }
@@ -362,8 +363,16 @@ public sealed class AgentActivityFeedAssemblerSpecs : IClassFixture<MohistDbFixt
             Status = new AgentSessionStatusSnapshot(
                 CreatedAt: started,
                 AgentRuntimeSessionId: sessionId,
-                LastDataAt: isActive ? started.AddSeconds(1) : null,
-                Activity: isActive ? AgentSessionActivity.Active : AgentSessionActivity.Idle),
+                LastDataAt: isActive ? started : null,
+                Activity: isActive ? AgentSessionActivity.Active : AgentSessionActivity.Idle,
+                Turns: isActive
+                    ? [new AgentTurnRecord(
+                        $"turn-{sessionId}",
+                        1,
+                        [$"input-{sessionId}"],
+                        AgentTurnStatus.Executing,
+                        UpdatedAt: started)]
+                    : null),
             Metadata = new AgentSessionMetadata(labels),
         };
 
@@ -409,7 +418,13 @@ public sealed class AgentActivityFeedAssemblerSpecs : IClassFixture<MohistDbFixt
                 CreatedAt: started,
                 AgentRuntimeSessionId: sessionId,
                 LastDataAt: started.AddSeconds(1),
-                Activity: AgentSessionActivity.Active),
+                Activity: AgentSessionActivity.Active,
+                Turns: [new AgentTurnRecord(
+                    $"turn-{sessionId}",
+                    1,
+                    [$"input-{sessionId}"],
+                    AgentTurnStatus.Executing,
+                    UpdatedAt: started.AddSeconds(1))]),
             Metadata = new AgentSessionMetadata(labels),
             PersistedActivitySummary = persisted.Normalize(),
         };

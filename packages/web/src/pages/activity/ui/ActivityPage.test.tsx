@@ -85,3 +85,34 @@ describe('Activity Runner navigation', () => {
     expect(screen.getByTestId('runner-summary-button')).not.toHaveTextContent(/idle|busy/i)
   })
 })
+
+describe('Activity status summary', () => {
+  it('counts queued work apart from confirmed running work', () => {
+    render(
+      <ProjectProvider initialProjectId={PROJECT.id} initialProjects={[PROJECT]}>
+        <MemoryRouter initialEntries={['/Payments/activity']}>
+          <Routes>
+            <Route
+              path="/:projectName/activity"
+              element={
+                <ActivityPage
+                  dependencies={{
+                    ...dependencies,
+                    activityCardsHook: () => ({
+                      ...dependencies.activityCardsHook(),
+                      statusCounts: { active: 1, queued: 2, waiting: 0, completed: 0, failed: 0 },
+                    }),
+                  }}
+                  now={Date.parse('2026-01-01T00:00:00Z')}
+                />
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </ProjectProvider>,
+    )
+
+    expect(screen.getByTestId('status-bar-active')).toHaveTextContent('Active:1')
+    expect(screen.getByTestId('status-bar-queued')).toHaveTextContent('Queued:2')
+  })
+})

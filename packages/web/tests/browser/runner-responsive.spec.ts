@@ -96,6 +96,7 @@ async function mockRunnerApi(page: Page, runners: unknown[] = [offlineRunner, li
     const path = url.pathname.replace(/^\/api/, '')
     if (route.request().method() !== 'GET')
       return route.fulfill({ status: 404, json: { success: false, error: 'Unhandled method' } })
+    if (path === '/auth/session') return route.fulfill({ json: response(null) })
     if (path === '/projects') return route.fulfill({ json: response([]) })
     if (path === '/runners') {
       return route.fulfill({
@@ -141,11 +142,13 @@ test('Runner inventory is global and works with no Projects', async ({ page }) =
 
   await expect(page.getByTestId('runners-page')).toBeVisible()
   await expect(page.getByTestId('nav-runners')).toBeVisible()
-  await expect(page.getByText(runnerId)).toBeVisible()
-  await expect(page.getByText('offline', { exact: true })).toBeVisible()
-  await expect(page.getByText('control disconnected')).toBeVisible()
-  await expect(page.getByText('admission blocked')).toHaveCount(2)
-  await expect(page.getByText('mo install runner --repo-root <path> --runner-id ' + runnerId)).toBeVisible()
+  const inventory = page.getByTestId('runners-page')
+  const rows = inventory.getByTestId('runner-row')
+  await expect(rows.first().getByText(runnerId, { exact: true })).toBeVisible()
+  await expect(rows.filter({ hasText: 'admission blocked' })).toHaveCount(2)
+  await expect(inventory.getByText('offline', { exact: true })).toBeVisible()
+  await expect(inventory.getByText('control disconnected')).toBeVisible()
+  await expect(inventory.getByText('mo install runner --repo-root <path> --runner-id ' + runnerId)).toBeVisible()
   await expect(page.getByText(/No projects yet/)).toHaveCount(0)
   await expectNoHorizontalOverflow(page)
 })

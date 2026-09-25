@@ -1,12 +1,13 @@
 import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
 import { IssueHealth, IssueStatus, WorkflowStage, type Issue } from '../../../entities/issue'
 import type { AgentStatus } from '../../../entities/agent'
+import type { ActivityCardsState, SessionCard } from '../../../entities/agent-ops'
 import type { RunnerStatusEntry } from '../../../entities/runner'
 import { useMswServer } from '../../../../tests/support/msw'
 import { issueListKeys } from '../../../entities/issue/api/query-keys'
@@ -64,9 +65,10 @@ useMswServer(
   ),
 )
 import { DashboardPage } from './DashboardPage'
-const NO_AGENT_ACTIVITY: any = {
-  activeCards: [] as unknown[],
-  activeCardByIssueNumber: new Map<number, unknown>(),
+const NO_AGENT_ACTIVITY: ActivityCardsState = {
+  activeCards: [],
+  needsVerificationCards: [],
+  activeCardByIssueNumber: new Map(),
   recentCards: [],
   waitingCards: [],
   statusCounts: { active: 0, waiting: 0, completed: 0, failed: 0 },
@@ -74,15 +76,17 @@ const NO_AGENT_ACTIVITY: any = {
   isLoading: false,
   isError: false,
 }
-let _activityCardsMock: any = { ...NO_AGENT_ACTIVITY, activeCardByIssueNumber: new Map() }
+let _activityCardsMock: ActivityCardsState = { ...NO_AGENT_ACTIVITY, activeCardByIssueNumber: new Map() }
 const queryClients = new Set<QueryClient>()
-function makeActiveCard(overrides: Record<string, unknown> = {}) {
+function makeActiveCard(overrides: Partial<SessionCard> = {}): SessionCard {
   return {
-    issueNumber: '999',
+    issueNumber: 999,
     issueTitle: 'Session-only issue',
     issueStage: 'Build',
     sessionId: 'session-only',
     status: 'active',
+    executionState: 'running',
+    evidence: null,
     model: null,
     resolvedModel: null,
     taskDescription: 'Session-only work',
@@ -102,6 +106,9 @@ function makeActiveCard(overrides: Record<string, unknown> = {}) {
     costCurrency: null,
     contextWindowUsed: null,
     contextWindowSize: null,
+    contextUsagePercent: null,
+    healthStatus: null,
+    contextUsageHistory: null,
     toolCallCount: null,
     toolErrorCount: null,
     ...overrides,
@@ -691,12 +698,11 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       await screen.findByTestId('dashboard-zone-pulse')
       expect(screen.getByTestId('dashboard-zone-pulse')).toBeInTheDocument()
     })
-
     it('renders active-production for an active session without a running issue and does not show the ready state', async () => {
       _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _issuesData = []
       const activeCard = makeActiveCard({
-        issueNumber: '999',
+        issueNumber: 999,
         issueTitle: 'Active session without issue row',
         title: 'Active session without issue row',
         sessionId: 'session-999',
@@ -716,6 +722,60 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       expect(screen.getByTestId('pulse-compact-card')).toHaveAttribute('data-issue-number', '999')
       expect(screen.getByTestId('pulse-compact-title')).toHaveTextContent('Active session without issue row')
     })
+  })
+  it('renders needs verification in a separate dashboard zone', async () => {
+    _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
+    _issuesData = []
+    const needsVerificationCard = makeActiveCard({
+      issueNumber: null,
+      sessionId: 'session-needs-verification',
+      title: 'Old telemetry',
+      executionState: 'needs-verification',
+      evidence: { reason: 'aged', observedAt: '2026-01-01T00:00:00.000Z' },
+    })
+    _activityCardsMock = {
+      ...NO_AGENT_ACTIVITY,
+      needsVerificationCards: [needsVerificationCard],
+    }
+
+    renderPage()
+
+    await screen.findByTestId('dashboard-zone-needs-verification')
+    expect(screen.queryByTestId('dashboard-zone-pulse')).not.toBeInTheDocument()
+    expect(screen.getByTestId('pulse-compact-execution-state')).toHaveTextContent('Needs verification')
+    expect(screen.getByTestId('pulse-compact-card')).toHaveAttribute(
+      'href',
+      '/demo/sessions/session-needs-verification',
+    )
+  })
+  it('keeps needs verification out of active production', async () => {
+    _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
+    _issuesData = []
+    const activeCard = makeActiveCard({
+      sessionId: 'session-running',
+      title: 'Current work',
+    })
+    const needsVerificationCard = makeActiveCard({
+      issueNumber: null,
+      sessionId: 'session-needs-verification',
+      title: 'Old telemetry',
+      executionState: 'needs-verification',
+      evidence: { reason: 'aged', observedAt: '2026-01-01T00:00:00.000Z' },
+    })
+    _activityCardsMock = {
+      ...NO_AGENT_ACTIVITY,
+      activeCards: [activeCard],
+      needsVerificationCards: [needsVerificationCard],
+      activeCardByIssueNumber: new Map([[activeCard.issueNumber!, activeCard]]),
+    }
+
+    renderPage()
+
+    const activeZone = await screen.findByTestId('dashboard-zone-pulse')
+    const needsZone = await screen.findByTestId('dashboard-zone-needs-verification')
+    expect(within(activeZone).getByText('Current work')).toBeInTheDocument()
+    expect(within(activeZone).queryByText('Old telemetry')).not.toBeInTheDocument()
+    expect(within(needsZone).getByText('Old telemetry')).toBeInTheDocument()
   })
 
   describe('test-id preservation', () => {

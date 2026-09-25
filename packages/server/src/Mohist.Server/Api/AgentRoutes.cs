@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
 using Mohist.Server.AgentOps.Services;
 using Mohist.Server.Issue.Services;
@@ -125,7 +126,7 @@ public static class AgentRoutes
 
 public sealed record AgentStatusResponse(
     bool Running,
-    int? IssueNumber,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? IssueNumber,
     IReadOnlyList<ActiveAgentDto> ActiveAgents,
     AgentCapacityResponse Capacity,
     bool RunnerAvailable,

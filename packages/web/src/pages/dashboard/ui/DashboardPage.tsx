@@ -42,7 +42,12 @@ export function DashboardPage({
     isLoading: issuesLoading,
     isError: issuesError,
   } = useIssues(projectId ? { projectId } : undefined)
-  const { activeCards, isLoading: activityLoading, isError: activityError } = activityCardsHook()
+  const {
+    activeCards,
+    needsVerificationCards = [],
+    isLoading: activityLoading,
+    isError: activityError,
+  } = activityCardsHook()
   const { completed, failed, archived } = useRecentDigest()
   const [showCreateProject, setShowCreateProject] = useState(false)
 
@@ -57,14 +62,15 @@ export function DashboardPage({
 
   const hasAttention = attentionItems.length > 0
   const hasAgentStatusActiveWork = agentStatus?.running === true || (agentStatus?.activeAgents?.length ?? 0) > 0
+  const hasNeedsVerification = needsVerificationCards.length > 0
   const hasActiveWork = runningIssues.length > 0 || activeCards.length > 0 || hasAgentStatusActiveWork
   const hasDigestItems = completed.length > 0 || failed.length > 0 || archived.length > 0
-  const hasCapacityData = runnerSummary.rows.length > 0 && runnerSummary.capacityTotal > 0
+  const hasCapacityData = runnerSummary.rows.length > 0
   const issuesResolved = fetchedIssues !== undefined || (!issuesLoading && !issuesError)
   const activityResolved = !activityLoading && !activityError
   const agentStatusResolved = agentStatus !== undefined || (!agentStatusLoading && !agentStatusError)
   const runnerStatusResolved = runnerSummary.isLoading !== true && runnerSummary.isError !== true
-  const runnerReady = runnerSummary.rows.length > 0 && runnerSummary.blockedCount === 0
+  const runnerReady = runnerSummary.hasAdmissibleCapacity
 
   const showAttentionHero = hasAttention
   const showReadyState =
@@ -75,7 +81,8 @@ export function DashboardPage({
     runnerReady &&
     runnerSummary.activeWorkCount === 0 &&
     !hasAttention &&
-    !hasActiveWork
+    !hasActiveWork &&
+    !hasNeedsVerification
 
   if (projectsLoading) {
     return null
@@ -104,11 +111,11 @@ export function DashboardPage({
       data-state={
         showAttentionHero
           ? 'has-attention'
-          : hasActiveWork
-            ? 'active-only'
-            : runnerSummary.rows.length === 0 || runnerSummary.isError
-              ? 'runner-unavailable'
-              : runnerSummary.blockedCount > 0
+          : hasNeedsVerification
+            ? 'needs-verification'
+            : hasActiveWork
+              ? 'active-only'
+              : runnerSummary.fleet.state === 'admission-blocked'
                 ? 'runner-blocked'
                 : runnerSummary.activeWorkCount > 0
                   ? 'runner-active-work'
@@ -136,6 +143,17 @@ export function DashboardPage({
               issuesOverride={fetchedIssues ?? []}
               agentStatusOverride={agentStatus ?? defaultAgentStatus}
               activityCardsHook={activityCardsHook}
+              includeNeedsVerification={false}
+            />
+          </DashboardZone>
+        )}
+        {hasNeedsVerification && (
+          <DashboardZone id="needs-verification" name="Needs verification">
+            <PulseZone
+              issuesOverride={[]}
+              agentStatusOverride={defaultAgentStatus}
+              activityCardsHook={activityCardsHook}
+              needsVerificationOnly
             />
           </DashboardZone>
         )}

@@ -159,7 +159,7 @@ public sealed record AgentSessionSummaryDto(
     [property: JsonPropertyName("workflowRunId")] string? WorkflowRunId = null);
 
 public sealed record AgentSessionInfoDto(
-    int IssueNumber,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? IssueNumber,
     string IssueTitle,
     string IssueStage,
     string SessionId,
@@ -179,7 +179,7 @@ public sealed record WorkflowSessionDto(
     [property: JsonPropertyName("runtimeSessionId")] string? AgentSessionId,
     [property: JsonPropertyName("runtime")] string? Runtime,
     string? ProjectId,
-    int? IssueNumber,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? IssueNumber,
     string? RunnerId,
     [property: JsonPropertyName("activity")] string Activity,
     string? Stage,
@@ -508,12 +508,19 @@ public sealed record ActivityDto(
     IReadOnlyList<ActivityWaitingCardDto> Waiting,
     AgentAmplificationDto Amplification);
 
-public sealed record ActivitySummaryDto(int Active, int Waiting, int Completed, int Failed, ActivitySlotUsageDto Slots);
+public sealed record ActivitySummaryDto(
+    int Active,
+    int Waiting,
+    int Completed,
+    int Failed,
+    ActivitySlotUsageDto Slots,
+    int NeedsVerification = 0,
+    int Queued = 0);
 
 public sealed record ActivitySlotUsageDto(int Active, int Max);
 
 public sealed record ActivityCardDto(
-    int IssueNumber,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? IssueNumber,
     string IssueTitle,
     string IssueStage,
     string? IssueRuntimeStatus,
@@ -531,7 +538,15 @@ public sealed record ActivityCardDto(
     string? AgentId,
     string? AgentName,
     [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
-    [property: JsonPropertyName("usage")] AgentUsageDto Usage);
+    [property: JsonPropertyName("usage")] AgentUsageDto Usage,
+    string? ExecutionState = null,
+    ActivityExecutionEvidenceDto? Evidence = null);
+
+public sealed record ActivityExecutionEvidenceDto(
+    string Reason,
+    DateTimeOffset? ObservedAt = null,
+    string? TurnId = null,
+    string? RunnerId = null);
 
 public sealed record ActivityWorkItemDto(string Type, string Id, string Title, string? Stage, string? SessionWorkType);
 public sealed record ActivityTaskProgressDto(int Completed, int Total);

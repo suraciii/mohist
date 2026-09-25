@@ -49,14 +49,20 @@ internal static class IssueTitleLookup
     }
 
     /// <summary>
-    /// Resolves a single issue title with the <c>Issue #{number}</c>
-    /// fallback. Returns the stored title verbatim when the number maps
-    /// to a non-whitespace title; otherwise returns the literal
-    /// <c>Issue #{number}</c> byte-identical to the pre-change resolver,
-    /// so list / activity-feed projections stay in lockstep.
+    /// Resolves a single Issue title. A positive Issue number uses the
+    /// stored title or the <c>Issue #{number}</c> fallback. A missing Issue
+    /// uses the supplied session title (or <c>Session</c>) and never
+    /// fabricates the sentinel <c>#0</c>.
     /// </summary>
-    internal static string Resolve(IReadOnlyDictionary<int, string> titles, int issueNumber) =>
-        titles.TryGetValue(issueNumber, out var title) && !string.IsNullOrWhiteSpace(title)
+    internal static string Resolve(
+        IReadOnlyDictionary<int, string> titles,
+        int? issueNumber,
+        string? noIssueTitle = null) =>
+        issueNumber is > 0
+        && titles.TryGetValue(issueNumber.Value, out var title)
+        && !string.IsNullOrWhiteSpace(title)
             ? title
-            : $"Issue #{issueNumber}";
+            : issueNumber is > 0
+                ? $"Issue #{issueNumber.Value}"
+                : string.IsNullOrWhiteSpace(noIssueTitle) ? "Session" : noIssueTitle;
 }

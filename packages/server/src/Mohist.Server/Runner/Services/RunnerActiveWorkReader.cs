@@ -43,7 +43,9 @@ public sealed class RunnerActiveWorkReader(
                     Issue: issue,
                     TakenAt: task.StartedAt,
                     ActionAttemptId: task.Id,
-                    IsAgentWork: false));
+                    IsAgentWork: false,
+                    AgentSessionId: task.AgentSessionId,
+                    ProcessGeneration: task.ProcessGeneration));
                 continue;
             }
 
@@ -57,7 +59,8 @@ public sealed class RunnerActiveWorkReader(
                     Stage: stage.Id,
                     Title: "Stage checks",
                     Issue: issue,
-                    TakenAt: null));
+                    TakenAt: null,
+                    ProcessGeneration: stage.ChecksProcessGeneration));
             }
         }
 
@@ -73,7 +76,10 @@ public sealed class RunnerActiveWorkReader(
                 Issue: work.IssueProjectId is not null && work.IssueNumber is not null
                     ? new WorkIssueRef(work.IssueProjectId, work.IssueNumber.Value)
                     : null,
-                TakenAt: work.RunningSince));
+                TakenAt: work.RunningSince,
+                AgentSessionId: work.AgentSessionId,
+                AgentTurnId: work.InitialTurnId,
+                ProcessGeneration: work.ClaimedProcessGeneration));
         }
 
         return activeWorks;

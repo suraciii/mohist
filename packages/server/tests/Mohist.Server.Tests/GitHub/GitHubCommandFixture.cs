@@ -60,6 +60,45 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
     public Dictionary<int, GitHubIssueSnapshot> Issues { get; } = new();
     public string? DeliveryPrUrl { get; set; }
 
+    /// <summary>
+    /// Restores every recorded fact and injected failure to its initial value.
+    /// The specs of a collection share one fixture, so a test that injects a
+    /// failure or a release barrier must not decide the outcome of a later test
+    /// class: each spec starts from this reset.
+    /// </summary>
+    public void Reset()
+    {
+        Comments.Clear();
+        CreatedIssues.Clear();
+        UpdatedIssues.Clear();
+        StateLabels.Clear();
+        Closes.Clear();
+        Issues.Clear();
+        MarkerMatches.Clear();
+        MarkerMatchCount = 0;
+        CreateFailure = null;
+        FindFailure = null;
+        ConfirmationFailure = null;
+        PostFailure = null;
+        PostThenThrow = false;
+        PostEntered = null;
+        ReleasePost = null;
+        FindEntered = null;
+        FindEnteredFilter = null;
+        ReleaseFind = null;
+        UpdateFailure = null;
+        UpdateFailures.Clear();
+        LabelFailure = null;
+        CloseFailure = null;
+        CloseThenThrow = false;
+        CloseEntered = null;
+        ReleaseClose = null;
+        CreateThenThrow = false;
+        NextGithubIssueNumber = 900;
+        CreateIssueNumberOverride = null;
+        DeliveryPrUrl = null;
+    }
+
     public Task<int> CreateIssueAsync(
         GitHubConnection connection,
         string title,

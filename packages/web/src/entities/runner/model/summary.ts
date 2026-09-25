@@ -43,28 +43,59 @@ export function runnerStatusLabels(row: RunnerStatusEntry): string[] {
   return labels
 }
 
+const RUNNER_REASON_LABELS: Record<string, string> = {
+  'admission-observation-missing': 'admission observation missing',
+  'capacity-full': 'capacity full',
+  'capacity-unknown': 'capacity unknown',
+  'control-disconnected': 'control disconnected',
+  draining: 'draining',
+  'presence-offline': 'presence offline',
+  'presence-stale': 'presence stale',
+}
+
 function countLabel(count: number, singular: string, plural = singular): string {
   return `${count} ${count === 1 ? singular : plural}`
 }
 
-export function runnerSummaryFacts(summary: RunnerStatusSummary): string[] {
-  if (summary.rows.length === 0) return []
+export function runnerFleetLabel(summary: RunnerStatusSummary): string {
+  switch (summary.fleet.state) {
+    case 'capacity-available':
+      return 'Capacity available'
+    case 'capacity-full':
+      return 'Capacity full'
+    case 'availability-unknown':
+      return 'Availability unknown'
+    case 'admission-blocked':
+      return 'Admission blocked'
+    case 'no-runners-configured':
+      return 'No Runners configured'
+  }
+}
 
-  const facts = [
-    countLabel(summary.readyCount, 'admission ready'),
-    countLabel(summary.blockedCount, 'admission blocked'),
-  ]
-  if (summary.onlineCount > 0) facts.push(countLabel(summary.onlineCount, 'online'))
-  if (summary.staleCount > 0) facts.push(countLabel(summary.staleCount, 'stale'))
-  if (summary.offlineCount > 0) facts.push(countLabel(summary.offlineCount, 'offline'))
+export function runnerSummaryFacts(summary: RunnerStatusSummary): string[] {
+  // A failed or in-flight read has no facts. Rendering derived counts would describe
+  // missing telemetry as a confirmed report of Runner state, and the fleet label
+  // already carries the read state.
+  if (summary.isError || summary.isLoading) return []
+
+  const facts: string[] = []
+  const pool = summary.fleet.eligiblePool
+  if (pool) facts.push(`${pool.used}/${pool.total} occupied`)
+  else if (summary.fleet.state === 'availability-unknown') facts.push('Occupancy unknown')
+
+  for (const group of summary.fleet.excludedGroups) {
+    const count = countLabel(group.count, group.kind === 'admission-blocked' ? 'admission blocked' : group.kind)
+    const capacity =
+      group.configuredSlots == null ? 'configured slots unknown' : `${group.configuredSlots} configured slots`
+    const occupancy = group.kind === 'offline' || group.kind === 'unknown-occupancy' ? ', occupancy unknown' : ''
+    facts.push(`${count} / ${capacity}${occupancy}`)
+  }
+
+  if (summary.fleet.reasons.length > 0) {
+    facts.push(`reasons: ${summary.fleet.reasons.map((reason) => RUNNER_REASON_LABELS[reason] ?? reason).join(', ')}`)
+  }
   if (summary.disconnectedCount > 0) facts.push(countLabel(summary.disconnectedCount, 'control disconnected'))
-  if (summary.drainingCount > 0) facts.push(countLabel(summary.drainingCount, 'draining'))
   if (summary.fullCount > 0) facts.push(countLabel(summary.fullCount, 'capacity full'))
-  facts.push(
-    summary.hasUnknownCapacity
-      ? `unknown/${summary.capacityTotal} slots`
-      : `${summary.capacityUsed ?? 0}/${summary.capacityTotal} slots`,
-  )
   facts.push(countLabel(summary.activeWorkCount, 'active work', 'active works'))
   return facts
 }

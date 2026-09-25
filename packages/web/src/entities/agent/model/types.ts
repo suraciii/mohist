@@ -8,8 +8,18 @@ export interface AgentProgress {
   lastActivityAt: string
 }
 
+export type ActivityExecutionState = 'running' | 'queued' | 'needs-verification' | 'not-running'
+
+export interface ActivityExecutionEvidence {
+  reason: string
+  observedAt?: string | null
+  turnId?: string | null
+  runnerId?: string | null
+}
+
 export interface ActiveAgentInfo {
-  issueNumber: number
+  issueNumber: number | null
+  sessionId?: string | null
   projectId: string
   progress?: AgentProgress
 }
@@ -336,12 +346,14 @@ export interface AgentActivityPreview {
 }
 
 export interface AgentActivitySession {
-  issueNumber: number
+  issueNumber: number | null
   issueTitle: string
   issueStage: string
   issueStatus: string | null
   sessionId: string
   status: string
+  executionState?: ActivityExecutionState
+  evidence?: ActivityExecutionEvidence | null
   model: string | null
   taskDescription: string | null
   createdAt: string
@@ -372,6 +384,8 @@ export interface AgentActivity {
     waiting: number
     completed: number
     failed: number
+    needsVerification?: number
+    queued?: number
     slots: {
       active: number
       max: number

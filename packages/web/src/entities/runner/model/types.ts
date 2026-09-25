@@ -174,7 +174,31 @@ export interface RunnerStatusDetailResponse {
   runner: RunnerStatusEntry
 }
 
+export type RunnerFleetSummaryState =
+  | 'capacity-available'
+  | 'capacity-full'
+  | 'availability-unknown'
+  | 'admission-blocked'
+  | 'no-runners-configured'
+
+export type RunnerExcludedGroupKind = 'offline' | 'admission-blocked' | 'unknown-occupancy'
+
+export interface RunnerExcludedGroup {
+  kind: RunnerExcludedGroupKind
+  count: number
+  configuredSlots: number | null
+}
+
+export interface RunnerFleetSummary {
+  state: RunnerFleetSummaryState
+  eligiblePool: { used: number; total: number } | null
+  excludedGroups: RunnerExcludedGroup[]
+  reasons: string[]
+  observedAt: string | null
+}
+
 export interface RunnerStatusSummary {
+  fleet: RunnerFleetSummary
   readyCount: number
   blockedCount: number
   onlineCount: number

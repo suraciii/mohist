@@ -443,7 +443,7 @@ function RunnerDetailContent({
             <Fact label="Used / total" testId="runner-detail-capacity">
               {capacity ? `${capacity.used == null ? 'unknown' : capacity.used}/${capacity.total} slots` : 'unknown'}
             </Fact>
-            <Fact label="Drain">
+            <Fact label="Drain" testId="runner-drain">
               {row.drain?.active
                 ? `${row.drain.kind}${row.drain.updateInterruptId ? ` · ${row.drain.updateInterruptId}` : ''}`
                 : 'not draining'}

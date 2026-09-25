@@ -266,14 +266,13 @@ public sealed record AgentSessionRecord(
 
     /// <summary>
     /// Reads the issue-number label (with record-first-then-metadata
-    /// fallback via <see cref="Label(string)"/>) and parses it as an
-    /// <see cref="int"/>. Returns <c>0</c> when the label is absent,
-    /// empty, whitespace, or non-numeric — matching the prior
-    /// <c>AgentSessionQuerier.IssueNumber</c> semantics (now an
-    /// instance method, no longer a querier static).
+    /// fallback via <see cref="Label(string)"/>). Invalid, absent, and
+    /// non-positive labels are treated as an absent Issue rather than being
+    /// represented by the sentinel number <c>0</c>.
     /// </summary>
-    public int IssueNumber() =>
+    public int? IssueNumber() =>
         int.TryParse(Label(AgentSessionQueryMetadataKeys.IssueNumber), out var issueNumber)
-            ? issueNumber
-            : 0;
+            && issueNumber > 0
+                ? issueNumber
+                : null;
 }

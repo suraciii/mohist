@@ -23,54 +23,74 @@ export interface PulseZoneProps {
   issuesOverride?: Issue[]
   agentStatusOverride?: AgentStatus
   activityCardsHook?: typeof useActivityCards
+  needsVerificationOnly?: boolean
+  includeNeedsVerification?: boolean
 }
 
 type ActiveRow =
   | { kind: 'issue'; issue: Issue }
   | { kind: 'session'; card: SessionCard }
-  | { kind: 'agent'; issueNumber: number | null; stage: string | null; key: string }
+  | { kind: 'agent'; issueNumber: number | null; sessionId: string | null; stage: string | null; key: string }
 
 export function PulseZone({
   issuesOverride,
   agentStatusOverride,
   activityCardsHook = useActivityCards,
+  needsVerificationOnly = false,
+  includeNeedsVerification = true,
 }: PulseZoneProps = {}) {
   const { projectId } = useProject()
   const { data: fetchedIssues } = useIssues(projectId ? { projectId } : undefined)
   const { data: fetchedAgentStatus } = useAgentStatus()
-  const { activeCards, activeCardByIssueNumber } = activityCardsHook()
+  const { activeCards, needsVerificationCards = [] } = activityCardsHook()
+  const sessionCards = useMemo(
+    () =>
+      needsVerificationOnly
+        ? needsVerificationCards
+        : includeNeedsVerification
+          ? [...activeCards, ...needsVerificationCards]
+          : activeCards,
+    [activeCards, includeNeedsVerification, needsVerificationCards, needsVerificationOnly],
+  )
+  // Index the cards this zone actually renders. A card excluded from `sessionCards`
+  // must not replace or resurrect an Issue row, or a historical unverified Session
+  // would appear as current work.
+  const cardByIssueNumber = useMemo(() => {
+    const index = new Map<number, SessionCard>()
+    for (const card of sessionCards) {
+      const issueNumber = normalizeIssueNumber(card.issueNumber)
+      if (issueNumber === null) continue
+      const existing = index.get(issueNumber)
+      if (existing && cardPriority(existing) <= cardPriority(card)) continue
+      index.set(issueNumber, card)
+    }
+    return index
+  }, [sessionCards])
   const toProjectPath = useProjectPath()
-  const agentStatus = agentStatusOverride ?? fetchedAgentStatus
+  const agentStatus = needsVerificationOnly ? undefined : (agentStatusOverride ?? fetchedAgentStatus)
 
   const activeRows = useMemo(() => {
-    const issues = issuesOverride ?? fetchedIssues ?? []
+    const issues = needsVerificationOnly ? [] : (issuesOverride ?? fetchedIssues ?? [])
     const runningIssues = issues
       .filter(isRunningIssue)
       .slice()
       .sort((a, b) => a.number - b.number)
     const runningIssueNumbers = new Set(runningIssues.map((issue) => issue.number))
-    const sessionOnlyRows = activeCards
-      .filter((card) => {
-        const issueNumber = Number(card.issueNumber)
-        return !Number.isFinite(issueNumber) || !runningIssueNumbers.has(issueNumber)
-      })
+    const sessionOnlyRows = sessionCards
+      .filter((card) => card.issueNumber === null || !runningIssueNumbers.has(card.issueNumber))
       .slice()
       .sort(compareSessionCards)
       .map((card) => ({ kind: 'session' as const, card }))
     const activeCardIssueNumbers = new Set(
-      activeCards
+      sessionCards
         .map((card) => normalizeIssueNumber(card.issueNumber))
         .filter((issueNumber): issueNumber is number => issueNumber !== null),
     )
     const coveredIssueNumbers = new Set([...runningIssueNumbers, ...activeCardIssueNumbers])
     const agentRows = deriveAgentStatusRows(agentStatus, coveredIssueNumbers)
 
-    return [
-      ...runningIssues.map((issue) => ({ kind: 'issue' as const, issue })),
-      ...sessionOnlyRows,
-      ...agentRows,
-    ]
-  }, [issuesOverride, fetchedIssues, activeCards, agentStatus])
+    return [...runningIssues.map((issue) => ({ kind: 'issue' as const, issue })), ...sessionOnlyRows, ...agentRows]
+  }, [issuesOverride, fetchedIssues, sessionCards, cardByIssueNumber, agentStatus, needsVerificationOnly])
 
   const visible = activeRows.slice(0, MAX_VISIBLE_ROWS)
   const overflow = activeRows.length - visible.length
@@ -89,12 +109,7 @@ export function PulseZone({
           <div className="flex flex-col gap-2" data-testid="pulse-card-list">
             {visible.map((row) => {
               if (row.kind === 'session') {
-                return (
-                  <CompactSessionCard
-                    key={`session-${row.card.sessionId}`}
-                    card={row.card}
-                  />
-                )
+                return <CompactSessionCard key={`session-${row.card.sessionId}`} card={row.card} />
               }
 
               if (row.kind === 'agent') {
@@ -102,6 +117,7 @@ export function PulseZone({
                   <AgentStatusRow
                     key={row.key}
                     issueNumber={row.issueNumber}
+                    sessionId={row.sessionId}
                     stage={row.stage}
                   />
                 )
@@ -109,7 +125,7 @@ export function PulseZone({
 
               const issue = row.issue
               const ownerActionItem = classifyIssueAttention(issue)
-              const card = activeCardByIssueNumber.get(issue.number)
+              const card = cardByIssueNumber.get(issue.number)
               if (card) {
                 return (
                   <CompactSessionCard
@@ -149,6 +165,9 @@ export function PulseZone({
 }
 
 function compareSessionCards(a: SessionCard, b: SessionCard): number {
+  if (a.issueNumber === null && b.issueNumber === null) return a.sessionId.localeCompare(b.sessionId)
+  if (a.issueNumber === null) return 1
+  if (b.issueNumber === null) return -1
   return a.issueNumber - b.issueNumber
 }
 
@@ -161,9 +180,9 @@ function deriveAgentStatusRows(
   const rows: Extract<ActiveRow, { kind: 'agent' }>[] = []
   for (const activeAgent of agentStatus.activeAgents ?? []) {
     const issueNumber = normalizeIssueNumber(activeAgent.issueNumber)
-    if (issueNumber === null || coveredIssueNumbers.has(issueNumber)) continue
+    if (issueNumber !== null && coveredIssueNumbers.has(issueNumber)) continue
     rows.push(agentStatusRowFromActiveAgent(activeAgent, issueNumber))
-    coveredIssueNumbers.add(issueNumber)
+    if (issueNumber !== null) coveredIssueNumbers.add(issueNumber)
   }
 
   if (rows.length === 0 && agentStatus.running) {
@@ -172,6 +191,7 @@ function deriveAgentStatusRows(
       rows.push({
         kind: 'agent',
         issueNumber,
+        sessionId: null,
         stage: null,
         key: issueNumber === null ? 'agent-running' : `agent-${issueNumber}`,
       })
@@ -183,13 +203,32 @@ function deriveAgentStatusRows(
 
 function agentStatusRowFromActiveAgent(
   activeAgent: ActiveAgentInfo,
-  issueNumber: number,
+  issueNumber: number | null,
 ): Extract<ActiveRow, { kind: 'agent' }> {
   return {
     kind: 'agent',
     issueNumber,
+    sessionId: activeAgent.sessionId ?? null,
     stage: stageLabel(activeAgent.progress?.stage ?? null),
-    key: `agent-${issueNumber}`,
+    key: activeAgent.sessionId ?? (issueNumber === null ? 'agent-running' : `agent-${issueNumber}`),
+  }
+}
+
+/**
+ * Which Session card represents an Issue when several Sessions claim it. A confirmed
+ * running Session is the current truth; an unverified historical Session must not
+ * displace it.
+ */
+function cardPriority(card: SessionCard): number {
+  switch (card.executionState) {
+    case 'running':
+      return 0
+    case 'queued':
+      return 1
+    case 'needs-verification':
+      return 2
+    default:
+      return 3
   }
 }
 
@@ -208,45 +247,60 @@ function compareAgentStatusRows(
   if (b.issueNumber === null) return -1
   return a.issueNumber - b.issueNumber
 }
-
 function AgentStatusRow({
   issueNumber,
+  sessionId,
   stage,
 }: {
   issueNumber: number | null
+  sessionId: string | null
   stage: string | null
 }) {
   const toProjectPath = useProjectPath()
-  const linkTarget = issueNumber === null ? '/activity' : `/issues/${issueNumber}`
+  const hasTarget = issueNumber !== null || sessionId !== null
+  const linkTarget = issueNumber !== null ? `/issues/${issueNumber}` : `/sessions/${sessionId}`
   const stageText = stage ?? 'Active'
+  const cardClassName =
+    'block rounded-lg border border-border bg-card shadow-sm hover:border-muted-foreground/40 hover:shadow-md transition-colors'
+  const content = (
+    <div className="p-3">
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="inline-block h-2 w-2 rounded-full bg-info animate-pulse" />
+        {issueNumber !== null && <span className="text-xs font-mono text-muted-foreground">#{issueNumber}</span>}
+        {issueNumber === null && <span className="text-xs font-mono text-muted-foreground">Session</span>}
+        <span
+          className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${stageColorFor(stageText)}`}
+          data-testid="pulse-agent-status-stage"
+        >
+          {stageText}
+        </span>
+      </div>
+      <h3 className="text-sm font-medium text-foreground" data-testid="pulse-agent-status-title">
+        Agent active
+      </h3>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Runner status reports active work; session telemetry is catching up.
+      </p>
+      {!hasTarget && (
+        <p className="mt-1 text-xs text-muted-foreground" data-testid="pulse-agent-status-target-unavailable">
+          Target unavailable
+        </p>
+      )}
+    </div>
+  )
 
-  return (
+  return hasTarget ? (
     <Link
       to={toProjectPath(linkTarget)}
       data-testid="pulse-agent-status-card"
       data-issue-number={issueNumber === null ? 'unknown' : String(issueNumber)}
-      className="block rounded-lg border border-border bg-card shadow-sm hover:border-muted-foreground/40 hover:shadow-md transition-colors"
+      className={cardClassName}
     >
-      <div className="p-3">
-        <div className="flex items-center gap-2 mb-1.5">
-          <span className="inline-block h-2 w-2 rounded-full bg-info animate-pulse" />
-          {issueNumber !== null && (
-            <span className="text-xs font-mono text-muted-foreground">#{issueNumber}</span>
-          )}
-          <span
-            className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${stageColorFor(stageText)}`}
-            data-testid="pulse-agent-status-stage"
-          >
-            {stageText}
-          </span>
-        </div>
-        <h3 className="text-sm font-medium text-foreground" data-testid="pulse-agent-status-title">
-          Agent active
-        </h3>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Runner status reports active work; session telemetry is catching up.
-        </p>
-      </div>
+      {content}
     </Link>
+  ) : (
+    <div data-testid="pulse-agent-status-card" data-issue-number="unknown" className={cardClassName}>
+      {content}
+    </div>
   )
 }

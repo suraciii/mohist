@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-var activityFields = []string{"id", "provenance", "scope", "kind", "time", "title", "description", "eventType", "issueNumber", "workflowRunId", "sessionId", "runnerId", "status"}
+var activityFields = []string{"id", "provenance", "scope", "kind", "time", "title", "description", "eventType", "issueNumber", "workflowRunId", "sessionId", "runnerId", "status", "executionState", "evidence"}
 var routingRuleFields = []string{"id", "projectId", "name", "position", "match", "agentId", "responsePrompt", "continue", "status", "createdAt", "updatedAt"}
 var webhookSubscriptionFields = []string{"id", "projectId", "name", "match", "targetUrl", "status", "eventSelectionMode", "eventTypes", "authType", "hasSecret", "createdAt", "updatedAt"}
 var webhookFailureFields = []string{"id", "projectId", "subscriptionId", "eventId", "eventType", "targetUrl", "responseStatus", "durationMs", "errorSummary", "occurredAt"}
@@ -499,9 +499,13 @@ func renderHumanResource(out interface{ Write([]byte) (int, error) }, kind strin
 	}
 	switch kind {
 	case "activity-list":
-		fmt.Fprintln(out, "provenance  scope  kind  time  title")
+		fmt.Fprintln(out, "provenance  scope  kind  state  time  title")
 		for _, value := range values {
-			fmt.Fprintf(out, "%s  %s  %s  %s  %s\n", rawString(value["provenance"]), rawString(value["scope"]), rawString(value["kind"]), rawString(value["time"]), rawString(value["title"]))
+			state := rawString(value["executionState"])
+			if state == "" {
+				state = rawString(value["status"])
+			}
+			fmt.Fprintf(out, "%s  %s  %s  %s  %s  %s\n", rawString(value["provenance"]), rawString(value["scope"]), rawString(value["kind"]), state, rawString(value["time"]), rawString(value["title"]))
 		}
 		return true
 	case "routing-rule-list":

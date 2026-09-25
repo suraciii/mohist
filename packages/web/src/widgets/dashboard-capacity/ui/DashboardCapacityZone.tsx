@@ -19,12 +19,18 @@ export function DashboardCapacityZone({
 }: DashboardCapacityZoneProps = {}) {
   const fetchedSummary = runnerSummaryHook()
   const summary = runnerSummaryOverride ?? fetchedSummary
-  if (summary.isLoading || summary.rows.length === 0 || summary.capacityTotal <= 0) return null
+  if (summary.isLoading || summary.rows.length === 0) return null
 
-  const active = summary.hasUnknownCapacity ? null : Math.max(0, summary.capacityUsed ?? 0)
-  const max = summary.capacityTotal
-  const usedPercent = active == null ? 0 : Math.min(100, Math.round((active / max) * 100))
-  const saturated = active != null && active >= max
+  const configuredExcludedSlots = summary.fleet.excludedGroups.reduce<number | null>(
+    (total, group) => (total == null || group.configuredSlots == null ? null : total + group.configuredSlots),
+    0,
+  )
+  const max = summary.fleet.eligiblePool?.total ?? configuredExcludedSlots
+  const displayMax = max ?? 'unknown'
+  if (max == null || max <= 0) return null
+  const active = summary.fleet.eligiblePool == null ? null : Math.max(0, summary.fleet.eligiblePool.used)
+  const usedPercent = active == null || max == null || max <= 0 ? 0 : Math.min(100, Math.round((active / max) * 100))
+  const saturated = active != null && max != null && active >= max
 
   return (
     <section
@@ -32,7 +38,7 @@ export function DashboardCapacityZone({
       data-zone="capacity"
       data-state={active == null ? 'unknown' : saturated ? 'saturated' : 'available'}
       data-active={active == null ? 'unknown' : active}
-      data-max={max}
+      data-max={displayMax}
       aria-label="Runner capacity"
       className={cn(
         'flex flex-wrap items-center gap-3 rounded-lg border bg-background px-4 py-3',
@@ -63,7 +69,7 @@ export function DashboardCapacityZone({
           />
         </div>
         <span data-testid="dashboard-zone-capacity-count" className="text-sm font-medium tabular-nums text-foreground">
-          {active == null ? `unknown/${max}` : `${active}/${max}`}
+          {active == null ? `unknown/${displayMax}` : `${active}/${displayMax}`}
         </span>
       </div>
       <Link

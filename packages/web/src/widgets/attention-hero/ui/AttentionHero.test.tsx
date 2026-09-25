@@ -73,7 +73,7 @@ function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
   }
 }
 
-function makeRunnerSummary(kind: 'draining' | 'full'): RunnerStatusSummary {
+function makeRunnerSummary(kind: 'draining' | 'full' | 'partial'): RunnerStatusSummary {
   const row: RunnerStatusEntry = {
     identity: {
       id: `runner-${kind}`,
@@ -86,28 +86,38 @@ function makeRunnerSummary(kind: 'draining' | 'full'): RunnerStatusSummary {
     },
     presence: { state: 'online', lastObservedAt: '2026-06-18T00:00:00.000Z' },
     control: { state: 'connected', generation: 'connection:1' },
-    admission: { state: 'blocked', reasonCodes: [kind === 'draining' ? 'draining' : 'capacity-full'] },
+    admission: {
+      state: kind === 'partial' ? 'ready' : 'blocked',
+      reasonCodes: kind === 'partial' ? [] : [kind === 'draining' ? 'draining' : 'capacity-full'],
+    },
     capabilities: [],
     runtimes: [],
-    capacity: { used: kind === 'full' ? 1 : 0, total: 1 },
+    capacity: { used: kind === 'full' ? 1 : 0, total: kind === 'partial' ? 8 : 1 },
     activeWorks: [],
     drain: kind === 'draining' ? { active: true, kind: 'update', updateInterruptId: 'update-1' } : null,
     nextActions: [],
   }
   return {
-    readyCount: 0,
-    blockedCount: 1,
+    fleet: {
+      state: kind === 'full' ? 'capacity-full' : kind === 'partial' ? 'capacity-available' : 'admission-blocked',
+      eligiblePool: kind === 'full' ? { used: 1, total: 1 } : kind === 'partial' ? { used: 0, total: 8 } : null,
+      excludedGroups: kind === 'partial' ? [{ kind: 'offline', count: 2, configuredSlots: 3 }] : [],
+      reasons: [],
+      observedAt: '2026-06-18T00:00:00.000Z',
+    },
+    readyCount: kind === 'partial' ? 1 : 0,
+    blockedCount: kind === 'partial' ? 0 : 1,
     onlineCount: 1,
     staleCount: 0,
-    offlineCount: 0,
+    offlineCount: kind === 'partial' ? 2 : 0,
     disconnectedCount: 0,
     drainingCount: kind === 'draining' ? 1 : 0,
     fullCount: kind === 'full' ? 1 : 0,
     activeWorkCount: 0,
     capacityUsed: kind === 'full' ? 1 : 0,
-    capacityTotal: 1,
+    capacityTotal: kind === 'partial' ? 8 : 1,
     hasUnknownCapacity: false,
-    hasAdmissibleCapacity: false,
+    hasAdmissibleCapacity: kind === 'partial',
     rows: [row],
     inventory: { state: 'ready', nextActions: [] },
   }
@@ -281,6 +291,17 @@ describe('AttentionHero - has-attention state', () => {
     expect(item).toHaveAttribute('data-kind', 'runner-draining')
     expect(item).toHaveTextContent('Runner draining')
     expect(item).not.toHaveTextContent('Runner admission blocked')
+  })
+
+  it('reports a partial outage beside available capacity without an admission-blocked claim', async () => {
+    _issues = [makeIssue({ status: IssueStatus.InProgress, health: IssueHealth.Active })]
+    _runnerSummary = makeRunnerSummary('partial')
+    renderHero()
+    const item = await screen.findByTestId('runner-status-entry')
+    expect(item).toHaveAttribute('data-kind', 'runner-partial-outage')
+    expect(item).toHaveTextContent('Some Runners unavailable')
+    expect(item).not.toHaveTextContent('Runner admission blocked')
+    expect(item).not.toHaveTextContent('Runner capacity full')
   })
 
   it('prioritizes canonical capacity-full facts over generic admission blocked', async () => {

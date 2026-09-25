@@ -70,7 +70,7 @@ async function mockActivityApi(page: Page) {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api/, '')
-
+    if (route.request().method() === 'GET' && path === '/auth/session') return route.fulfill({ json: response(null) })
     if (route.request().method() === 'GET' && path === '/projects') return route.fulfill({ json: response([project]) })
     if (route.request().method() === 'GET' && path === `/projects/${project.id}/agent/status`) {
       return route.fulfill({

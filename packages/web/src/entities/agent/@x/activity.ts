@@ -1,2 +1,7 @@
 export { useAgentActivity } from '../api/queries'
-export type { AgentActivitySession, AgentActivityWaiting } from '../model/types'
+export type {
+  ActivityExecutionEvidence,
+  ActivityExecutionState,
+  AgentActivitySession,
+  AgentActivityWaiting,
+} from '../model/types'

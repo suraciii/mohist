@@ -82,6 +82,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
         int? limit = null,
         IReadOnlyList<ActivityWaitingCardDto>? waiting = null,
         RunnerCapacityView? capacity = null,
+        RunnerStatusListSnapshot? runnerSnapshot = null,
         CancellationToken ct = default)
     {
         var take = Math.Clamp(limit ?? 50, 1, 200);
@@ -96,25 +97,53 @@ public sealed class AgentActivityFeedAssembler : IScopedService
 
         var sessionIds = sessions.Select(s => s.Session.Id).ToArray();
         var latestEventsLoad = await LoadLatestEventsAsync(db, sessionIds, ct);
-        var issueTitles = await IssueTitleLookup.LoadTitlesAsync(db, projectId, sessions.Select(r => r.IssueNumber()), ct);
+        var issueNumbers = sessions
+            .Select(r => r.IssueNumber())
+            .Where(number => number is not null)
+            .Select(number => number!.Value);
+        var issueTitles = await IssueTitleLookup.LoadTitlesAsync(db, projectId, issueNumbers, ct);
         var taskProgressMap = await BuildTaskProgressMapAsync(sessions, ct);
+        var observedAt = runnerSnapshot?.ObservedAt ?? _timeProvider.GetUtcNow();
+        var runners = runnerSnapshot?.Runners
+            .ToDictionary(runner => runner.Identity.Id, StringComparer.Ordinal)
+            ?? new Dictionary<string, RunnerStatusEntry>(StringComparer.Ordinal);
 
         var cards = sessions
-            .Select(record => ToActivityCard(
-                record,
-                latestEventsLoad.Projections.GetValueOrDefault(record.Session.Id),
-                IssueTitleLookup.Resolve(issueTitles, record.IssueNumber()),
-                taskProgressMap.GetValueOrDefault(record.Session.Id)))
+            .Select(record =>
+            {
+                var latestEvent = latestEventsLoad.Projections.GetValueOrDefault(record.Session.Id);
+                var latestEventAt = latestEvent is null
+                    ? (DateTimeOffset?)null
+                    : new DateTimeOffset(DateTime.SpecifyKind(latestEvent.CreatedAt, DateTimeKind.Utc));
+                var activityTurnId = latestEvent is null
+                    ? null
+                    : ResolveActivityTurnId(record.Session, latestEvent);
+                var assessment = ActivityExecutionEvidencePolicy.Evaluate(
+                    record,
+                    observedAt,
+                    runners.GetValueOrDefault(record.Session.Runtime.RunnerId),
+                    latestEventAt,
+                    activityTurnId);
+                var sessionTitle = record.Label(AgentSessionQueryMetadataKeys.SessionName) ?? record.Session.Id;
+                return ToActivityCard(
+                    record,
+                    latestEvent,
+                    IssueTitleLookup.Resolve(issueTitles, record.IssueNumber(), sessionTitle),
+                    taskProgressMap.GetValueOrDefault(record.Session.Id),
+                    assessment);
+            })
             .ToList();
 
         waiting ??= [];
         var slots = new ActivitySlotUsageDto(capacity?.UsedSlots ?? 0, capacity?.TotalSlots ?? 0);
         var summary = new ActivitySummaryDto(
-            cards.Count(c => c.Status == "active"),
+            cards.Count(c => string.Equals(c.ExecutionState, "running", StringComparison.Ordinal)),
             waiting.Count,
             0,
             0,
-            slots);
+            slots,
+            cards.Count(c => string.Equals(c.ExecutionState, "needs-verification", StringComparison.Ordinal)),
+            cards.Count(c => string.Equals(c.ExecutionState, "queued", StringComparison.Ordinal)));
 
         var amplification = new AgentAmplificationDto(
             Candidates: candidatesCount,
@@ -197,7 +226,8 @@ public sealed class AgentActivityFeedAssembler : IScopedService
         AgentSessionRecord record,
         TranscriptEventProjection? latestEvent,
         string issueTitle,
-        ActivityTaskProgressDto? taskProgress)
+        ActivityTaskProgressDto? taskProgress,
+        ActivityExecutionAssessment assessment)
     {
         var s = record.Session;
         var lastActivityAt = AgentSessionJsonHelper.LastActivityAt(s).ToString("o");
@@ -207,6 +237,14 @@ public sealed class AgentActivityFeedAssembler : IScopedService
         var workId = record.Label(AgentSessionQueryMetadataKeys.WorkId);
         var workType = record.Label(AgentSessionQueryMetadataKeys.WorkType);
         var sourceKind = record.Label(AgentSessionQueryMetadataKeys.SourceKind);
+        var currentWorkItem = new ActivityWorkItemDto(
+            string.IsNullOrEmpty(workType) ? "task" : workType,
+            workId ?? sessionName,
+            workId ?? sessionName,
+            stage,
+            null);
+        var eventSummary = AgentSessionDtoMapper.ToEventSummaryDto(s.ActivitySummary);
+        var usage = AgentSessionDtoMapper.ToUsageDto(s);
 
         if (string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal))
         {
@@ -224,14 +262,16 @@ public sealed class AgentActivityFeedAssembler : IScopedService
                 s.Status.CreatedAt.ToString("o"),
                 null,
                 lastActivityAt,
-                new ActivityWorkItemDto(string.IsNullOrEmpty(workType) ? "task" : workType, workId ?? sessionName, workId ?? sessionName, stage, null),
+                currentWorkItem,
                 taskProgress,
                 latestEvent is null ? null : ToPreview(latestEvent),
                 null,
                 agentId,
                 agentName,
-                AgentSessionDtoMapper.ToEventSummaryDto(s.ActivitySummary),
-                AgentSessionDtoMapper.ToUsageDto(s));
+                eventSummary,
+                usage,
+                assessment.ExecutionState,
+                assessment.Evidence);
         }
 
         return new ActivityCardDto(
@@ -246,14 +286,16 @@ public sealed class AgentActivityFeedAssembler : IScopedService
             s.Status.CreatedAt.ToString("o"),
             null,
             lastActivityAt,
-            new ActivityWorkItemDto(string.IsNullOrEmpty(workType) ? "task" : workType, workId ?? sessionName, workId ?? sessionName, stage, null),
+            currentWorkItem,
             taskProgress,
             latestEvent is null ? null : ToPreview(latestEvent),
             null,
             null,
             null,
-            AgentSessionDtoMapper.ToEventSummaryDto(s.ActivitySummary),
-            AgentSessionDtoMapper.ToUsageDto(s));
+            eventSummary,
+            usage,
+            assessment.ExecutionState,
+            assessment.Evidence);
     }
 
     /// <summary>
@@ -272,12 +314,31 @@ public sealed class AgentActivityFeedAssembler : IScopedService
         var loaded = await TranscriptPartLoader.LoadAsync(db, sessionIds, ct: ct);
         if (loaded.Parts.Count == 0) return new([], 0);
 
+        var turnSequenceById = loaded.Turns.ToDictionary(turn => turn.Id, turn => turn.Sequence);
         var result = new Dictionary<string, TranscriptEventProjection>(StringComparer.Ordinal);
         foreach (var part in loaded.Parts.OrderBy(e => e.LastSeenAt).ThenBy(e => e.Id))
             if (loaded.SessionByTurnId.TryGetValue(part.TurnId, out var sessionId))
-                result[sessionId] = AgentSessionDtoMapper.ToProjection(sessionId, part);
+            {
+                var projection = AgentSessionDtoMapper.ToProjection(sessionId, part);
+                result[sessionId] = turnSequenceById.TryGetValue(part.TurnId, out var turnSequence)
+                    ? projection with { TurnSequence = turnSequence }
+                    : projection;
+            }
 
         return new(result, loaded.Parts.Count);
+    }
+
+    private static string? ResolveActivityTurnId(
+        AgentSession session,
+        TranscriptEventProjection latestEvent)
+    {
+        var fromServerTurn = latestEvent.TurnSequence > 0
+            ? (session.Status.Turns ?? []).FirstOrDefault(turn => turn.Sequence == latestEvent.TurnSequence)?.Id
+            : null;
+        if (!string.IsNullOrWhiteSpace(fromServerTurn))
+            return fromServerTurn;
+
+        return ActivityExecutionEvidencePolicy.ReadTurnId(latestEvent.PayloadJson);
     }
 
     private static ActivityPreviewDto ToPreview(TranscriptEventProjection e)

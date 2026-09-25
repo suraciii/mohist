@@ -39,7 +39,11 @@ public sealed class AgentSessionListAssembler : IScopedService
             status: status,
             ct: ct);
         sessions = await ActiveSessionReconciler.ReconcileAsync(db, sessions, _logger, ct);
-        var issueTitles = await IssueTitleLookup.LoadTitlesAsync(db, projectId, sessions.Select(r => r.IssueNumber()), ct);
+        var issueTitles = await IssueTitleLookup.LoadTitlesAsync(
+            db,
+            projectId,
+            sessions.Select(record => record.IssueNumber()).Where(issueNumber => issueNumber.HasValue).Select(issueNumber => issueNumber!.Value),
+            ct);
         var eventSummaries = await TranscriptReductions.LoadEventSummariesAsync(db, sessions.Select(r => r.Session.Id), ct);
 
         return sessions.Select(record =>
@@ -47,9 +51,10 @@ public sealed class AgentSessionListAssembler : IScopedService
             var session = record.Session;
             var events = eventSummaries.GetValueOrDefault(session.Id);
             var issueNumber = record.IssueNumber();
+            var sessionTitle = record.Label(AgentSessionQueryMetadataKeys.SessionName) ?? session.Id;
             return new AgentSessionInfoDto(
                 issueNumber,
-                IssueTitleLookup.Resolve(issueTitles, issueNumber),
+                IssueTitleLookup.Resolve(issueTitles, issueNumber, sessionTitle),
                 record.Label(AgentSessionQueryMetadataKeys.Stage) ?? string.Empty,
                 session.Id,
                 AgentSessionJsonHelper.ActivityName(session),

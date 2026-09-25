@@ -246,7 +246,15 @@ public sealed class AgentPathAmplificationSpecs
                     BoundAt: now,
                     LastDataAt: index < activeCount ? now : null,
                     AgentRuntimeSessionId: id,
-                    Activity: index < activeCount ? AgentSessionActivity.Active : AgentSessionActivity.Idle),
+                    Activity: index < activeCount ? AgentSessionActivity.Active : AgentSessionActivity.Idle,
+                    Turns: index < activeCount
+                        ? [new AgentTurnRecord(
+                            $"turn-{id}",
+                            1,
+                            [$"input-{id}"],
+                            AgentTurnStatus.Executing,
+                            UpdatedAt: now)]
+                        : null),
                 Metadata = new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     [AgentSessionQueryMetadataKeys.ProjectId] = projectId,

@@ -32,7 +32,7 @@ export function stageColorFor(stage: string | null | undefined): string {
 
 export interface CompactSessionCardProps {
   card: SessionCard
-  issueNumber?: number
+  issueNumber?: number | null
   issueTitle?: string
   workflowStage?: string | null
   ownerActionItem?: IssueAttentionItem | null
@@ -49,16 +49,19 @@ export function CompactSessionCard({
   const displayedIssueNumber = issueNumber ?? card.issueNumber
   const stage = workflowStage ?? card.issueStage
   const stageColor = stageColorFor(stage)
+  const executionState = card.executionState ?? (card.status === 'active' ? 'running' : 'not-running')
   const title = issueTitle ?? card.title ?? card.taskDescription ?? card.issueTitle
   const taskProgressPercent = card.taskProgress
     ? getTaskProgressPercent(card.taskProgress.completed, card.taskProgress.total)
     : null
+  const sessionPath = displayedIssueNumber === null ? `/sessions/${card.sessionId}` : `/issues/${displayedIssueNumber}`
+  const evidenceLine = executionEvidenceLine(executionState, card.evidence)
 
   return (
     <Link
-      to={toProjectPath(`/issues/${displayedIssueNumber}`)}
+      to={toProjectPath(sessionPath)}
       data-testid="pulse-compact-card"
-      data-issue-number={displayedIssueNumber}
+      data-issue-number={displayedIssueNumber === null ? 'unknown' : String(displayedIssueNumber)}
       className="block rounded-lg border border-border bg-card shadow-sm hover:border-muted-foreground/40 hover:shadow-md transition-colors"
     >
       <div className="p-3">
@@ -66,7 +69,9 @@ export function CompactSessionCard({
           issueNumber={displayedIssueNumber}
           stage={stage}
           stageColor={stageColor}
-          showLiveDot
+          showLiveDot={executionState === 'running'}
+          executionState={executionState}
+          evidenceReason={card.evidence?.reason ?? null}
           ownerActionItem={ownerActionItem}
         />
 
@@ -78,6 +83,12 @@ export function CompactSessionCard({
         >
           {title}
         </h3>
+
+        {evidenceLine && (
+          <p className="mt-1 text-xs text-warning-foreground" data-testid="pulse-compact-evidence">
+            {evidenceLine}
+          </p>
+        )}
 
         {(card.totalTokens != null || card.costAmount != null) && (
           <p className="mt-1 text-xs text-muted-foreground" style={LINE_CLAMP_STYLE} data-testid="pulse-compact-usage">
@@ -125,10 +136,12 @@ export function CompactSessionCard({
 }
 
 export interface RunningIssueHeaderProps {
-  issueNumber: string | number
+  issueNumber: string | number | null
   stage: string | null | undefined
   stageColor: string
   showLiveDot: boolean
+  executionState?: SessionCard['executionState']
+  evidenceReason?: string | null
   ownerActionItem?: IssueAttentionItem | null
 }
 
@@ -137,6 +150,8 @@ export function RunningIssueHeader({
   stage,
   stageColor,
   showLiveDot,
+  executionState = 'not-running',
+  evidenceReason = null,
   ownerActionItem = null,
 }: RunningIssueHeaderProps) {
   const ownerActionTreatment = ownerActionItem ? issueAttentionTreatment(ownerActionItem) : null
@@ -151,7 +166,17 @@ export function RunningIssueHeader({
           aria-hidden
         />
       )}
-      <span className="text-xs font-mono text-muted-foreground">#{issueNumber}</span>
+      <span className="text-xs font-mono text-muted-foreground">
+        {issueNumber === null ? 'Session' : `#${issueNumber}`}
+      </span>
+      <span
+        className="inline-flex items-center rounded-full border border-border bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground"
+        data-testid="pulse-compact-execution-state"
+        data-state={executionState}
+        title={evidenceReason ?? undefined}
+      >
+        {executionStateLabel(executionState)}
+      </span>
       <span
         className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${stageColor}`}
         data-testid="pulse-compact-stage"
@@ -170,6 +195,32 @@ export function RunningIssueHeader({
       )}
     </div>
   )
+}
+
+function executionStateLabel(state: SessionCard['executionState']): string {
+  if (state === 'needs-verification') return 'Needs verification'
+  if (state === 'not-running') return 'Not running'
+  return state === 'queued' ? 'Queued' : 'Running'
+}
+
+const EVIDENCE_REASON_LABELS: Record<string, string> = {
+  missing: 'missing',
+  aged: 'aged',
+  future: 'future-dated',
+  'superseded-generation': 'superseded generation',
+}
+
+/**
+ * The unverified-execution label keeps its reason and last evidence time visible, so a
+ * reader can tell why an observation is not confirmed current execution.
+ */
+export function executionEvidenceLine(
+  state: SessionCard['executionState'],
+  evidence: SessionCard['evidence'],
+): string | null {
+  if (state !== 'needs-verification' || !evidence) return null
+  const reason = EVIDENCE_REASON_LABELS[evidence.reason] ?? evidence.reason
+  return evidence.observedAt ? `${reason} evidence · last evidence ${evidence.observedAt}` : `${reason} evidence`
 }
 
 function issueAttentionTreatment(item: IssueAttentionItem): {

@@ -172,14 +172,14 @@ public class IssueTitleLookupSpecs
     }
 
     [Fact]
-    public void Resolve_NumberZero_UsesLiteralZeroInFallback()
+    public void Resolve_MissingNumber_UsesSessionFallbackWithoutZeroSentinel()
     {
-        // Defensive: callers pass issueNumber = 0 for sessions without
-        // an issue-number label; the fallback must still render as
-        // "Issue #0" rather than throwing or producing an empty string.
         var titles = new Dictionary<int, string>();
 
-        Assert.Equal("Issue #0", IssueTitleLookup.Resolve(titles, 0));
+        Assert.Equal("Session", IssueTitleLookup.Resolve(titles, null));
+        Assert.Equal("Session", IssueTitleLookup.Resolve(titles, 0));
+        Assert.Equal("Session 'worker'", IssueTitleLookup.Resolve(titles, null, "Session 'worker'"));
+        Assert.DoesNotContain("#0", IssueTitleLookup.Resolve(titles, null));
     }
 
     [Fact]
@@ -214,8 +214,12 @@ public class IssueTitleLookupSpecs
         var current = await sessionList.ListCurrentAsync(projectId, limit: 10);
         var activity = await assembler.GetActivityAsync(projectId, limit: 10);
 
-        var fromQuerierPath = current.ToDictionary(session => session.IssueNumber, session => session.IssueTitle);
-        var fromAssemblerPath = activity.Sessions.ToDictionary(session => session.IssueNumber, session => session.IssueTitle);
+        var fromQuerierPath = current
+            .Where(session => session.IssueNumber is not null)
+            .ToDictionary(session => session.IssueNumber!.Value, session => session.IssueTitle);
+        var fromAssemblerPath = activity.Sessions
+            .Where(session => session.IssueNumber is not null)
+            .ToDictionary(session => session.IssueNumber!.Value, session => session.IssueTitle);
 
         Assert.Equal(fromQuerierPath.OrderBy(pair => pair.Key), fromAssemblerPath.OrderBy(pair => pair.Key));
         Assert.Equal(fromQuerierPath.Count, fromAssemblerPath.Count);

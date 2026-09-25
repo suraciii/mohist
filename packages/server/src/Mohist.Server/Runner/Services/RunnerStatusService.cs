@@ -290,16 +290,21 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
                 : durable?.LastPresenceAt;
         var updateInterruptId = status?.UpdateInterruptId ?? durable?.UpdateInterruptId;
         var draining = status?.Draining == true || !string.IsNullOrWhiteSpace(updateInterruptId);
+        var confirmedWorks = RunnerWorkConfirmationLedger.Stamp(
+            ownerWorks ?? [],
+            status?.DispatchObservation?.WorkConfirmations,
+            status?.DispatchObservation?.ProcessGeneration);
         var runtime = status is null && durable is null
             ? null
             : new RunnerRuntimeState(
                 status?.Status ?? RunnerStatus.Offline,
                 lastPresenceAt ?? default,
-                ownerWorks ?? [],
+                confirmedWorks,
                 draining,
                 updateInterruptId,
                 info?.ConnectionGeneration,
-                status?.DispatchObservation);
+                status?.DispatchObservation,
+                status?.DispatchObservation?.ProcessGeneration);
         var connectionId = _connectionTracker.GetConnectionId(definition.Id);
         var connectionGeneration = _connectionTracker.GetConnectionGeneration(definition.Id);
         var connected = connectionId is not null;
@@ -313,7 +318,7 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
                 ? null
                 : ownerWorks.Count;
         var capacity = new RunnerStatusCapacityView(knownUsage, definition.Slots);
-        var activeWorks = ProjectActiveWorks(ownerWorks);
+        var activeWorks = ProjectActiveWorks(confirmedWorks);
         var observation = CurrentObservation(runtime?.DispatchObservation, connectionGeneration);
         var credentialStatus = await ReadCredentialStatusAsync(definition.Id, ct);
         var reasonCodes = DeriveAdmissionReasons(
@@ -354,7 +359,8 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
                 reasonCodes,
                 runtimes,
                 capacity),
-            environment);
+            environment,
+            runtime?.ProcessGeneration);
     }
 
     private async Task<RunnerCredentialStatus> ReadCredentialStatusAsync(
@@ -726,7 +732,11 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
                 work.Title,
                 work.Issue is null
                     ? null
-                    : new RunnerActiveWorkIssueView(work.Issue.ProjectId, work.Issue.IssueNumber)));
+                    : new RunnerActiveWorkIssueView(work.Issue.ProjectId, work.Issue.IssueNumber),
+                work.AgentSessionId,
+                work.AgentTurnId,
+                work.ProcessGeneration,
+                work.ConfirmedAt));
         }
         return views;
     }

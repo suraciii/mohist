@@ -43,7 +43,7 @@ public sealed class GitHubReviewApprovalSpecs
     public GitHubReviewApprovalSpecs(GitHubCommandFixture fixture)
     {
         _fixture = fixture;
-        fixture.Comments.Comments.Clear();
+        fixture.Comments.Reset();
     }
 
     private HttpClient Client => _fixture.Client;
