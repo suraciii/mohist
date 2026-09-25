@@ -1,11 +1,12 @@
-namespace Mohist.Server.Infrastructure.Data.DirectApi;
+namespace Mohist.Server.Infrastructure.Data.Idempotency;
 
 /// <summary>
-/// Durable request fence for the direct API write commands. The composite
-/// command/scope key is the caller-visible idempotency grain; the outcome is
-/// internal JSON containing canonical identities and command-specific state.
+/// Durable request fence for the external Agent API commands and the
+/// control-plane writes. The composite command/scope key is the
+/// caller-visible idempotency grain; the outcome is internal JSON containing
+/// canonical identities and command-specific state.
 /// </summary>
-public sealed class DirectApiIdempotencyMappingRow
+public sealed class IdempotencyMappingRow
 {
     public string Command { get; set; } = string.Empty;
     public string ScopeKey { get; set; } = string.Empty;

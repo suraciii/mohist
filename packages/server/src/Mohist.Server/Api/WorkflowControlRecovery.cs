@@ -35,16 +35,25 @@ internal static class WorkflowControlRecovery
         return ApiResults.Ok();
     }
 
-    internal static async Task<IResult> RecoverWorkflowRunScopedRerunAsync(
+    internal static async Task<KeyedControlWrites.Outcome> RecoverWorkflowRunScopedRerunAsync(
         IGrainFactory grains,
         IssueQuerier issuesQuery,
         string workflowRunId)
     {
         var issue = await issuesQuery.GetIssueForWorkflowRunAsync(workflowRunId);
         if (issue is null)
-            return ApiResults.NotFound($"Issue for workflow run '{workflowRunId}' not found");
+        {
+            return KeyedControlWrites.Outcome.Rejected(
+                StatusCodes.Status404NotFound,
+                ApiResults.Failure(
+                    $"Issue for workflow run '{workflowRunId}' not found",
+                    StatusCodes.Status404NotFound,
+                    "not_found",
+                    effect: ApiEffect.None,
+                    retrySafe: false));
+        }
 
         await grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(issue.ProjectId, issue.Number))).StartWorkAsync();
-        return ApiResults.Ok();
+        return KeyedControlWrites.Outcome.Accepted(ApiResults.SuccessEnvelope());
     }
 }

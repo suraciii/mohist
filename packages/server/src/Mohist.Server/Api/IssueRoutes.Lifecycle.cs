@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Routing;
+using Mohist.Server.Api.DirectApi;
 using Mohist.Server.Auth.Identity;
+using Mohist.Server.Infrastructure.Idempotency;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Issue.Domain;
@@ -21,48 +23,103 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueQuerier issuesQuery) =>
+            IssueQuerier issuesQuery,
+            ICurrentUser currentUser,
+            IdempotencyFence fence,
+            TimeProvider timeProvider) =>
         {
             var project = GetRequiredProject(ctx);
+            var key = DirectApiWriteValidation.ReadIdempotencyKey(ctx.Request.Headers);
 
-            var grain = await GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
-            if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
-            try
+            async Task<KeyedControlWrites.Outcome> StartAsync()
             {
-                var workflowRunId = await grain.StartWorkAsync();
-                return ApiResults.Ok(IssueStartResponse.FromGrainResult(number, workflowRunId));
-            }
-            catch (IssueStartBlockedException ex)
-            {
-                var blockerDto = IssueStartBlockerDto.FromDomain(ex.Blocker);
-                var code = ex.Blocker switch
+                var grain = await GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
+                if (grain is null)
                 {
-                    IssueStartBlocker.Draft => "draft",
-                    IssueStartBlocker.WaitingFor => "waiting_for_prerequisite",
-                    _ => "start_blocked",
-                };
-                return ApiResults.Fail(
-                    ex.Message,
-                    400,
-                    code,
-                    new
+                    return KeyedControlWrites.Outcome.Rejected(
+                        StatusCodes.Status404NotFound,
+                        ApiResults.Failure(
+                            $"Issue #{number} not found",
+                            StatusCodes.Status404NotFound,
+                            "not_found",
+                            effect: ApiEffect.None,
+                            retrySafe: false));
+                }
+                try
+                {
+                    var workflowRunId = await grain.StartWorkAsync();
+                    return KeyedControlWrites.Outcome.Accepted(
+                        new ApiResponse<IssueStartResponse>(true, IssueStartResponse.FromGrainResult(number, workflowRunId)));
+                }
+                catch (IssueStartBlockedException ex)
+                {
+                    var blockerDto = IssueStartBlockerDto.FromDomain(ex.Blocker);
+                    var code = ex.Blocker switch
                     {
-                        canStart = false,
-                        blocker = blockerDto,
-                    });
+                        IssueStartBlocker.Draft => "draft",
+                        IssueStartBlocker.WaitingFor => "waiting_for_prerequisite",
+                        _ => "start_blocked",
+                    };
+                    return KeyedControlWrites.Outcome.Rejected(
+                        StatusCodes.Status400BadRequest,
+                        ApiResults.Failure(
+                            ex.Message,
+                            StatusCodes.Status400BadRequest,
+                            code,
+                            new
+                            {
+                                canStart = false,
+                                blocker = blockerDto,
+                            },
+                            ApiEffect.None,
+                            retrySafe: false));
+                }
+                catch (MissingPromptsException ex)
+                {
+                    return KeyedControlWrites.Outcome.Rejected(
+                        StatusCodes.Status400BadRequest,
+                        ApiResults.Failure(
+                            ex.Message,
+                            StatusCodes.Status400BadRequest,
+                            "missing_prompts",
+                            new { missingKeys = ex.MissingKeys },
+                            ApiEffect.None,
+                            retrySafe: false));
+                }
+                catch (ProjectVerificationConfigurationMissingException ex)
+                {
+                    return KeyedControlWrites.Outcome.Rejected(
+                        StatusCodes.Status400BadRequest,
+                        ApiResults.Failure(
+                            ex.Message,
+                            StatusCodes.Status400BadRequest,
+                            "project-verification-config-missing",
+                            effect: ApiEffect.None,
+                            retrySafe: false));
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return KeyedControlWrites.Outcome.Rejected(
+                        StatusCodes.Status409Conflict,
+                        ApiResults.Failure(
+                            ex.Message,
+                            StatusCodes.Status409Conflict,
+                            "conflict",
+                            effect: ApiEffect.None,
+                            retrySafe: false));
+                }
             }
-            catch (MissingPromptsException ex)
-            {
-                return ApiResults.Fail(ex.Message, 400, "missing_prompts", new { missingKeys = ex.MissingKeys });
-            }
-            catch (ProjectVerificationConfigurationMissingException ex)
-            {
-                return ApiResults.Fail(ex.Message, 400, "project-verification-config-missing");
-            }
-            catch (InvalidOperationException ex)
-            {
-                return ApiResults.Conflict(ex.Message);
-            }
+
+            return await KeyedControlWrites.ExecuteAsync(
+                key,
+                currentUser,
+                fence,
+                timeProvider,
+                IdempotencyCommands.IssueStart,
+                KeyedControlWrites.IssueStartScopeKey(project.Id, number, currentUser.Principal.Id, key.Value!),
+                KeyedControlWrites.IssueStartFingerprint(project.Id, number),
+                $"mo issue start {number}{KeyedControlWrites.Flag("project", projectRef)} --idempotency-key",
+                StartAsync);
         });
 
         group.MapPost("/{number:int}/comments", async (

@@ -10,9 +10,10 @@ using Mohist.Server.Api.DirectApi;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Data.DirectApi;
+using Mohist.Server.Infrastructure.Data.Idempotency;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.DirectApi;
+using Mohist.Server.Infrastructure.Idempotency;
 using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
@@ -96,14 +97,14 @@ public sealed class DirectApiIdempotencySpecs(PublicProjectionIntegrationFixture
         await using var db = await fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
             .CreateDbContextAsync();
-        var mapping = await db.DirectApiIdempotencyMappings.SingleAsync(row =>
-            row.Command == DirectApiCommands.Launch
+        var mapping = await db.IdempotencyMappings.SingleAsync(row =>
+            row.Command == IdempotencyCommands.Launch
             && row.ScopeKey == $"{projectId}|{agentId}|whitespace-text");
         Assert.Equal(
             DirectApiWriteValidation.LaunchFingerprint(projectId, agentId, " "),
             mapping.Fingerprint);
         Assert.True(
-            string.Equals(mapping.State, DirectApiMappingStates.Completed, StringComparison.Ordinal),
+            string.Equals(mapping.State, IdempotencyMappingStates.Completed, StringComparison.Ordinal),
             $"state={mapping.State}; outcome={mapping.Outcome}");
     }
 
@@ -123,13 +124,13 @@ public sealed class DirectApiIdempotencySpecs(PublicProjectionIntegrationFixture
         await using (var scope = fixture.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-            db.DirectApiIdempotencyMappings.Add(new DirectApiIdempotencyMappingRow
+            db.IdempotencyMappings.Add(new IdempotencyMappingRow
             {
-                Command = DirectApiCommands.Launch,
+                Command = IdempotencyCommands.Launch,
                 ScopeKey = $"{projectId}|{agentId}|{key}",
                 CallerKeyId = "crash-simulated-caller",
                 Fingerprint = fingerprint,
-                State = DirectApiMappingStates.Pending,
+                State = IdempotencyMappingStates.Pending,
                 Outcome = JSON.Serialize(new DirectApiLaunchOutcome(coordinatorKey)),
                 CreatedAt = fixture.TimeProvider.GetUtcNow(),
             });
@@ -147,10 +148,10 @@ public sealed class DirectApiIdempotencySpecs(PublicProjectionIntegrationFixture
         await using var verify = await fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
             .CreateDbContextAsync();
-        var mapping = await verify.DirectApiIdempotencyMappings.SingleAsync(row =>
-            row.Command == DirectApiCommands.Launch
+        var mapping = await verify.IdempotencyMappings.SingleAsync(row =>
+            row.Command == IdempotencyCommands.Launch
             && row.ScopeKey == $"{projectId}|{agentId}|{key}");
-        Assert.Equal(DirectApiMappingStates.Completed, mapping.State);
+        Assert.Equal(IdempotencyMappingStates.Completed, mapping.State);
         Assert.Equal(1, await verify.AgentJobs.CountAsync(row => row.AgentId == agentId && row.ProjectId == projectId));
     }
 
@@ -231,8 +232,8 @@ public sealed class DirectApiIdempotencySpecs(PublicProjectionIntegrationFixture
         using var db = await fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
             .CreateDbContextAsync();
-        var mappings = await db.DirectApiIdempotencyMappings
-            .Where(row => row.Command == DirectApiCommands.Launch)
+        var mappings = await db.IdempotencyMappings
+            .Where(row => row.Command == IdempotencyCommands.Launch)
             .Where(row => row.ScopeKey == $"{projectId}|{agentId}|{key}")
             .ToListAsync();
         Assert.Single(mappings);
@@ -265,8 +266,8 @@ public sealed class DirectApiIdempotencySpecs(PublicProjectionIntegrationFixture
         await using var db = await fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
             .CreateDbContextAsync();
-        Assert.Equal(1, await db.DirectApiIdempotencyMappings.CountAsync(row =>
-            row.Command == DirectApiCommands.Launch
+        Assert.Equal(1, await db.IdempotencyMappings.CountAsync(row =>
+            row.Command == IdempotencyCommands.Launch
             && row.ScopeKey == $"{projectId}|{agentId}|{key}"));
         Assert.Equal(1, await db.AgentJobs.CountAsync(row => row.AgentId == agentId && row.ProjectId == projectId));
     }
@@ -296,10 +297,10 @@ public sealed class DirectApiIdempotencySpecs(PublicProjectionIntegrationFixture
         await using var db = await fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
             .CreateDbContextAsync();
-        var mapping = await db.DirectApiIdempotencyMappings.SingleAsync(row =>
-            row.Command == DirectApiCommands.Launch
+        var mapping = await db.IdempotencyMappings.SingleAsync(row =>
+            row.Command == IdempotencyCommands.Launch
             && row.ScopeKey == $"{projectId}|{agentId}|{key}");
-        Assert.Equal(DirectApiMappingStates.Completed, mapping.State);
+        Assert.Equal(IdempotencyMappingStates.Completed, mapping.State);
         var outcome = JsonDocument.Parse(mapping.Outcome!).RootElement;
         Assert.Equal(
             DirectApiWriteValidation.DerivedLaunchCoordinatorKey(projectId, agentId, key),
@@ -419,7 +420,7 @@ public sealed class DirectApiIdempotencySpecs(PublicProjectionIntegrationFixture
         await using var scope = fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         return new CanonicalCounts(
-            await db.DirectApiIdempotencyMappings.CountAsync(),
+            await db.IdempotencyMappings.CountAsync(),
             await db.AgentJobs.CountAsync(),
             await db.AgentSessions.CountAsync());
     }

@@ -103,21 +103,32 @@ func TestWorkflowNoCatalogJSONIsLocalUsageError(t *testing.T) {
 	}
 }
 
-func TestRunControlUsesDistinctEndpointsAndDoesNotRetryMutation(t *testing.T) {
+func TestRunControlKeyedWriteRetriesLostResponseOnceWithSameKey(t *testing.T) {
 	requests := 0
+	keys := []string{}
 	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		requests++
-		if r.URL.Path != "/api/workflow-runs/wr-1/retry" {
-			t.Fatalf("path=%q", r.URL.Path)
+		if r.URL.Path != "/api/workflow-runs/wr-1/retry" || r.Method != http.MethodPost {
+			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
 		}
-		return nil, errors.New("connection lost after submit")
+		keys = append(keys, r.Header.Get("Idempotency-Key"))
+		if requests == 1 {
+			return nil, errors.New("connection lost after submit")
+		}
+		return response(http.StatusOK, `{"success":true,"data":{}}`), nil
 	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
 
-	if code := Run(context.Background(), []string{"run", "retry", "wr-1"}, deps); code != ExitOperation {
+	if code := Run(context.Background(), []string{"run", "retry", "wr-1"}, deps); code != ExitOK {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
-	if requests != 1 {
-		t.Fatalf("mutation was retried: %d requests", requests)
+	if requests != 2 {
+		t.Fatalf("requests=%d", requests)
+	}
+	if keys[0] == "" || keys[0] != keys[1] {
+		t.Fatalf("retry reused key: %v", keys)
+	}
+	if errOut.String() != "Idempotency-Key: "+keys[0]+"\n" {
+		t.Fatalf("stderr=%q key=%q", errOut.String(), keys[0])
 	}
 }
 
@@ -162,6 +173,9 @@ func TestRunControlsUseTheirOwnServerActions(t *testing.T) {
 				}
 				if r.URL.Path != want || r.Method != http.MethodPost {
 					t.Fatalf("request=%s %s", r.Method, r.URL.Path)
+				}
+				if r.Header.Get("Idempotency-Key") == "" {
+					t.Fatalf("control write sent no Idempotency-Key")
 				}
 				return response(http.StatusOK, `{"success":true,"data":{}}`), nil
 			}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})

@@ -4,8 +4,8 @@ using Mohist.Server.Api;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure;
-using Mohist.Server.Infrastructure.Data.DirectApi;
 using Mohist.Server.Infrastructure.DirectApi;
+using Mohist.Server.Infrastructure.Idempotency;
 using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -22,7 +22,7 @@ internal static class DirectApiStopRoutes
         AgentSessionQuerier sessions,
         IGrainFactory grains,
         ISessionStopDelivery stopDelivery,
-        DirectApiIdempotencyService idempotency,
+        IdempotencyFence idempotency,
         PublicExecutionReadQuerier publicReads,
         CancellationToken ct)
     {
@@ -79,7 +79,7 @@ internal static class DirectApiStopRoutes
             ct);
 
         var claim = await idempotency.GetOrCreateAsync(
-            DirectApiCommands.Stop,
+            IdempotencyCommands.Stop,
             scopeKey,
             caller.CallerKeyId,
             fingerprint,
@@ -95,7 +95,7 @@ internal static class DirectApiStopRoutes
                 "Another stop for this Turn has an unresolved outcome.");
         }
 
-        if (!string.Equals(claim.Mapping.Fingerprint, fingerprint, StringComparison.Ordinal))
+        if (!string.Equals(claim.Fingerprint, fingerprint, StringComparison.Ordinal))
         {
             return DirectApiResults.Error(
                 StatusCodes.Status409Conflict,
@@ -103,10 +103,10 @@ internal static class DirectApiStopRoutes
                 "The Idempotency-Key has already been used for a different request.");
         }
 
-        var outcome = DirectApiIdempotencyService.ReadOutcome<DirectApiStopOutcome>(claim.Mapping);
-        if (claim.Mapping.State == DirectApiMappingStates.Pending)
+        var outcome = IdempotencyFence.ReadOutcome<DirectApiStopOutcome>(claim.Outcome);
+        if (claim.State == IdempotencyMappingStates.Pending)
         {
-            var frozen = ReadFrozenTarget(claim.Mapping);
+            var frozen = ReadFrozenTarget(claim);
             if (frozen is null)
             {
                 var prepared = await PrepareFrozenTargetAsync(
@@ -115,13 +115,10 @@ internal static class DirectApiStopRoutes
                     operationId,
                     ct);
                 frozen = prepared.Target;
-                claim = claim with
-                {
-                    Mapping = await idempotency.FreezeStopTargetAsync(
-                        scopeKey,
-                        JSON.Serialize(frozen),
-                        ct),
-                };
+                claim = (await idempotency.FreezeStopTargetAsync(
+                    scopeKey,
+                    JSON.Serialize(frozen),
+                    ct)) with { Created = claim.Created };
             }
 
             if (!claim.Created
@@ -144,15 +141,12 @@ internal static class DirectApiStopRoutes
 
             if (AgentSessionStopResultPolicy.CompletesDirectMapping(result))
             {
-                claim = claim with
-                {
-                    Mapping = await idempotency.CompleteAsync(
-                        DirectApiCommands.Stop,
-                        scopeKey,
-                        DirectApiMappingStates.Completed,
-                        JSON.Serialize(outcome),
-                        ct),
-                };
+                claim = await idempotency.CompleteAsync(
+                    IdempotencyCommands.Stop,
+                    scopeKey,
+                    IdempotencyMappingStates.Completed,
+                    JSON.Serialize(outcome),
+                    ct);
             }
             else
             {
@@ -207,7 +201,7 @@ internal static class DirectApiStopRoutes
     private static async Task ReconcileSettledPendingStopAsync(
         string turnId,
         IAgentSessionGrain session,
-        DirectApiIdempotencyService idempotency,
+        IdempotencyFence idempotency,
         CancellationToken ct)
     {
         var pending = await idempotency.FindPendingStopAsync(turnId, ct);
@@ -220,9 +214,9 @@ internal static class DirectApiStopRoutes
             return;
 
         await idempotency.CompleteAsync(
-            DirectApiCommands.Stop,
+            IdempotencyCommands.Stop,
             pending.ScopeKey,
-            DirectApiMappingStates.Completed,
+            IdempotencyMappingStates.Completed,
             pending.Outcome
                 ?? throw new InvalidOperationException("The pending direct API stop mapping has no outcome."),
             ct);
@@ -251,15 +245,15 @@ internal static class DirectApiStopRoutes
     }
 
     private static DirectApiFrozenStopTarget? ReadFrozenTarget(
-        DirectApiIdempotencyMappingRow mapping)
+        IdempotencyClaim claim)
     {
-        if (string.IsNullOrWhiteSpace(mapping.FrozenTarget))
+        if (string.IsNullOrWhiteSpace(claim.FrozenTarget))
             return null;
         try
         {
-            return JSON.Deserialize<DirectApiFrozenStopTarget>(mapping.FrozenTarget);
+            return JSON.Deserialize<DirectApiFrozenStopTarget>(claim.FrozenTarget);
         }
-        catch (Exception) when (mapping.State == DirectApiMappingStates.Pending)
+        catch (Exception) when (claim.State == IdempotencyMappingStates.Pending)
         {
             return null;
         }

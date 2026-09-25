@@ -331,9 +331,24 @@ type operationError struct {
 	// instead of parsing the rendered message.
 	code    string
 	details json.RawMessage
+	// effect states whether the operation changed anything ("none",
+	// "unknown", or "applied"), retrySafe whether repeating the identical
+	// request can produce a second effect, and nextAction the recovery the
+	// caller should run. The Server envelope supplies them when it knows
+	// them; classifyFailure derives the rest for Issue and Run commands.
+	effect     string
+	retrySafe  *bool
+	nextAction string
+	// cause is the failure the CLI classified itself (a transport or context
+	// error), kept so errors.Is still recognises it as the caller sees it.
+	cause error
 }
 
 func (e *operationError) Error() string { return e.message }
+
+func (e *operationError) Unwrap() error { return e.cause }
+
+func boolPtr(value bool) *bool { return &value }
 
 // Run executes one CLI invocation and returns its process exit code.
 func Run(ctx context.Context, args []string, deps Dependencies) int {
@@ -425,7 +440,7 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	}
 	command, err := parse(args)
 	if err != nil {
-		writeError(deps.Stderr, err)
+		writeFailure(deps.Stderr, parseFailureStructured(args), err)
 		return ExitUsage
 	}
 	if command.help {
@@ -488,17 +503,18 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if strings.HasPrefix(command.kind, "ops-") {
 		return runOperations(ctx, deps, client, command)
 	}
+	why := structuredFailure(command.kind, command.fieldsOnly || len(command.fields) > 0)
 	data, err := client.get(ctx, command.path)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			writeError(deps.Stderr, err)
 			return ExitCanceled
 		}
-		writeError(deps.Stderr, err)
+		writeFailure(deps.Stderr, why, err)
 		return ExitOperation
 	}
 	if err := render(deps.Stdout, command, data); err != nil {
-		writeError(deps.Stderr, err)
+		writeFailure(deps.Stderr, why, responseShapeError(err.Error()))
 		return ExitOperation
 	}
 	if command.kind == "doctor" && doctorFailed(data) {
@@ -841,17 +857,20 @@ func configureManagerClient(deps Dependencies, value *client) error {
 }
 
 type envelope struct {
-	Success *bool           `json:"success"`
-	Data    json.RawMessage `json:"data"`
-	Error   string          `json:"error"`
-	Code    string          `json:"code"`
-	Details json.RawMessage `json:"details"`
+	Success    *bool           `json:"success"`
+	Data       json.RawMessage `json:"data"`
+	Error      string          `json:"error"`
+	Code       string          `json:"code"`
+	Details    json.RawMessage `json:"details"`
+	Effect     string          `json:"effect"`
+	RetrySafe  *bool           `json:"retrySafe"`
+	NextAction string          `json:"nextAction"`
 }
 
 func (c *client) get(ctx context.Context, path string) (json.RawMessage, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base.String()+path, strings.NewReader(""))
 	if err != nil {
-		return nil, &operationError{message: "error: request could not be created [request_error]"}
+		return nil, classifyFailure(&operationError{message: "error: request could not be created [request_error]"}, http.MethodGet, false, failureLocal, 0)
 	}
 	if c.token != "" && (!c.machineLocal || isLoopback(c.base)) {
 		req.Header.Set("Authorization", "Bearer "+c.token)
@@ -864,15 +883,19 @@ func (c *client) get(ctx context.Context, path string) (json.RawMessage, error) 
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, err
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+			interrupted := ctx.Err()
+			if interrupted == nil {
+				interrupted = err
+			}
+			return nil, classifyFailure(requestInterruptedError(interrupted), http.MethodGet, false, failureSubmit, 0)
 		}
-		return nil, &operationError{message: "error: Mohist Server request failed [service_unavailable]"}
+		return nil, classifyFailure(&operationError{message: "error: Mohist Server request failed [service_unavailable]", code: "service_unavailable"}, http.MethodGet, false, failureSubmit, 0)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, &operationError{message: "error: Mohist Server response could not be read [response_error]"}
+		return nil, classifyFailure(&operationError{message: "error: Mohist Server response could not be read [response_error]", code: "response_error"}, http.MethodGet, false, failureResponse, 0)
 	}
 	if resp.StatusCode == http.StatusUnauthorized && c.refreshToken != "" {
 		if c.refresh() {
@@ -889,7 +912,7 @@ func (c *client) get(ctx context.Context, path string) (json.RawMessage, error) 
 
 	var result envelope
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, &operationError{message: responseStatusError(resp.StatusCode)}
+		return nil, classifyFailure(responseStatusFailure(resp.StatusCode), http.MethodGet, false, failureResponse, resp.StatusCode)
 	}
 	success := result.Success == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 || result.Success != nil && *result.Success
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 || !success {
@@ -901,10 +924,10 @@ func (c *client) get(ctx context.Context, path string) (json.RawMessage, error) 
 		if message == "" {
 			message = "Mohist Server request failed"
 		}
-		return nil, &operationError{message: "error: " + message + " [" + code + "]", code: code, details: result.Details}
+		return nil, classifyFailure(&operationError{message: "error: " + message + " [" + code + "]", code: code, details: result.Details, effect: result.Effect, retrySafe: result.RetrySafe, nextAction: result.NextAction}, http.MethodGet, false, failureServer, resp.StatusCode)
 	}
 	if len(result.Data) == 0 || string(result.Data) == "null" {
-		return nil, &operationError{message: "error: Mohist Server returned no data [invalid_response]"}
+		return nil, classifyFailure(&operationError{message: "error: Mohist Server returned no data [invalid_response]", code: "invalid_response"}, http.MethodGet, false, failureResponse, resp.StatusCode)
 	}
 	return result.Data, nil
 }
@@ -940,14 +963,16 @@ func (c *client) refresh() bool {
 	return true
 }
 
-func responseStatusError(status int) string {
+// responseStatusFailure classifies a response whose body was not a valid
+// envelope: the status is all the CLI knows about the outcome.
+func responseStatusFailure(status int) *operationError {
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		return "error: Mohist Server authentication failed [" + statusCodeName(status) + "]"
+		return &operationError{message: "error: Mohist Server authentication failed [" + statusCodeName(status) + "]", code: statusCodeName(status)}
 	}
 	if status == http.StatusNotFound {
-		return "error: Mohist Server could not find the requested resource [not_found]"
+		return &operationError{message: "error: Mohist Server could not find the requested resource [not_found]", code: "not_found"}
 	}
-	return "error: Mohist Server returned malformed JSON (HTTP " + fmt.Sprint(status) + ") [invalid_response]"
+	return &operationError{message: "error: Mohist Server returned malformed JSON (HTTP " + fmt.Sprint(status) + ") [invalid_response]", code: "invalid_response"}
 }
 
 func statusCodeName(status int) string {
@@ -1302,5 +1327,182 @@ func doctorFailed(data json.RawMessage) bool {
 func writeError(out io.Writer, err error) {
 	if err != nil {
 		fmt.Fprintln(out, err.Error())
+	}
+}
+
+// failureStage names where one request failed. The stage decides which facts
+// the CLI can state about the effect: a request that never left the process
+// changed nothing, while a lost connection leaves the effect unknown.
+type failureStage int
+
+const (
+	failureLocal    failureStage = iota // the request was never created or sent
+	failureSubmit                       // the connection failed before a response
+	failureResponse                     // the response could not be read or parsed
+	failureServer                       // the Server answered with a failure
+)
+
+// classifyFailure attaches the decision facts the CLI derives itself. Facts
+// the Server already supplied in the envelope win; only the gaps are filled.
+func classifyFailure(e *operationError, method string, keyed bool, stage failureStage, status int) *operationError {
+	if e.effect != "" && e.retrySafe != nil {
+		return e
+	}
+	effect, retrySafe := "none", boolPtr(false)
+	switch {
+	case method == http.MethodGet:
+		// A read failure changes nothing and repeating the read is safe.
+		retrySafe = boolPtr(true)
+	case stage == failureLocal:
+	case stage == failureServer && status < http.StatusInternalServerError:
+		// The Server classified this failure: it decided, nothing else applied.
+	case keyed:
+		// The durable fence replays the recorded outcome for the same key, and
+		// the domain guards refuse a second transition, so repeating a keyed
+		// write is safe even when the failure said nothing about the effect.
+		effect, retrySafe = "unknown", boolPtr(true)
+	case stage == failureServer:
+		effect = "unknown"
+	default:
+		effect = "unknown"
+	}
+	if e.effect == "" {
+		e.effect = effect
+	}
+	if e.retrySafe == nil {
+		e.retrySafe = retrySafe
+	}
+	return e
+}
+
+// failureView is the structured form of one Issue or Run failure: one JSON
+// object on stderr that states the stable code, the effect, whether retry is
+// safe, and the next action.
+type failureView struct {
+	Code       string `json:"code"`
+	Message    string `json:"message"`
+	Effect     string `json:"effect"`
+	RetrySafe  bool   `json:"retrySafe"`
+	NextAction string `json:"nextAction,omitempty"`
+}
+
+// failureFacts projects any error onto the failure view. A usage failure
+// never left the process; an operation error carries its own facts.
+func failureFacts(err error) failureView {
+	var operation *operationError
+	if !errors.As(err, &operation) {
+		return failureView{Code: "usage_error", Message: failureMessage(err.Error(), ""), Effect: "none"}
+	}
+	code := operation.code
+	if code == "" {
+		code = "service_error"
+	}
+	effect := operation.effect
+	if effect == "" {
+		effect = "none"
+	}
+	return failureView{
+		Code:       code,
+		Message:    failureMessage(operation.message, code),
+		Effect:     effect,
+		RetrySafe:  operation.retrySafe != nil && *operation.retrySafe,
+		NextAction: operation.nextAction,
+	}
+}
+
+// failureMessage strips the rendered error decoration so the structured form
+// carries the bare cause beside the structured code.
+func failureMessage(message, code string) string {
+	message = strings.TrimPrefix(message, "error: ")
+	if code != "" {
+		message = strings.TrimSuffix(message, " ["+code+"]")
+	}
+	return message
+}
+
+// writeFailure reports one Issue or Run failure. A --json invocation receives
+// the structured failure object on stderr; the human form keeps the existing
+// error line and adds the hint when a recovery action exists.
+func writeFailure(out io.Writer, structured bool, err error) {
+	if structured {
+		_ = json.NewEncoder(out).Encode(failureFacts(err))
+		return
+	}
+	writeError(out, err)
+	var operation *operationError
+	if errors.As(err, &operation) && operation.nextAction != "" {
+		fmt.Fprintln(out, "hint: "+operation.nextAction)
+	}
+}
+
+// structuredFailure reports whether the invocation selected --json output on
+// an Issue or Run command, the surface that promises decision facts.
+func structuredFailure(kind string, selected bool) bool {
+	if !strings.HasPrefix(kind, "issue-") && !strings.HasPrefix(kind, "run-") && kind != "why" {
+		return false
+	}
+	return selected
+}
+
+// parseFailureStructured decides the failure form from the raw argv, because
+// a failed parse produced no command: only an Issue or Run invocation that
+// contains --json receives the structured object.
+func parseFailureStructured(args []string) bool {
+	return len(args) > 0 && (args[0] == "issue" || args[0] == "run") && contains(args, "--json")
+}
+
+// keyedRetryHint completes a keyed write whose outcome is unknown: the lost
+// response is recovered by repeating the same command with the same key.
+func keyedRetryHint(err error, nextAction string) error {
+	var operation *operationError
+	if errors.As(err, &operation) && operation.effect == "unknown" && operation.retrySafe != nil && *operation.retrySafe && operation.nextAction == "" {
+		operation.nextAction = nextAction
+	}
+	return err
+}
+
+// commandFailureExit reports an Issue or Run operation failure with its
+// decision facts and returns the process exit code.
+func commandFailureExit(deps Dependencies, ctx context.Context, cmd command, err error) int {
+	writeFailure(deps.Stderr, structuredFailure(cmd.kind, cmd.fieldsOnly || len(cmd.fields) > 0), err)
+	if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+		return ExitCanceled
+	}
+	return ExitOperation
+}
+
+// commandUsageExit reports an Issue or Run local usage failure — the request
+// never left the process — and returns ExitUsage.
+func commandUsageExit(deps Dependencies, cmd command, err error) int {
+	writeFailure(deps.Stderr, structuredFailure(cmd.kind, cmd.fieldsOnly || len(cmd.fields) > 0), err)
+	return ExitUsage
+}
+
+// requestInterruptedError classifies the caller's own cancelation or deadline.
+// No response was received, so a keyed write's effect is unknown and the same
+// key is its recovery; classifyFailure fills the effect for the command kind.
+func requestInterruptedError(cause error) *operationError {
+	if errors.Is(cause, context.DeadlineExceeded) {
+		return &operationError{message: "error: the deadline passed before Mohist Server answered [timeout]", code: "timeout", cause: cause}
+	}
+	return &operationError{message: "error: the request was canceled before Mohist Server answered [canceled]", code: "canceled", cause: cause}
+}
+
+// responseShapeError classifies a readable response whose shape the CLI could
+// not project: the read succeeded, so repeating it stays safe.
+func responseShapeError(message string) *operationError {
+	return &operationError{message: message, code: "invalid_response", effect: "none", retrySafe: boolPtr(true)}
+}
+
+// projectNotSelected is the local precondition failure of every
+// Project-scoped Issue and Run command without an explicit or configured
+// Project.
+func projectNotSelected() *operationError {
+	return &operationError{
+		message:    "error: Run 'mo project use <name-or-id>' or pass --project <name-or-id> [project_not_selected]",
+		code:       "project_not_selected",
+		effect:     "none",
+		retrySafe:  boolPtr(false),
+		nextAction: "mo project use <name-or-id>",
 	}
 }

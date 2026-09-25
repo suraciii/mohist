@@ -10,6 +10,7 @@ using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.DirectApi;
+using Mohist.Server.Infrastructure.Idempotency;
 using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -54,7 +55,7 @@ public static class DirectApiRoutes
             string agentId,
             AgentQuerier agents,
             IAgentLauncher launcher,
-            DirectApiIdempotencyService idempotency,
+            IdempotencyFence idempotency,
             PublicExecutionReadQuerier publicReads,
             CancellationToken ct) =>
             await LaunchAsync(
@@ -74,7 +75,7 @@ public static class DirectApiRoutes
             AgentSessionQuerier sessions,
             IGrainFactory grains,
             AgentSessionFollowupDispatcher dispatcher,
-            DirectApiIdempotencyService idempotency,
+            IdempotencyFence idempotency,
             PublicExecutionReadQuerier publicReads,
             CancellationToken ct) =>
             await FollowupAsync(
@@ -95,7 +96,7 @@ public static class DirectApiRoutes
             AgentSessionQuerier sessions,
             IGrainFactory grains,
             ISessionStopDelivery stopDelivery,
-            DirectApiIdempotencyService idempotency,
+            IdempotencyFence idempotency,
             PublicExecutionReadQuerier publicReads,
             CancellationToken ct) =>
             await DirectApiStopRoutes.ExecuteAsync(
@@ -206,7 +207,7 @@ public static class DirectApiRoutes
         AgentSessionQuerier sessions,
         IGrainFactory grains,
         AgentSessionFollowupDispatcher dispatcher,
-        DirectApiIdempotencyService idempotency,
+        IdempotencyFence idempotency,
         PublicExecutionReadQuerier publicReads,
         CancellationToken ct)
     {
@@ -245,10 +246,10 @@ public static class DirectApiRoutes
             ?? throw new InvalidOperationException("The direct API caller was not resolved.");
 
         var existing = await idempotency.FindAsync(
-            DirectApiCommands.Followup,
+            IdempotencyCommands.Followup,
             scopeKey,
             ct);
-        DirectApiMappingClaim claim;
+        IdempotencyClaim claim;
         if (existing is null)
         {
             var target = await sessions.ResolveCanonicalFollowupTargetAsync(projectId, sessionId, ct);
@@ -266,7 +267,7 @@ public static class DirectApiRoutes
                 InputId: inputId,
                 TurnId: turnId);
             claim = await idempotency.GetOrCreateAsync(
-                DirectApiCommands.Followup,
+                IdempotencyCommands.Followup,
                 scopeKey,
                 caller.CallerKeyId,
                 fingerprint,
@@ -276,16 +277,16 @@ public static class DirectApiRoutes
         }
         else
         {
-            var existingOutcome = DirectApiIdempotencyService.ReadOutcome<DirectApiFollowupOutcome>(existing);
+            var existingOutcome = IdempotencyFence.ReadOutcome<DirectApiFollowupOutcome>(existing.Outcome);
             if (!string.Equals(existingOutcome.ProjectId, projectId, StringComparison.Ordinal))
             {
                 return DirectApiResults.ResourceNotFound(DirectApiErrorCodes.SessionNotFound);
             }
 
-            claim = new DirectApiMappingClaim(existing, Created: false);
+            claim = existing;
         }
 
-        if (!string.Equals(claim.Mapping.Fingerprint, fingerprint, StringComparison.Ordinal))
+        if (!string.Equals(claim.Fingerprint, fingerprint, StringComparison.Ordinal))
         {
             return DirectApiResults.Error(
                 StatusCodes.Status409Conflict,
@@ -293,8 +294,8 @@ public static class DirectApiRoutes
                 "The Idempotency-Key has already been used for a different request.");
         }
 
-        var outcome = DirectApiIdempotencyService.ReadOutcome<DirectApiFollowupOutcome>(claim.Mapping);
-        if (claim.Mapping.State == DirectApiMappingStates.Pending)
+        var outcome = IdempotencyFence.ReadOutcome<DirectApiFollowupOutcome>(claim.Outcome);
+        if (claim.State == IdempotencyMappingStates.Pending)
         {
             try
             {
@@ -310,15 +311,12 @@ public static class DirectApiRoutes
                     InputId = accepted.InputId,
                     TurnId = accepted.TurnId,
                 };
-                claim = claim with
-                {
-                    Mapping = await idempotency.CompleteAsync(
-                        DirectApiCommands.Followup,
-                        scopeKey,
-                        DirectApiMappingStates.Completed,
-                        JSON.Serialize(outcome),
-                        ct),
-                };
+                claim = await idempotency.CompleteAsync(
+                    IdempotencyCommands.Followup,
+                    scopeKey,
+                    IdempotencyMappingStates.Completed,
+                    JSON.Serialize(outcome),
+                    ct);
 
                 if (accepted.ShouldRedeliver)
                     await dispatcher.DispatchNextAsync(projectId, sessionId, ct);
@@ -332,15 +330,12 @@ public static class DirectApiRoutes
                     RejectionCode = PublicExecutionFieldValues.Reasons.QueueFull,
                     RejectionReason = PublicExecutionFieldValues.Reasons.QueueFull,
                 };
-                claim = claim with
-                {
-                    Mapping = await idempotency.CompleteAsync(
-                        DirectApiCommands.Followup,
-                        scopeKey,
-                        DirectApiMappingStates.Rejected,
-                        JSON.Serialize(outcome),
-                        ct),
-                };
+                claim = await idempotency.CompleteAsync(
+                    IdempotencyCommands.Followup,
+                    scopeKey,
+                    IdempotencyMappingStates.Rejected,
+                    JSON.Serialize(outcome),
+                    ct);
             }
             catch (FollowupConcurrencyLimitException)
             {
@@ -351,15 +346,12 @@ public static class DirectApiRoutes
                     RejectionCode = PublicExecutionFieldValues.Reasons.QueueFull,
                     RejectionReason = PublicExecutionFieldValues.Reasons.QueueFull,
                 };
-                claim = claim with
-                {
-                    Mapping = await idempotency.CompleteAsync(
-                        DirectApiCommands.Followup,
-                        scopeKey,
-                        DirectApiMappingStates.Rejected,
-                        JSON.Serialize(outcome),
-                        ct),
-                };
+                claim = await idempotency.CompleteAsync(
+                    IdempotencyCommands.Followup,
+                    scopeKey,
+                    IdempotencyMappingStates.Rejected,
+                    JSON.Serialize(outcome),
+                    ct);
             }
             catch (RuntimeSessionMissingException)
             {
@@ -405,26 +397,23 @@ public static class DirectApiRoutes
                     RejectionCode = DirectApiErrorCodes.FollowupRejected,
                     RejectionReason = DirectApiErrorCodes.FollowupRejected,
                 };
-                claim = claim with
-                {
-                    Mapping = await idempotency.CompleteAsync(
-                        DirectApiCommands.Followup,
-                        scopeKey,
-                        DirectApiMappingStates.Rejected,
-                        JSON.Serialize(outcome),
-                        ct),
-                };
+                claim = await idempotency.CompleteAsync(
+                    IdempotencyCommands.Followup,
+                    scopeKey,
+                    IdempotencyMappingStates.Rejected,
+                    JSON.Serialize(outcome),
+                    ct);
             }
         }
 
-        outcome = DirectApiIdempotencyService.ReadOutcome<DirectApiFollowupOutcome>(claim.Mapping);
-        if (claim.Mapping.State == DirectApiMappingStates.Rejected)
+        outcome = IdempotencyFence.ReadOutcome<DirectApiFollowupOutcome>(claim.Outcome);
+        if (claim.State == IdempotencyMappingStates.Rejected)
         {
             return DirectApiResults.Snapshot(
                 DirectApiPublicObservation.RejectedFollowup(
                     projectId,
                     outcome,
-                    claim.Mapping.CompletedAt ?? DateTimeOffset.UnixEpoch));
+                    claim.CompletedAt ?? DateTimeOffset.UnixEpoch));
         }
 
         if (string.IsNullOrWhiteSpace(outcome.InputId))
@@ -447,16 +436,13 @@ public static class DirectApiRoutes
         }
 
         var frozenOutcome = outcome with { SnapshotJson = observation.SnapshotJson! };
-        claim = claim with
-        {
-            Mapping = await idempotency.FreezeCompletedOutcomeAsync(
-                DirectApiCommands.Followup,
-                scopeKey,
-                claim.Mapping.Outcome!,
-                JSON.Serialize(frozenOutcome),
-                ct),
-        };
-        frozenOutcome = DirectApiIdempotencyService.ReadOutcome<DirectApiFollowupOutcome>(claim.Mapping);
+        claim = await idempotency.FreezeCompletedOutcomeAsync(
+            IdempotencyCommands.Followup,
+            scopeKey,
+            claim.Outcome!,
+            JSON.Serialize(frozenOutcome),
+            ct);
+        frozenOutcome = IdempotencyFence.ReadOutcome<DirectApiFollowupOutcome>(claim.Outcome);
         return DirectApiResults.Snapshot(frozenOutcome.SnapshotJson!);
     }
 
@@ -466,7 +452,7 @@ public static class DirectApiRoutes
         string agentId,
         AgentQuerier agents,
         IAgentLauncher launcher,
-        DirectApiIdempotencyService idempotency,
+        IdempotencyFence idempotency,
         PublicExecutionReadQuerier publicReads,
         CancellationToken ct)
     {
@@ -506,11 +492,11 @@ public static class DirectApiRoutes
         var caller = context.Items[ExternalAgentCaller.HttpContextItemKey] as ExternalAgentCaller
             ?? throw new InvalidOperationException("The direct API caller was not resolved.");
         var existing = await idempotency.FindAsync(
-            DirectApiCommands.Launch,
+            IdempotencyCommands.Launch,
             scopeKey,
             ct);
         AgentInfo? agent = null;
-        DirectApiMappingClaim claim;
+        IdempotencyClaim claim;
         if (existing is null)
         {
             agent = await agents.GetByIdAsync(projectId, agentId, ct);
@@ -522,7 +508,7 @@ public static class DirectApiRoutes
 
             var initialOutcome = new DirectApiLaunchOutcome(coordinatorKey);
             claim = await idempotency.GetOrCreateAsync(
-                DirectApiCommands.Launch,
+                IdempotencyCommands.Launch,
                 scopeKey,
                 caller.CallerKeyId,
                 fingerprint,
@@ -532,10 +518,10 @@ public static class DirectApiRoutes
         }
         else
         {
-            claim = new DirectApiMappingClaim(existing, Created: false);
+            claim = existing;
         }
 
-        if (!string.Equals(claim.Mapping.Fingerprint, fingerprint, StringComparison.Ordinal))
+        if (!string.Equals(claim.Fingerprint, fingerprint, StringComparison.Ordinal))
         {
             return DirectApiResults.Error(
                 StatusCodes.Status409Conflict,
@@ -543,11 +529,11 @@ public static class DirectApiRoutes
                 "The Idempotency-Key has already been used for a different request.");
         }
 
-        var outcome = DirectApiIdempotencyService.ReadOutcome<DirectApiLaunchOutcome>(claim.Mapping);
-        if (claim.Mapping.State == DirectApiMappingStates.Rejected)
-            return RejectedLaunch(projectId, agentId, outcome, claim.Mapping.CompletedAt);
+        var outcome = IdempotencyFence.ReadOutcome<DirectApiLaunchOutcome>(claim.Outcome);
+        if (claim.State == IdempotencyMappingStates.Rejected)
+            return RejectedLaunch(projectId, agentId, outcome, claim.CompletedAt);
 
-        if (claim.Mapping.State == DirectApiMappingStates.Pending)
+        if (claim.State == IdempotencyMappingStates.Pending)
         {
             var launchRequest = new AgentLaunchCoordinatorRequest(
                 Prompt: text,
@@ -605,15 +591,12 @@ public static class DirectApiRoutes
                     InputId = result.InputId,
                     TurnId = result.TurnId,
                 };
-                claim = claim with
-                {
-                    Mapping = await idempotency.CompleteAsync(
-                        DirectApiCommands.Launch,
-                        scopeKey,
-                        DirectApiMappingStates.Completed,
-                        JSON.Serialize(outcome),
-                        ct),
-                };
+                claim = await idempotency.CompleteAsync(
+                    IdempotencyCommands.Launch,
+                    scopeKey,
+                    IdempotencyMappingStates.Completed,
+                    JSON.Serialize(outcome),
+                    ct);
             }
             catch (AgentExecutabilityException)
             {
@@ -622,15 +605,12 @@ public static class DirectApiRoutes
                     RejectionCode = DirectApiErrorCodes.AgentNotReady,
                     RejectionReason = "agent_not_ready",
                 };
-                claim = claim with
-                {
-                    Mapping = await idempotency.CompleteAsync(
-                        DirectApiCommands.Launch,
-                        scopeKey,
-                        DirectApiMappingStates.Rejected,
-                        JSON.Serialize(outcome),
-                        ct),
-                };
+                claim = await idempotency.CompleteAsync(
+                    IdempotencyCommands.Launch,
+                    scopeKey,
+                    IdempotencyMappingStates.Rejected,
+                    JSON.Serialize(outcome),
+                    ct);
             }
             catch (LaunchSetupPendingException)
             {
@@ -641,8 +621,8 @@ public static class DirectApiRoutes
             }
         }
 
-        if (claim.Mapping.State == DirectApiMappingStates.Rejected)
-            return RejectedLaunch(projectId, agentId, outcome, claim.Mapping.CompletedAt);
+        if (claim.State == IdempotencyMappingStates.Rejected)
+            return RejectedLaunch(projectId, agentId, outcome, claim.CompletedAt);
 
         if (string.IsNullOrWhiteSpace(outcome.JobId))
         {

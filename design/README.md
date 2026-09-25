@@ -18,6 +18,7 @@ changing a document in `design/`.
 - [domain-analysis.md](domain-analysis.md) — Domain analysis and context mapping: subdomain split, bounded-context relations, dependency invariants.
 - [conventions.md](conventions.md) — Naming, layering, variable conventions, certainty vocabulary (facts, claims, settlement).
 - [cli.md](cli.md) — Command language for humans and agents: domain ownership, progressive help / Skill context, field-selection output, error and reliability contract.
+- [agent-operability.md](agent-operability.md) — Keyed control-plane writes, failure projection, and the read projection an Agent operates one Issue with; product contract in [`../docs/agent-operability.md`](../docs/agent-operability.md).
 - [observability.md](observability.md) — Observability signal split, resource budget, degradation rules, high-frequency path cost constraints.
 - [diagnostics.md](diagnostics.md) — Run failure diagnosis and deployment doctor: server-assembled read models, dispatch snapshot retention, logical path display contract.
 - [eventbus.md](eventbus.md) — Event bus: CloudEvent subscription contract + single dispatcher reliable at-least-once notification.

@@ -27,6 +27,8 @@ If you are new to Mohist, read the [repository README](../README.md) first.
 
 ## Part 3: Work Management
 
+- [Agent Operability](agent-operability.md): Let Mohist and External Agents
+  discover, read, operate, supervise, recover, and report existing factory work
 - [Repositories](repositories.md): Declare multiple repositories as Project
   execution resources and route each Issue to its target repository
 - [Workspace](workspaces.md): Use persistent execution environments across

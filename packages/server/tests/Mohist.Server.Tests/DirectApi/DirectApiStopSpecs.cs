@@ -12,6 +12,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.DirectApi;
+using Mohist.Server.Infrastructure.Idempotency;
 using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Contracts;
@@ -73,11 +74,11 @@ public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixtur
         await using var db = await fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
             .CreateDbContextAsync();
-        var mapping = (await db.DirectApiIdempotencyMappings
-            .Where(row => row.Command == DirectApiCommands.Stop)
+        var mapping = (await db.IdempotencyMappings
+            .Where(row => row.Command == IdempotencyCommands.Stop)
             .ToListAsync())
             .Single(row => row.ScopeKey.EndsWith("|terminal-no-op", StringComparison.Ordinal));
-        Assert.Equal(DirectApiMappingStates.Completed, mapping.State);
+        Assert.Equal(IdempotencyMappingStates.Completed, mapping.State);
         Assert.False(string.IsNullOrWhiteSpace(mapping.FrozenTarget));
     }
 
@@ -139,19 +140,19 @@ public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixtur
         await using var db = await fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
             .CreateDbContextAsync();
-        Assert.Equal(1, await db.DirectApiIdempotencyMappings.CountAsync(row =>
-            row.Command == DirectApiCommands.Stop
+        Assert.Equal(1, await db.IdempotencyMappings.CountAsync(row =>
+            row.Command == IdempotencyCommands.Stop
             && row.TurnId == turnId));
-        var mapping = await db.DirectApiIdempotencyMappings.SingleAsync(row =>
-            row.Command == DirectApiCommands.Stop && row.TurnId == turnId);
-        Assert.Equal(DirectApiMappingStates.Pending, mapping.State);
+        var mapping = await db.IdempotencyMappings.SingleAsync(row =>
+            row.Command == IdempotencyCommands.Stop && row.TurnId == turnId);
+        Assert.Equal(IdempotencyMappingStates.Pending, mapping.State);
         AssertFrozenTargetIsInternal(mapping.FrozenTarget!, turnId);
 
         var secondCaller = await CreatePatAsync(projectId);
         using var secondClient = DirectClient(secondCaller);
         using var sameKey = await secondClient.SendAsync(StopRequest(projectId, turnId, "unknown-a"));
         await AssertErrorAsync(sameKey, HttpStatusCode.Conflict, DirectApiErrorCodes.StopOutcomeUnknown);
-        Assert.Equal(1, await db.DirectApiIdempotencyMappings.CountAsync(row => row.TurnId == turnId));
+        Assert.Equal(1, await db.IdempotencyMappings.CountAsync(row => row.TurnId == turnId));
     }
 
     [Fact]
@@ -177,8 +178,8 @@ public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixtur
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
             .CreateDbContextAsync())
         {
-            var mapping = await db.DirectApiIdempotencyMappings.SingleAsync(row =>
-                row.Command == DirectApiCommands.Stop && row.TurnId == turnId);
+            var mapping = await db.IdempotencyMappings.SingleAsync(row =>
+                row.Command == IdempotencyCommands.Stop && row.TurnId == turnId);
             AssertFrozenTargetIsInternal(mapping.FrozenTarget!, turnId);
         }
 
@@ -347,7 +348,7 @@ public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixtur
     {
         await using var scope = fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        return await db.DirectApiIdempotencyMappings.CountAsync();
+        return await db.IdempotencyMappings.CountAsync();
     }
 
     private static void AssertFrozenTargetIsInternal(string json, string turnId)
