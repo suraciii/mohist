@@ -59,9 +59,12 @@ public sealed class WorkflowRunControlIdempotencyApiSpecs(DefaultMohistIntegrati
         Assert.Equal("idempotency_key_reused", payload.GetProperty("code").GetString());
         Assert.Equal("none", payload.GetProperty("effect").GetString());
         Assert.False(payload.GetProperty("retrySafe").GetBoolean());
-        var nextAction = payload.GetProperty("nextAction").GetString();
-        Assert.Contains($"mo run request-changes {wrId}", nextAction);
-        Assert.Contains("<new-key>", nextAction);
+        // The key already belongs to another request, so the recovery command
+        // names the one the caller just sent: run that under a fresh key, or
+        // resend the original body with this key.
+        Assert.Equal(
+            $"mo run request-changes {wrId} --message 'loosen the check' --idempotency-key <new-key>",
+            payload.GetProperty("nextAction").GetString());
 
         var run = await LoadRunAsync(wrId);
         Assert.Single(run.Feedback);
@@ -130,7 +133,9 @@ public sealed class WorkflowRunControlIdempotencyApiSpecs(DefaultMohistIntegrati
         Assert.Equal("operation_pending", payload.GetProperty("code").GetString());
         Assert.Equal("unknown", payload.GetProperty("effect").GetString());
         Assert.True(payload.GetProperty("retrySafe").GetBoolean());
-        Assert.Contains(key, payload.GetProperty("nextAction").GetString());
+        Assert.Equal(
+            $"mo run pause {wrId} --idempotency-key {key}",
+            payload.GetProperty("nextAction").GetString());
         var run = await LoadRunAsync(wrId);
         Assert.NotEqual(WorkflowRunStatus.Paused, run.Status);
         var row = await FenceRowAsync(wrId, key);
@@ -184,6 +189,40 @@ public sealed class WorkflowRunControlIdempotencyApiSpecs(DefaultMohistIntegrati
         Assert.Equal(0, await FenceRowCountAsync(wrId));
     }
 
+    [Fact]
+    public async Task Stop_PendingHintCarriesTheConfirmationFlagTheCliRequires()
+    {
+        var wrId = await SeedActiveWorkflowAsync();
+        const string key = "stop-key-pending";
+        await SeedPendingFenceRowAsync(wrId, key, AgeSeconds: 0, verb: "stop");
+
+        var response = await SendStopAsync(wrId, key);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(
+            $"mo run stop {wrId} --yes --idempotency-key {key}",
+            payload.GetProperty("nextAction").GetString());
+        var run = await LoadRunAsync(wrId);
+        Assert.NotEqual(WorkflowRunStatus.Stopped, run.Status);
+    }
+
+    [Fact]
+    public async Task RerunFromStage_PendingHintCarriesTheStageAndTheRerunLeaf()
+    {
+        var wrId = await SeedActiveWorkflowAsync();
+        const string key = "rerun-stage-key-pending";
+        await SeedPendingFenceRowAsync(wrId, key, AgeSeconds: 0, verb: "rerun-from-stage", stage: "plan");
+
+        var response = await SendRerunFromStageAsync(wrId, key, "plan");
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(
+            $"mo run rerun {wrId} --from-stage plan --idempotency-key {key}",
+            payload.GetProperty("nextAction").GetString());
+    }
+
     private static Task<HttpResponseMessage> SendRequestChangesAsync(HttpClient client, string wrId, string key, string message)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, $"/api/workflow-runs/{wrId}/request-changes")
@@ -204,7 +243,29 @@ public sealed class WorkflowRunControlIdempotencyApiSpecs(DefaultMohistIntegrati
         return Client.SendAsync(request);
     }
 
-    private async Task SeedPendingFenceRowAsync(string wrId, string key, int AgeSeconds)
+    private Task<HttpResponseMessage> SendStopAsync(string wrId, string key)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/workflow-runs/{wrId}/stop");
+        request.Headers.Add("Idempotency-Key", key);
+        return Client.SendAsync(request);
+    }
+
+    private Task<HttpResponseMessage> SendRerunFromStageAsync(string wrId, string key, string stage)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/workflow-runs/{wrId}/rerun-from-stage")
+        {
+            Content = JsonContent.Create(new { stage }),
+        };
+        request.Headers.Add("Idempotency-Key", key);
+        return Client.SendAsync(request);
+    }
+
+    private async Task SeedPendingFenceRowAsync(
+        string wrId,
+        string key,
+        int AgeSeconds,
+        string verb = "pause",
+        string? stage = null)
     {
         var factory = Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
@@ -213,7 +274,9 @@ public sealed class WorkflowRunControlIdempotencyApiSpecs(DefaultMohistIntegrati
             Command = IdempotencyCommands.WorkflowControl,
             ScopeKey = KeyedControlWrites.WorkflowControlScopeKey(wrId, "service", key),
             CallerKeyId = "service",
-            Fingerprint = KeyedControlWrites.WorkflowControlFingerprint(wrId, "pause"),
+            Fingerprint = stage is null
+                ? KeyedControlWrites.WorkflowControlFingerprint(wrId, verb)
+                : KeyedControlWrites.WorkflowControlFingerprint(wrId, verb, new { stage }),
             State = IdempotencyMappingStates.Pending,
             CreatedAt = fixture.TimeProvider.GetUtcNow().AddSeconds(-AgeSeconds),
         });

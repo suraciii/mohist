@@ -339,9 +339,14 @@ type operationError struct {
 	effect     string
 	retrySafe  *bool
 	nextAction string
+	// cause is the failure the CLI classified itself (a transport or context
+	// error), kept so errors.Is still recognises it as the caller sees it.
+	cause error
 }
 
 func (e *operationError) Error() string { return e.message }
+
+func (e *operationError) Unwrap() error { return e.cause }
 
 func boolPtr(value bool) *bool { return &value }
 
@@ -878,8 +883,12 @@ func (c *client) get(ctx context.Context, path string) (json.RawMessage, error) 
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, err
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+			interrupted := ctx.Err()
+			if interrupted == nil {
+				interrupted = err
+			}
+			return nil, classifyFailure(requestInterruptedError(interrupted), http.MethodGet, false, failureSubmit, 0)
 		}
 		return nil, classifyFailure(&operationError{message: "error: Mohist Server request failed [service_unavailable]", code: "service_unavailable"}, http.MethodGet, false, failureSubmit, 0)
 	}
@@ -1464,6 +1473,16 @@ func commandFailureExit(deps Dependencies, ctx context.Context, cmd command, err
 func commandUsageExit(deps Dependencies, cmd command, err error) int {
 	writeFailure(deps.Stderr, structuredFailure(cmd.kind, cmd.fieldsOnly || len(cmd.fields) > 0), err)
 	return ExitUsage
+}
+
+// requestInterruptedError classifies the caller's own cancelation or deadline.
+// No response was received, so a keyed write's effect is unknown and the same
+// key is its recovery; classifyFailure fills the effect for the command kind.
+func requestInterruptedError(cause error) *operationError {
+	if errors.Is(cause, context.DeadlineExceeded) {
+		return &operationError{message: "error: the deadline passed before Mohist Server answered [timeout]", code: "timeout", cause: cause}
+	}
+	return &operationError{message: "error: the request was canceled before Mohist Server answered [canceled]", code: "canceled", cause: cause}
 }
 
 // responseShapeError classifies a readable response whose shape the CLI could

@@ -761,8 +761,12 @@ func (c *client) request(ctx context.Context, method, path string, body any) (js
 	}
 	resp, e := c.http.Do(req)
 	if e != nil {
-		if errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded) {
-			return nil, e
+		if ctx.Err() != nil || errors.Is(e, context.Canceled) {
+			interrupted := ctx.Err()
+			if interrupted == nil {
+				interrupted = e
+			}
+			return nil, classifyFailure(requestInterruptedError(interrupted), method, false, failureSubmit, 0)
 		}
 		return nil, classifyFailure(&operationError{message: "error: Mohist Server request failed [service_unavailable]", code: "service_unavailable"}, method, false, failureSubmit, 0)
 	}

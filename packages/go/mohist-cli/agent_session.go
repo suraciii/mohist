@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -1245,8 +1246,18 @@ func (c *client) requestHeaders(ctx context.Context, method, path string, body a
 		}
 		resp, e := c.http.Do(req)
 		if e != nil {
-			if errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded) {
-				return nil, e
+			if ctx.Err() != nil || errors.Is(e, context.Canceled) {
+				interrupted := ctx.Err()
+				if interrupted == nil {
+					interrupted = e
+				}
+				return nil, classifyFailure(requestInterruptedError(interrupted), method, keyed, failureSubmit, 0)
+			}
+			if !keyed && os.IsTimeout(e) {
+				// The Server may have received and applied this unkeyed write
+				// after the client stopped waiting, and a second attempt could
+				// produce a second effect. The CLI states the unknown instead.
+				return nil, classifyFailure(&operationError{message: "error: Mohist Server did not answer before the client timeout [timeout]", code: "timeout"}, method, keyed, failureSubmit, 0)
 			}
 			last = classifyFailure(&operationError{message: "error: Mohist Server request failed [service_unavailable]", code: "service_unavailable"}, method, keyed, failureSubmit, 0)
 			continue
@@ -1254,7 +1265,15 @@ func (c *client) requestHeaders(ctx context.Context, method, path string, body a
 		b, e := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if e != nil {
-			return nil, classifyFailure(&operationError{message: "error: Mohist Server response could not be read [response_error]", code: "response_error"}, method, keyed, failureResponse, resp.StatusCode)
+			lost := classifyFailure(&operationError{message: "error: Mohist Server response could not be read [response_error]", code: "response_error"}, method, keyed, failureResponse, resp.StatusCode)
+			if !keyed {
+				return nil, lost
+			}
+			// The Server answered but the body was lost, so the operation may
+			// have applied. Repeating the identical keyed request reads the
+			// recorded decision instead of executing a second effect.
+			last = lost
+			continue
 		}
 		var env envelope
 		if json.Unmarshal(b, &env) != nil {

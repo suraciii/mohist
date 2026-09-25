@@ -924,7 +924,14 @@ known, whether retry is safe, and what to do next:
 - A retry is safe only when repeating the identical request cannot produce a
   second effect. Repeating a keyed write with the same key is the intended
   recovery: the Server replays the recorded outcome instead of executing again.
-- `hint:` is that recovery action in human form.
+- `hint:` is that recovery action in human form. Every printed recovery command
+  is complete and quoted for a POSIX shell, so it stays executable after a copy.
+- The CLI re-sends a keyed write once by itself when the connection failed, the
+  client's own timeout expired, or the response body was lost after the Server
+  answered. An unkeyed write is never re-sent.
+- A caller interruption is not retried. The CLI reports `canceled` (exit `130`)
+  or `timeout`, keeps the effect rule above, and prints the same-key recovery of
+  a keyed write.
 
 A caller that selected `--json` receives the same facts as one machine-readable
 object on stderr instead of the two text lines, so a structured caller never

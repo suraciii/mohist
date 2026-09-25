@@ -123,7 +123,9 @@ failure, `2` local usage failure, and `130` cancellation. Every domain failure
 exposed to an Agent must additionally carry a stable code, whether the effect
 is known, whether retry is safe, and the next permitted action. Human hints may
 remain on stderr; structured callers must not parse prose to decide whether to
-retry or hand off.
+retry or hand off. A caller that is interrupted mid-write receives the same
+facts: `canceled` or `timeout`, the effect unknown, and the same command under
+the same key as the next action.
 
 ## Read the Factory
 

@@ -641,7 +641,7 @@ func issueStartNextAction(cmd command, key string) string {
 	if project := argValue(cmd.args, "project", ""); project != "" {
 		parts = append(parts, "--project", shellWord(project))
 	}
-	return strings.Join(append(parts, "--idempotency-key", key), " ")
+	return strings.Join(append(parts, "--idempotency-key", shellWord(key)), " ")
 }
 
 func renderIssueView(out interface{ Write([]byte) (int, error) }, data json.RawMessage) error {

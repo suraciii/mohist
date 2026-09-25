@@ -174,11 +174,19 @@ The Server supplies `effect`, `retrySafe`, and `nextAction` when it knows them
   the same key as the next action;
 - response unreadable or malformed → `effect: unknown`, `retrySafe` by the same
   rule;
-- read failure → `effect: none`, `retrySafe: true`.
+- read failure → `effect: none`, `retrySafe: true`;
+- the caller's own cancelation or deadline → `canceled` (exit `130`) or
+  `timeout`, with the same effect rule, so an interrupted keyed write is never
+  reported as an operation that did not happen.
 
-Automatic transport retry stays limited to keyed writes: the CLI re-sends a
-keyed write once when the connection failed, because the fence makes that safe.
-An unkeyed write is never re-sent.
+Automatic transport retry stays limited to keyed writes, which the fence makes
+safe; an unkeyed write is never re-sent. A keyed write is re-sent once when the
+connection failed, when the client's own timeout expired, or when the response
+body was lost after the Server answered.
+
+Every recovery command the CLI prints is complete — the run or issue reference,
+the flags, and the key — and quoted for a POSIX shell, so it survives a copy
+even when the caller's values contain spaces or quotes.
 
 ## Examples
 

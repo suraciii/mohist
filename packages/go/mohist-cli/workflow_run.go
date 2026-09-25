@@ -601,17 +601,19 @@ func runControlNextAction(cmd command, key string) string {
 	case "run-stop":
 		parts = append(parts, "--yes")
 	}
-	return strings.Join(append(parts, "--idempotency-key", key), " ")
+	return strings.Join(append(parts, "--idempotency-key", shellWord(key)), " ")
 }
 
-// shellWord quotes a value that a shell would otherwise split or expand.
+// shellWord quotes one value for a POSIX shell. Only characters a shell leaves
+// alone stay bare; everything else is single quoted, which suppresses splitting
+// and expansion alike — a double quoted value would still expand $ and `.
 func shellWord(value string) string {
 	if value == "" {
-		return `""`
+		return "''"
 	}
 	for _, r := range value {
-		if strings.ContainsRune(" \t\"'`$\\;&()|<>", r) {
-			return strconv.Quote(value)
+		if !strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:/@%+=,-", r) {
+			return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 		}
 	}
 	return value

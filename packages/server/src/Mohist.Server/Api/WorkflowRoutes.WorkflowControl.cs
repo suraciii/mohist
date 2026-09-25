@@ -30,8 +30,7 @@ public static partial class WorkflowRoutes
                 IdempotencyCommands.WorkflowControl,
                 KeyedControlWrites.WorkflowControlScopeKey(workflowRunId, currentUser.Principal.Id, key.Value!),
                 KeyedControlWrites.WorkflowControlFingerprint(workflowRunId, "resume"),
-                $"mo run resume {workflowRunId} --idempotency-key <new-key>",
-                $"mo run resume {workflowRunId} --idempotency-key {key.Value!}",
+                $"mo run resume {workflowRunId} --idempotency-key",
                 async () =>
                 {
                     if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.ActiveOnly) is { } failure)
@@ -60,8 +59,7 @@ public static partial class WorkflowRoutes
                 IdempotencyCommands.WorkflowControl,
                 KeyedControlWrites.WorkflowControlScopeKey(workflowRunId, currentUser.Principal.Id, key.Value!),
                 KeyedControlWrites.WorkflowControlFingerprint(workflowRunId, "approve", new { displayName = displayName.Value }),
-                $"mo run approve {workflowRunId} --idempotency-key <new-key>",
-                $"mo run approve {workflowRunId} --idempotency-key {key.Value!}",
+                $"mo run approve {workflowRunId}{KeyedControlWrites.Flag("display-name", displayName.Value)} --idempotency-key",
                 async () =>
                 {
                     if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.ActiveOnly) is { } failure)
@@ -90,13 +88,15 @@ public static partial class WorkflowRoutes
                     "Request changes message is required",
                     effect: ApiEffect.None,
                     retrySafe: false);
+            var recovery = $"mo run request-changes {workflowRunId}"
+                + $"{KeyedControlWrites.Flag("message", req.Message)}"
+                + $"{KeyedControlWrites.Flag("display-name", displayName.Value)} --idempotency-key";
             return await KeyedControlWrites.ExecuteAsync(
                 key, currentUser, fence, timeProvider,
                 IdempotencyCommands.WorkflowControl,
                 KeyedControlWrites.WorkflowControlScopeKey(workflowRunId, currentUser.Principal.Id, key.Value!),
                 KeyedControlWrites.WorkflowControlFingerprint(workflowRunId, "request-changes", new { message = req.Message, displayName = displayName.Value }),
-                $"mo run request-changes {workflowRunId} --idempotency-key <new-key>",
-                $"mo run request-changes {workflowRunId} --idempotency-key {key.Value!}",
+                recovery,
                 async () =>
                 {
                     if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.ActiveOnly) is { } failure)
@@ -121,8 +121,7 @@ public static partial class WorkflowRoutes
                 IdempotencyCommands.WorkflowControl,
                 KeyedControlWrites.WorkflowControlScopeKey(workflowRunId, currentUser.Principal.Id, key.Value!),
                 KeyedControlWrites.WorkflowControlFingerprint(workflowRunId, "retry"),
-                $"mo run retry {workflowRunId} --idempotency-key <new-key>",
-                $"mo run retry {workflowRunId} --idempotency-key {key.Value!}",
+                $"mo run retry {workflowRunId} --idempotency-key",
                 async () =>
                 {
                     if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.RetryOrRerun) is { } failure)
@@ -148,8 +147,7 @@ public static partial class WorkflowRoutes
                 IdempotencyCommands.WorkflowControl,
                 KeyedControlWrites.WorkflowControlScopeKey(workflowRunId, currentUser.Principal.Id, key.Value!),
                 KeyedControlWrites.WorkflowControlFingerprint(workflowRunId, "rerun"),
-                $"mo run rerun {workflowRunId} --idempotency-key <new-key>",
-                $"mo run rerun {workflowRunId} --idempotency-key {key.Value!}",
+                $"mo run rerun {workflowRunId} --idempotency-key",
                 async () =>
                 {
                     try
@@ -188,8 +186,7 @@ public static partial class WorkflowRoutes
                 IdempotencyCommands.WorkflowControl,
                 KeyedControlWrites.WorkflowControlScopeKey(workflowRunId, currentUser.Principal.Id, key.Value!),
                 KeyedControlWrites.WorkflowControlFingerprint(workflowRunId, "rerun-from-stage", new { stage = req.Stage }),
-                $"mo run rerun-from-stage {workflowRunId} --idempotency-key <new-key>",
-                $"mo run rerun-from-stage {workflowRunId} --idempotency-key {key.Value!}",
+                $"mo run rerun {workflowRunId}{KeyedControlWrites.Flag("from-stage", req.Stage)} --idempotency-key",
                 async () =>
                 {
                     try
@@ -233,8 +230,7 @@ public static partial class WorkflowRoutes
                 IdempotencyCommands.WorkflowControl,
                 KeyedControlWrites.WorkflowControlScopeKey(workflowRunId, currentUser.Principal.Id, key.Value!),
                 KeyedControlWrites.WorkflowControlFingerprint(workflowRunId, "pause"),
-                $"mo run pause {workflowRunId} --idempotency-key <new-key>",
-                $"mo run pause {workflowRunId} --idempotency-key {key.Value!}",
+                $"mo run pause {workflowRunId} --idempotency-key",
                 async () =>
                 {
                     if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.ActiveOnly) is { } failure)
@@ -259,8 +255,7 @@ public static partial class WorkflowRoutes
                 IdempotencyCommands.WorkflowControl,
                 KeyedControlWrites.WorkflowControlScopeKey(workflowRunId, currentUser.Principal.Id, key.Value!),
                 KeyedControlWrites.WorkflowControlFingerprint(workflowRunId, "stop"),
-                $"mo run stop {workflowRunId} --idempotency-key <new-key>",
-                $"mo run stop {workflowRunId} --idempotency-key {key.Value!}",
+                $"mo run stop {workflowRunId} --yes --idempotency-key",
                 async () =>
                 {
                     if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.Stop) is { } failure)

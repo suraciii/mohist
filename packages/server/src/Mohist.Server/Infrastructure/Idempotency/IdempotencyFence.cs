@@ -207,8 +207,10 @@ public sealed class IdempotencyFence : IScopedService
 
     /// <summary>
     /// Records a classified outcome (accepted or a rejection the Server
-    /// decided) on a pending row. Rows that already carry an outcome are
-    /// left untouched so a replay always observes the first decision.
+    /// decided) on a pending row. The write is conditional on the row still
+    /// being pending, so of two attempts that raced past the pending lease the
+    /// first decision is the one kept and every replay observes it. Rows that
+    /// already carry an outcome are left untouched.
     /// </summary>
     public async Task<IdempotencyClaim> CompleteAsync(
         string command,
@@ -218,33 +220,42 @@ public sealed class IdempotencyFence : IScopedService
         CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var mapping = await db.IdempotencyMappings
+        await db.IdempotencyMappings
+            .Where(row => row.Command == command
+                && row.ScopeKey == scopeKey
+                && row.State == IdempotencyMappingStates.Pending)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(row => row.State, state)
+                    .SetProperty(row => row.Outcome, outcome)
+                    .SetProperty(row => row.CompletedAt, _timeProvider.GetUtcNow()),
+                ct);
+
+        var row = await db.IdempotencyMappings.AsNoTracking()
             .FirstOrDefaultAsync(
                 row => row.Command == command && row.ScopeKey == scopeKey,
                 ct)
             ?? throw new InvalidOperationException("The request fence row disappeared before completion.");
 
-        if (mapping.State == IdempotencyMappingStates.Pending)
-        {
-            mapping.State = state;
-            mapping.Outcome = outcome;
-            mapping.CompletedAt = _timeProvider.GetUtcNow();
-            await db.SaveChangesAsync(ct);
-        }
-
-        return ClaimOf(mapping, Created: false);
+        return ClaimOf(row, Created: false);
     }
 
     /// <summary>
     /// Removes a still-pending row after an unclassified failure so the
-    /// operation stays retryable. An outcome that was already recorded is
-    /// never removed.
+    /// operation stays retryable. Only the attempt that created the row may
+    /// remove it: a later attempt that took the fence over after the pending
+    /// lease runs on the creator's row, and deleting it would discard the
+    /// creator's decision while it is still executing. An outcome that was
+    /// already recorded is never removed.
     /// </summary>
     public async Task AbandonPendingAsync(
         string command,
         string scopeKey,
+        bool owned,
         CancellationToken ct = default)
     {
+        if (!owned) return;
+
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await db.IdempotencyMappings
             .Where(row => row.Command == command

@@ -118,8 +118,7 @@ public static partial class IssueRoutes
                 IdempotencyCommands.IssueStart,
                 KeyedControlWrites.IssueStartScopeKey(project.Id, number, currentUser.Principal.Id, key.Value!),
                 KeyedControlWrites.IssueStartFingerprint(project.Id, number),
-                $"mo issue start {number} --project {projectRef} --idempotency-key <new-key>",
-                $"mo issue start {number} --project {projectRef} --idempotency-key {key.Value!}",
+                $"mo issue start {number}{KeyedControlWrites.Flag("project", projectRef)} --idempotency-key",
                 StartAsync);
         });
 

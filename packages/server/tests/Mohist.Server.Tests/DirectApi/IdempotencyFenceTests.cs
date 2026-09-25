@@ -98,6 +98,52 @@ public sealed class IdempotencyFenceTests
         Assert.Equal("frozen", staleWriter.Outcome);
     }
 
+    [Fact]
+    public async Task Completion_KeepsTheFirstRecordedDecision()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        var factory = new TestDbContextFactory(database.Options);
+        var service = new IdempotencyFence(
+            factory,
+            new FakeTimeProvider(new DateTimeOffset(2026, 8, 19, 0, 0, 0, TimeSpan.Zero)));
+        const string command = IdempotencyCommands.WorkflowControl;
+        const string scope = "wr_1|caller-a|key-a";
+        await service.GetOrCreateAsync(command, scope, "caller-a", "fingerprint", null, null);
+
+        await service.CompleteAsync(command, scope, IdempotencyMappingStates.Completed, "first");
+        var late = await service.CompleteAsync(command, scope, IdempotencyMappingStates.Rejected, "second");
+
+        // Two attempts can race past the pending lease. The first decision is
+        // the one the key records, so every later replay observes it.
+        Assert.Equal(IdempotencyMappingStates.Completed, late.State);
+        Assert.Equal("first", late.Outcome);
+    }
+
+    [Fact]
+    public async Task Abandon_RemovesOnlyTheRowTheAttemptClaimed()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        var factory = new TestDbContextFactory(database.Options);
+        var service = new IdempotencyFence(
+            factory,
+            new FakeTimeProvider(new DateTimeOffset(2026, 8, 19, 0, 0, 0, TimeSpan.Zero)));
+        const string command = IdempotencyCommands.WorkflowControl;
+        const string scope = "wr_1|caller-a|key-a";
+        var creator = await service.GetOrCreateAsync(command, scope, "caller-a", "fingerprint", null, null);
+        Assert.True(creator.Created);
+
+        // An attempt that took the fence over after the lease must leave the
+        // creator's row alone: the creator may still be executing and about to
+        // record the decision for this key.
+        await service.AbandonPendingAsync(command, scope, owned: false);
+        var surviving = await service.FindAsync(command, scope);
+        Assert.NotNull(surviving);
+        Assert.Equal(IdempotencyMappingStates.Pending, surviving!.State);
+
+        await service.AbandonPendingAsync(command, scope, owned: true);
+        Assert.Null(await service.FindAsync(command, scope));
+    }
+
     private sealed class TestDbContextFactory(DbContextOptions<MohistDbContext> options)
         : IDbContextFactory<MohistDbContext>
     {

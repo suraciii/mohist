@@ -92,6 +92,25 @@ public static class KeyedControlWrites
         public static Outcome Rejected(int statusCode, ApiResponse<object> envelope) => new(statusCode, envelope);
     }
 
+    /// <summary>
+    /// Quotes one shell word so a recovery command carrying caller values (a
+    /// key, a message, a stage) stays executable as written.
+    /// </summary>
+    public static string ShellWord(string value)
+    {
+        var plain = value.Length > 0
+            && value.All(character => char.IsAsciiLetterOrDigit(character) || "._:/@%+=,-".Contains(character));
+        return plain ? value : "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+    }
+
+    /// <summary>
+    /// One optional flag of a recovery command. The flag is omitted when the
+    /// caller supplied no value, and the value is quoted so the printed command
+    /// reproduces the accepted payload — and therefore the same fingerprint.
+    /// </summary>
+    public static string Flag(string name, string? value) =>
+        string.IsNullOrEmpty(value) ? string.Empty : $" --{name} {ShellWord(value)}";
+
     /// <summary>The recorded response of a completed fence row.</summary>
     private sealed record RecordedOutcome(int StatusCode, JsonElement Body);
 
@@ -103,8 +122,7 @@ public static class KeyedControlWrites
         string command,
         string scopeKey,
         string fingerprint,
-        string reuseNextAction,
-        string pendingNextAction,
+        string recoveryCommand,
         Func<Task<Outcome>> operation)
     {
         if (key.Disposition == IdempotencyKeyDisposition.Required)
@@ -137,7 +155,7 @@ public static class KeyedControlWrites
                     "idempotency_key_reused",
                     effect: ApiEffect.None,
                     retrySafe: false,
-                    nextAction: reuseNextAction),
+                    nextAction: recoveryCommand + " <new-key>"),
                 statusCode: StatusCodes.Status409Conflict);
         }
 
@@ -157,7 +175,7 @@ public static class KeyedControlWrites
                     "operation_pending",
                     effect: ApiEffect.Unknown,
                     retrySafe: true,
-                    nextAction: pendingNextAction));
+                    nextAction: recoveryCommand + " " + ShellWord(key.Value!)));
         }
 
         Outcome outcome;
@@ -167,9 +185,11 @@ public static class KeyedControlWrites
         }
         catch
         {
-            // An unclassified failure is not a decision. Remove the pending
-            // row so the operation stays retryable under the same key.
-            await fence.AbandonPendingAsync(command, scopeKey);
+            // An unclassified failure is not a decision. The attempt that
+            // claimed the row removes it so the operation stays retryable under
+            // the same key; an attempt that took the fence over leaves the
+            // creator's row in place.
+            await fence.AbandonPendingAsync(command, scopeKey, claim.Created);
             throw;
         }
 
@@ -179,13 +199,25 @@ public static class KeyedControlWrites
             var record = new RecordedOutcome(
                 outcome.StatusCode,
                 JsonDocument.Parse(body).RootElement.Clone());
-            await fence.CompleteAsync(
-                command,
-                scopeKey,
-                outcome.StatusCode >= 400
-                    ? IdempotencyMappingStates.Rejected
-                    : IdempotencyMappingStates.Completed,
-                JSON.Serialize(record));
+            var state = outcome.StatusCode >= 400
+                ? IdempotencyMappingStates.Rejected
+                : IdempotencyMappingStates.Completed;
+            var recorded = JSON.Serialize(record);
+            try
+            {
+                await fence.CompleteAsync(command, scopeKey, state, recorded);
+            }
+            catch (InvalidOperationException)
+            {
+                // The attempt that claimed the row abandoned it while this one
+                // was executing, so the decision this request already made has
+                // nowhere to go. Re-create the fence and record it: the caller
+                // acted, and a replay must observe that decision rather than a
+                // conflict it cannot act on.
+                await fence.GetOrCreateAsync(
+                    command, scopeKey, currentUser.Principal.Id, fingerprint, turnId: null, initialOutcome: null);
+                await fence.CompleteAsync(command, scopeKey, state, recorded);
+            }
         }
 
         return Write(outcome);
