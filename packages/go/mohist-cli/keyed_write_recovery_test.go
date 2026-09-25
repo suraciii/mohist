@@ -69,10 +69,10 @@ func TestKeyedWriteRetriesOnceWhenTheResponseBodyIsLost(t *testing.T) {
 		if attempts == 1 {
 			return &http.Response{StatusCode: http.StatusOK, Body: failingBody{}, Header: make(http.Header)}, nil
 		}
-		return response(http.StatusOK, `{"success":true,"data":{"workflowRunId":"wr-1"}}`), nil
+		return response(http.StatusOK, `{"success":true,"data":{"status":{"workflowRunId":"wr-1","status":"running"},"issueRef":{"projectId":"p","number":7,"title":"t"},"workflowProfileId":"wp-1"}}`), nil
 	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
 
-	code := Run(context.Background(), []string{"run", "retry", "wr-1"}, deps)
+	code := Run(context.Background(), []string{"run", "retry", "wr-1", "--json", "id,status,issueRef"}, deps)
 
 	if code != ExitOK {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
@@ -84,8 +84,12 @@ func TestKeyedWriteRetriesOnceWhenTheResponseBodyIsLost(t *testing.T) {
 		t.Fatalf("keys=%q", keys)
 	}
 	// The generated key is readable on stderr before the request, so a lost
-	// response is recoverable at all.
-	if !strings.Contains(errOut.String(), "Idempotency-Key: "+keys[0]) || !strings.Contains(out.String(), "wr-1") {
+	// response is recoverable at all; the replayed answer carries the Run the
+	// control changed, in the field names `run view` reports.
+	if !strings.Contains(errOut.String(), "Idempotency-Key: "+keys[0]) ||
+		!strings.Contains(out.String(), `"id":"wr-1"`) ||
+		!strings.Contains(out.String(), `"status":"running"`) ||
+		!strings.Contains(out.String(), `"issueRef":{"projectId":"p","number":7,"title":"t"}`) {
 		t.Fatalf("stderr=%q stdout=%q", errOut.String(), out.String())
 	}
 }

@@ -126,7 +126,10 @@ public static class KeyedControlWrites
         Func<Task<Outcome>> operation)
     {
         if (key.Disposition == IdempotencyKeyDisposition.Required)
-            return Write(await operation());
+        {
+            var result = await operation();
+            return Write(JSON.Serialize(result.Envelope), result.StatusCode);
+        }
 
         if (key.Disposition == IdempotencyKeyDisposition.Invalid)
             return Results.Json(
@@ -162,7 +165,7 @@ public static class KeyedControlWrites
         if (claim.State is IdempotencyMappingStates.Completed or IdempotencyMappingStates.Rejected)
         {
             var recorded = IdempotencyFence.ReadOutcome<RecordedOutcome>(claim.Outcome);
-            return Results.Json(recorded.Body, statusCode: recorded.StatusCode);
+            return WriteRecorded(recorded);
         }
 
         if (!claim.Created
@@ -218,12 +221,23 @@ public static class KeyedControlWrites
                     command, scopeKey, currentUser.Principal.Id, fingerprint, turnId: null, initialOutcome: null);
                 await fence.CompleteAsync(command, scopeKey, state, recorded);
             }
+
+            // Answer with the rendering a replay will read back from that
+            // recorded row, so the first response and every replay are the same
+            // bytes by construction instead of by the two serializations
+            // happening to agree.
+            return WriteRecorded(IdempotencyFence.ReadOutcome<RecordedOutcome>(recorded));
         }
 
-        return Write(outcome);
+        return Write(body: JSON.Serialize(outcome.Envelope), statusCode: outcome.StatusCode);
 
-        static IResult Write(Outcome result) =>
-            Results.Json(result.Envelope, statusCode: result.StatusCode);
+        // A replay is not a re-rendering of the response: it is the recorded
+        // body written verbatim, under the content type JSON results use.
+        static IResult WriteRecorded(RecordedOutcome recorded) =>
+            Write(recorded.Body.GetRawText(), recorded.StatusCode);
+
+        static IResult Write(string body, int statusCode) =>
+            Results.Text(body, "application/json; charset=utf-8", statusCode: statusCode);
     }
 
     /// <summary>A 503 that carries the pending-lease retry signal.</summary>

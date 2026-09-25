@@ -144,6 +144,37 @@ public sealed class IdempotencyFenceTests
         Assert.Null(await service.FindAsync(command, scope));
     }
 
+    [Fact]
+    public async Task PruneFinishedBefore_RemovesExpiredDecisionsAndKeepsLiveFences()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        var factory = new TestDbContextFactory(database.Options);
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero));
+        var service = new IdempotencyFence(factory, clock);
+        const string command = IdempotencyCommands.WorkflowControl;
+
+        await service.GetOrCreateAsync(command, "expired", "caller-a", "fingerprint", null, null);
+        await service.CompleteAsync(command, "expired", IdempotencyMappingStates.Completed, "recorded");
+
+        clock.Advance(TimeSpan.FromDays(6));
+        await service.GetOrCreateAsync(command, "recent", "caller-a", "fingerprint", null, null);
+        await service.CompleteAsync(command, "recent", IdempotencyMappingStates.Completed, "recorded");
+        await service.GetOrCreateAsync(IdempotencyCommands.Stop, "pending", "caller-a", "fingerprint", "turn-1", null);
+
+        clock.Advance(TimeSpan.FromDays(2));
+        var removed = await service.PruneFinishedBeforeAsync(clock.GetUtcNow() - TimeSpan.FromDays(7));
+
+        // Only the decision that aged out of the window is dropped. A pending
+        // row stays because the next attempt may still be executing it, and a
+        // decision inside the window stays because the key still replays it.
+        Assert.Equal(1, removed);
+        Assert.Null(await service.FindAsync(command, "expired"));
+        Assert.Equal("recorded", (await service.FindAsync(command, "recent"))!.Outcome);
+        Assert.Equal(
+            IdempotencyMappingStates.Pending,
+            (await service.FindAsync(IdempotencyCommands.Stop, "pending"))!.State);
+    }
+
     private sealed class TestDbContextFactory(DbContextOptions<MohistDbContext> options)
         : IDbContextFactory<MohistDbContext>
     {

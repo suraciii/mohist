@@ -334,6 +334,9 @@ preserve live in [the design note](../design/agent-operability.md).
   key with the same inputs replays the recorded outcome; the same key with
   changed inputs is rejected as a conflict; a key whose request is still
   executing reports its own retry signal.
+- An accepted Run control answers with the Run resource it changed, so `--json`
+  on a control selects the fields `run view` reports instead of returning
+  nothing; the one-line human confirmation is unchanged.
 - The CLI sends a key for those commands, prints a generated key before the
   request, and re-sends a lost keyed write once.
 - Failures on Issue and Run commands report a stable code, whether the effect

@@ -20,6 +20,7 @@ public static partial class WorkflowRoutes
             string workflowRunId,
             IGrainFactory grains,
             WorkflowQuerier reader,
+            IssueQuerier issueQuerier,
             ICurrentUser currentUser,
             IdempotencyFence fence,
             TimeProvider timeProvider) =>
@@ -36,6 +37,9 @@ public static partial class WorkflowRoutes
                     if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.ActiveOnly) is { } failure)
                         return failure;
                     return await ExecuteControlAsync(
+                        reader,
+                        issueQuerier,
+                        workflowRunId,
                         () => grains.GetGrain<IWorkflowGrain>(workflowRunId).ResumeAsync());
                 });
         });
@@ -46,6 +50,7 @@ public static partial class WorkflowRoutes
             ApproveRequest? req,
             IGrainFactory grains,
             WorkflowQuerier reader,
+            IssueQuerier issueQuerier,
             ICurrentUser currentUser,
             IdempotencyFence fence,
             TimeProvider timeProvider) =>
@@ -65,6 +70,9 @@ public static partial class WorkflowRoutes
                     if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.ActiveOnly) is { } failure)
                         return failure;
                     return await ExecuteControlAsync(
+                        reader,
+                        issueQuerier,
+                        workflowRunId,
                         () => grains.GetGrain<IWorkflowGrain>(workflowRunId).ApproveAsync(currentUser.Principal.Id, displayName.Value));
                 });
         });
@@ -75,6 +83,7 @@ public static partial class WorkflowRoutes
             RequestChangesRequest? req,
             IGrainFactory grains,
             WorkflowQuerier reader,
+            IssueQuerier issueQuerier,
             ICurrentUser currentUser,
             IdempotencyFence fence,
             TimeProvider timeProvider) =>
@@ -102,6 +111,9 @@ public static partial class WorkflowRoutes
                     if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.ActiveOnly) is { } failure)
                         return failure;
                     return await ExecuteControlAsync(
+                        reader,
+                        issueQuerier,
+                        workflowRunId,
                         () => grains.GetGrain<IWorkflowGrain>(workflowRunId).RequestChangesAsync(req.Message, currentUser.Principal.Id, displayName.Value));
                 });
         });
@@ -111,6 +123,7 @@ public static partial class WorkflowRoutes
             string workflowRunId,
             IGrainFactory grains,
             WorkflowQuerier reader,
+            IssueQuerier issueQuerier,
             ICurrentUser currentUser,
             IdempotencyFence fence,
             TimeProvider timeProvider) =>
@@ -127,6 +140,9 @@ public static partial class WorkflowRoutes
                     if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.RetryOrRerun) is { } failure)
                         return failure;
                     return await ExecuteControlAsync(
+                        reader,
+                        issueQuerier,
+                        workflowRunId,
                         () => grains.GetGrain<IWorkflowGrain>(workflowRunId).RetryAsync());
                 });
         });
@@ -139,7 +155,7 @@ public static partial class WorkflowRoutes
             ICurrentUser currentUser,
             IdempotencyFence fence,
             TimeProvider timeProvider,
-            IssueQuerier issuesQuery) =>
+            IssueQuerier issueQuerier) =>
         {
             var key = DirectApiWriteValidation.ReadIdempotencyKey(ctx.Request.Headers);
             return await KeyedControlWrites.ExecuteAsync(
@@ -155,11 +171,14 @@ public static partial class WorkflowRoutes
                         if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.RetryOrRerun) is { } failure)
                             return failure;
                         return await ExecuteControlAsync(
+                            reader,
+                            issueQuerier,
+                            workflowRunId,
                             () => grains.GetGrain<IWorkflowGrain>(workflowRunId).RerunAsync());
                     }
                     catch (Exception ex) when (WorkflowControlRecovery.IsWorkflowRunStateCorruption(ex))
                     {
-                        return await WorkflowControlRecovery.RecoverWorkflowRunScopedRerunAsync(grains, issuesQuery, workflowRunId);
+                        return await WorkflowControlRecovery.RecoverWorkflowRunScopedRerunAsync(grains, issueQuerier, workflowRunId);
                     }
                 });
         });
@@ -173,7 +192,7 @@ public static partial class WorkflowRoutes
             ICurrentUser currentUser,
             IdempotencyFence fence,
             TimeProvider timeProvider,
-            IssueQuerier issuesQuery) =>
+            IssueQuerier issueQuerier) =>
         {
             if (string.IsNullOrWhiteSpace(req?.Stage))
                 return ApiResults.BadRequest(
@@ -206,11 +225,11 @@ public static partial class WorkflowRoutes
                                     ApiResults.Failure(result.Error ?? "Workflow control rejected", StatusCodes.Status400BadRequest, result.Code, result.Details, ApiEffect.None, retrySafe: false)),
                             };
                         }
-                        return KeyedControlWrites.Outcome.Accepted(ApiResults.SuccessEnvelope());
+                        return await ControlAcceptedAsync(reader, issueQuerier, workflowRunId);
                     }
                     catch (Exception ex) when (WorkflowControlRecovery.IsWorkflowRunStateCorruption(ex))
                     {
-                        return await WorkflowControlRecovery.RecoverWorkflowRunScopedRerunAsync(grains, issuesQuery, workflowRunId);
+                        return await WorkflowControlRecovery.RecoverWorkflowRunScopedRerunAsync(grains, issueQuerier, workflowRunId);
                     }
                 });
         });
@@ -220,6 +239,7 @@ public static partial class WorkflowRoutes
             string workflowRunId,
             IGrainFactory grains,
             WorkflowQuerier reader,
+            IssueQuerier issueQuerier,
             ICurrentUser currentUser,
             IdempotencyFence fence,
             TimeProvider timeProvider) =>
@@ -236,6 +256,9 @@ public static partial class WorkflowRoutes
                     if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.ActiveOnly) is { } failure)
                         return failure;
                     return await ExecuteControlAsync(
+                        reader,
+                        issueQuerier,
+                        workflowRunId,
                         () => grains.GetGrain<IWorkflowGrain>(workflowRunId).PauseAsync("user-pause"));
                 });
         });
@@ -245,6 +268,7 @@ public static partial class WorkflowRoutes
             string workflowRunId,
             IGrainFactory grains,
             WorkflowQuerier reader,
+            IssueQuerier issueQuerier,
             ICurrentUser currentUser,
             IdempotencyFence fence,
             TimeProvider timeProvider) =>
@@ -261,6 +285,9 @@ public static partial class WorkflowRoutes
                     if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.Stop) is { } failure)
                         return failure;
                     return await ExecuteControlAsync(
+                        reader,
+                        issueQuerier,
+                        workflowRunId,
                         () => grains.GetGrain<IWorkflowGrain>(workflowRunId).StopAsync("user-stop"));
                 });
         });
@@ -285,17 +312,63 @@ public static partial class WorkflowRoutes
     private sealed record DisplayNameResult(string? Value, IResult? Failure);
 
     /// <summary>
+    /// The accepted outcome of a control: the control applied, so the answer
+    /// is the state it produced. Reporting that state is what lets the caller
+    /// verify the effect without a second read; when the read itself fails the
+    /// control still stands and the accepted outcome is reported without it,
+    /// because failing the request would misreport a transition that landed.
+    /// </summary>
+    private static async Task<KeyedControlWrites.Outcome> ControlAcceptedAsync(
+        WorkflowQuerier reader,
+        IssueQuerier issueQuerier,
+        string workflowRunId)
+    {
+        WorkflowRunDetailDto? result = null;
+        try
+        {
+            result = await ReadControlResultAsync(reader, issueQuerier, workflowRunId);
+        }
+        catch (Exception)
+        {
+            // The authoritative read is the Run route; it stays available.
+        }
+        return KeyedControlWrites.Outcome.Accepted(new ApiResponse<object>(true, result));
+    }
+
+    /// <summary>
+    /// The resource a control changed, composed exactly like the Run read, so a
+    /// caller that asked for a transition observes the same object it would
+    /// read back and `--json` selects the same fields.
+    /// </summary>
+    private static async Task<WorkflowRunDetailDto?> ReadControlResultAsync(
+        WorkflowQuerier reader,
+        IssueQuerier issueQuerier,
+        string workflowRunId)
+    {
+        var status = await reader.GetStatusAsync(workflowRunId);
+        if (status is null) return null;
+
+        var issueRef = await issueQuerier.GetIssueRefForWorkflowRunAsync(workflowRunId);
+        var binding = await reader.GetBindingAsync(workflowRunId);
+        return new WorkflowRunDetailDto(status, issueRef, binding?.WorkflowProfileId);
+    }
+
+    /// <summary>
     /// Runs one domain control and classifies its outcome. A state guard in
     /// the aggregate refuses the control before it changes anything; that
     /// refusal is a classified conflict, so the fence records it and a replay
     /// returns the same decision instead of re-evaluating it.
     /// </summary>
-    private static async Task<KeyedControlWrites.Outcome> ExecuteControlAsync(Func<Task> control)
+    private static async Task<KeyedControlWrites.Outcome> ExecuteControlAsync(
+        WorkflowQuerier reader,
+        IssueQuerier issueQuerier,
+        string workflowRunId,
+        Func<Task> control)
     {
         try
         {
             await control();
-            return KeyedControlWrites.Outcome.Accepted(ApiResults.SuccessEnvelope());
+            return await ControlAcceptedAsync(reader, issueQuerier, workflowRunId);
         }
         catch (InvalidOperationException ex) when (!WorkflowControlRecovery.IsWorkflowRunStateCorruption(ex))
         {

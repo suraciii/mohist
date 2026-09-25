@@ -288,6 +288,35 @@ public sealed class IdempotencyFence : IScopedService
         return ClaimOf(row, Created: false);
     }
 
+    /// <summary>
+    /// Removes finished fence rows older than the cutoff. The row is what lets
+    /// a repeated key replay its first decision, so the cutoff defines how
+    /// long that promise holds: inside the window the fence answers with the
+    /// recorded outcome, outside it the key is free again and the caller owns
+    /// the consequence. Pending rows are never removed — one is either about
+    /// to record its decision or, past the pending lease, taken over by the
+    /// next attempt.
+    /// </summary>
+    public async Task<int> PruneFinishedBeforeAsync(
+        DateTimeOffset cutoff,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        // The age test runs in memory: SQLite cannot translate a
+        // DateTimeOffset comparison, and the candidate set is the finished
+        // rows, which a running sweep keeps down to one retention window of
+        // accepted writes.
+        var finished = await db.IdempotencyMappings
+            .Where(row => row.State != IdempotencyMappingStates.Pending)
+            .ToListAsync(ct);
+        var expired = finished.Where(row => row.CompletedAt is { } completedAt && completedAt < cutoff).ToList();
+        if (expired.Count == 0) return 0;
+
+        db.IdempotencyMappings.RemoveRange(expired);
+        await db.SaveChangesAsync(ct);
+        return expired.Count;
+    }
+
     public static T ReadOutcome<T>(string? outcome)
         where T : class
     {

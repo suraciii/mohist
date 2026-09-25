@@ -49,8 +49,13 @@ write" has one implementation.
 | `Outcome` | JSON of the recorded response: HTTP status plus response envelope. |
 
 The key is opaque, caller-chosen, and never interpreted as an ID. A mapping is
-written before the operation runs and is never reclaimed, so a replay always
-finds the original decision.
+written before the operation runs and is never reclaimed by another request, so
+a replay finds the original decision for as long as the row lives. Finished rows
+are swept once they age past the retention window (seven days): inside the
+window a repeated key replays the recorded decision, outside it the key is free
+again and the caller owns the consequence. Pending rows are never swept — one is
+either about to record its decision or, past the pending lease, taken over by the
+next attempt.
 
 `completed` records an accepted outcome. `rejected` records a classified
 rejection: the Server decided against the operation, so a later retry of the same
@@ -78,6 +83,23 @@ A control-plane failure answers three questions with fields, not prose:
 `nextAction` is an executable command because the existing Runner status and
 doctor reads already return commands, and because the CLI is the shared surface
 for people and Agents.
+
+### Control responses
+
+An accepted control answers with the resource it changed: the Run read's own
+composition — `status` (the `WorkflowStatusView`), `issueRef`, and
+`workflowProfileId`. The caller asked for a transition, so the answer to that
+one round trip is the resulting state and the `availableActions` that state
+permits, in the same field names the Run read exposes.
+
+The state read is a courtesy, not the operation's contract. A control whose
+state read fails after the transition still reports its accepted outcome instead
+of failing a request whose effect already applied; the Run route remains the
+authoritative read.
+
+Because the fence records the response body, a replay returns that recorded
+resource — the state the first request produced, not the Run's state at replay
+time.
 
 ## Semantics
 
@@ -123,7 +145,12 @@ Order for a keyed request:
 A `pending` row older than the lease is the only case where a key can be
 executed twice. Re-execution is safe because control-plane operations are
 state-guarded: a change that already happened is rejected by the guard rather
-than applied twice, and the caller still receives one recorded outcome.
+than applied twice, and the caller still receives one recorded outcome. The
+lease is a bound on how long one caller's decision is protected from another,
+not a promise about the control's own duration: a control that runs longer than
+the lease can be taken over while it is still executing, and the state guard —
+not the fence — is what keeps the effect single. The first recorded decision is
+the one the key keeps.
 
 A domain state guard refuses the operation before it changes anything, and the
 refusal reaches the caller as a stable `conflict` code. It is therefore a
@@ -220,6 +247,9 @@ Implemented in this increment:
   fence row per accepted request, and replay accepted or rejected outcomes.
 - The CLI sends a key for those commands, prints a generated key before the
   request, and reports structured failures.
+- An accepted Run control answers with the Run resource it changed, so `--json`
+  on a control selects the same fields `run view` reports.
+- Finished fence rows are swept after the seven-day retention window.
 - `run view` projects the decision fields the read model already computes.
 
 Not implemented, and not required by this increment:

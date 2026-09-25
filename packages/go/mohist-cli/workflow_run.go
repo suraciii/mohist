@@ -461,6 +461,41 @@ func resolveRun(ctx context.Context, deps Dependencies, c *client, cmd command) 
 	return id, ExitOK
 }
 
+// projectRunStatus maps one WorkflowStatusView onto the Run field catalog.
+// `run view` and the Run controls answer with the same resource, so both
+// project through the same names and `--json` means the same thing on either.
+func projectRunStatus(status map[string]json.RawMessage) map[string]json.RawMessage {
+	return map[string]json.RawMessage{
+		"id":               status["workflowRunId"],
+		"status":           status["status"],
+		"currentStage":     status["currentStage"],
+		"stages":           status["stages"],
+		"pendingWork":      status["pendingWork"],
+		"failure":          status["failure"],
+		"availableActions": status["availableActions"],
+		"assignedTo":       status["assignedTo"],
+	}
+}
+
+// projectRunControlResult maps a Run control's answer — the Run it changed —
+// onto that same catalog. An answer that carries no resource (the Server could
+// not read the Run back) projects to nil, and the caller keeps the historical
+// empty-response behavior.
+func projectRunControlResult(data []byte) map[string]json.RawMessage {
+	var root map[string]json.RawMessage
+	if json.Unmarshal(data, &root) != nil {
+		return nil
+	}
+	var status map[string]json.RawMessage
+	raw, ok := root["status"]
+	if !ok || json.Unmarshal(raw, &status) != nil || status == nil {
+		return nil
+	}
+	projected := projectRunStatus(status)
+	projected["issueRef"] = root["issueRef"]
+	return projected
+}
+
 func runRunView(ctx context.Context, deps Dependencies, c *client, cmd command) int {
 	run, code := resolveRun(ctx, deps, c, cmd)
 	if code != 0 {
@@ -488,7 +523,8 @@ func runRunView(ctx context.Context, deps Dependencies, c *client, cmd command) 
 	}
 	status := map[string]json.RawMessage{}
 	_ = json.Unmarshal(root["status"], &status)
-	projected := map[string]json.RawMessage{"id": status["workflowRunId"], "status": status["status"], "currentStage": status["currentStage"], "stages": status["stages"], "issueRef": root["issueRef"], "pendingWork": status["pendingWork"], "failure": status["failure"], "availableActions": status["availableActions"], "assignedTo": status["assignedTo"]}
+	projected := projectRunStatus(status)
+	projected["issueRef"] = root["issueRef"]
 	enc, _ := json.Marshal(projected)
 	if cmd.fieldsOnly {
 		for _, f := range cmd.catalog {
@@ -565,14 +601,17 @@ func runRunControl(ctx context.Context, deps Dependencies, c *client, cmd comman
 		return ExitOK
 	}
 	if len(cmd.fields) > 0 {
+		projected := projectRunControlResult(data)
+		if projected != nil {
+			enc, _ := json.Marshal(projected)
+			s, _ := SelectFields(enc, cmd.fields, false)
+			return writeJSON(deps.Stdout, json.RawMessage(s))
+		}
 		s, _ := SelectFields(data, cmd.fields, false)
 		return writeJSON(deps.Stdout, json.RawMessage(s))
 	}
-	if len(data) == 0 || string(data) == "null" || string(data) == "{}" {
-		fmt.Fprintln(deps.Stdout, "OK")
-		return ExitOK
-	}
-	return writeJSON(deps.Stdout, json.RawMessage(data))
+	fmt.Fprintln(deps.Stdout, "OK")
+	return ExitOK
 }
 
 // runControlNextAction rebuilds the same control invocation with the same

@@ -373,6 +373,19 @@ stopped or not advancing. Use it after `mo run view` shows a failure, blocker,
 or unexpected stage state. It is a read-only diagnosis and does not retry,
 rerun, pause, or stop the Run.
 
+An accepted control answers with the Run it changed, in the same shape `run view`
+reads: `status` (including the `status` string, `currentStage`, and the
+`availableActions` that status permits), `issueRef`, and `workflowProfileId`.
+`--json` on a control therefore selects the same fields `run view` reports:
+
+```bash
+mo run pause wr_abc123 --json status,availableActions
+```
+
+The default human view of a control stays the one-line confirmation. The Run
+route remains the authoritative read after a control, and a replayed control
+returns the answer the first request produced.
+
 A command that needs one Run accepts exactly one of these targets:
 
 ```bash

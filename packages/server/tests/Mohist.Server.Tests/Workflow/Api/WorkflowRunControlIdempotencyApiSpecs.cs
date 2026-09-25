@@ -40,6 +40,13 @@ public sealed class WorkflowRunControlIdempotencyApiSpecs(DefaultMohistIntegrati
         var replayBody = await replay.Content.ReadAsStringAsync();
 
         Assert.Equal(firstBody, replayBody);
+        // The recorded answer is not an empty acknowledgement: it carries the
+        // resource the control changed, so a caller that lost the first
+        // response recovers the same facts on the replay.
+        var payload = JsonDocument.Parse(firstBody).RootElement
+            .GetProperty("data").GetProperty("status");
+        Assert.Equal(wrId, payload.GetProperty("workflowRunId").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(payload.GetProperty("status").GetString()));
         var run = await LoadRunAsync(wrId);
         Assert.Single(run.Feedback);
         Assert.Equal(1, await FenceRowCountAsync(wrId));

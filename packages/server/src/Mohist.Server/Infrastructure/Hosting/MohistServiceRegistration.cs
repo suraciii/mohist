@@ -354,6 +354,7 @@ public static class MohistServiceRegistration
         services.AddHostedService<SlackAgentAppBindingObligationWorker>();
         services.AddHostedService<SlackAgentSelectionObligationWorker>();
         services.AddHostedService<AgentRetryObligationWorker>();
+        services.AddHostedService<Mohist.Server.Infrastructure.Idempotency.IdempotencyFenceRetentionWorker>();
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
         services.AddScoped<Mohist.Server.Workflow.Services.IWorkflowProfileProvider, Mohist.Server.Workflow.Services.WorkflowProfileProvider>();

@@ -31,11 +31,24 @@ public partial class WorkflowRunControlApiSpecs : IClassFixture<DefaultMohistInt
     [Fact]
     public async Task Pause_OnActiveRun_TransitionsToPaused()
     {
-        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+        var (_, issueNumber, _, wrId) = await SeedActiveWorkflowAsync();
 
         var response = await _client.PostAsync($"/api/workflow-runs/{wrId}/pause", content: null);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        // The accepted answer is the resource the control changed, composed
+        // like the Run read: the caller that asked for the transition observes
+        // the resulting state and the action it permits without a second
+        // request, and `--json` selects the same fields the read exposes.
+        var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        var data = payload.GetProperty("data");
+        var status = data.GetProperty("status");
+        Assert.Equal(wrId, status.GetProperty("workflowRunId").GetString());
+        Assert.Equal("paused", status.GetProperty("status").GetString());
+        Assert.Contains(
+            status.GetProperty("availableActions").EnumerateArray(),
+            action => action.GetProperty("name").GetString() == "resume");
+        Assert.Equal(issueNumber, data.GetProperty("issueRef").GetProperty("number").GetInt32());
         var run = await LoadRunAsync(wrId);
         Assert.NotNull(run);
         Assert.Equal(WorkflowRunStatus.Paused, run!.Status);
