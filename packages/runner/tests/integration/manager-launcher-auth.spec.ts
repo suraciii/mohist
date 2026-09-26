@@ -1,8 +1,9 @@
 import { chmod, mkdtemp, writeFile } from 'node:fs/promises'
+import type { Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { scanSocketInspectorRows } from '../../src/runtime/manager-launcher-auth.js'
+import { inspectManagerPeer, scanSocketInspectorRows } from '../../src/runtime/manager-launcher-auth.js'
 
 // A row shape the scanner can accept. Its content does not matter to
 // termination attribution; it only selects which scan path the stub drives.
@@ -76,5 +77,28 @@ describe('Socket inspector row scanning', () => {
     )
 
     await expect(scanSocketInspectorRows(inspector, () => true)).resolves.toBeUndefined()
+  })
+
+  it('refuses the peer when the inspector fails after printing its row', async () => {
+    const acceptedInode = '4242'
+    const peerInode = '4243'
+    const launcherPath = '/tmp/mohist-launcher-auth/mo'
+    const inspector = await writeInspector(inspectorFailsAfterRow)
+    const verdict = await inspectManagerPeer({ _handle: { fd: 9 } } as unknown as Socket, launcherPath, undefined, {
+      platform: 'linux',
+      socketInode: async (path) =>
+        path === `/proc/${process.pid}/fd/9` ? acceptedInode : path === '/proc/77/fd/9' ? peerInode : null,
+      scanSocketTable: async (onRow) => {
+        await scanSocketInspectorRows(inspector, onRow)
+      },
+      readCommandLine: async () => ['/usr/bin/node', launcherPath],
+      samePath: async (left, right) => left === right,
+    })
+
+    expect(verdict).toEqual({
+      admitted: false,
+      refusal: 'socket-table-unreadable',
+      detail: 'inspector-exit-nonzero:7',
+    })
   })
 })
