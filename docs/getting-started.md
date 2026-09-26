@@ -179,7 +179,7 @@ Without a model, the Agent uses its runtime default. The Runtime itself
 defaults to `pi` when an entry point does not supply one; see
 [Agents and AgentSessions](../specs/agent/configuration/spec.md#execution-resolution) for the
 resolution order. Configure a model on the named Agent from the Agents page or
-`mo agent edit`. See [Agents and AgentSessions](../specs/agent/execution/spec.md) and
+`mo agent edit`. See [Agent configuration](../specs/agent/configuration/spec.md#configure-an-agent) and
 [Workflow Profiles](../specs/workflow/profiles/spec.md#configure-the-agent-for-a-task).
 
 ## 7. Create Your First Project
@@ -224,7 +224,7 @@ workspace, status, and canonical observation links. In table mode it also
 prints a generated idempotency key before the request when one was not supplied.
 Retry a lost response with the same key; an accepted retry returns the original
 identities without starting a second launch. Use
-[Agents and AgentSessions](../specs/agent/execution/spec.md) to refine the created Agent after
+[Agent configuration](../specs/agent/configuration/spec.md#configure-an-agent) to refine the created Agent after
 launch. The definition-first `mo agent create` then `mo agent launch` flow
 remains the deliberate configuration path.
 
@@ -353,8 +353,8 @@ In your repository, verify that `GET /hello` works.
 
 - [Skills](../specs/agent/skills/spec.md): Let an External Agent query, delegate to, and operate
   Mohist
-- [Agents and AgentSessions](../specs/agent/execution/spec.md): Configure and use a Mohist
-  Agent directly
+- [Agent configuration](../specs/agent/configuration/spec.md): Configure a reusable Agent
+- [Agent execution](../specs/agent/execution/spec.md): Launch work with a Mohist Agent
 - [Slack](../specs/integrations/slack/enrollment/spec.md): Bring a tested Agent to Slack and use the Mohist App to
   manage its Agent Connection conversationally
 - [Core Concepts](concepts.md): Understand all terms used in this guide

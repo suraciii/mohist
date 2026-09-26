@@ -3,8 +3,8 @@
 WorkflowRun persists neutral WorkflowActionAttempt orchestration records. Agent-backed attempts retain only
 AgentJob and AgentSession references. AgentJob owns execution state.
 
-This document defines the content boundary and read/write cost rules for persisted WorkflowRun State. Dispatch
-snapshot semantics and storage lifecycle are defined in [`task-dispatch.md`](design.md).
+This section defines the content boundary and read/write cost rules for persisted WorkflowRun State. Dispatch
+snapshot semantics and storage lifecycle are defined under [Dispatch Snapshot Persistence](#dispatch-snapshot-persistence).
 
 ## Design Drivers
 
@@ -29,7 +29,7 @@ rewrites it after each state change.
 State is not:
 
 - History. Event storage owns traceable history.
-- The dispatch contract. Dispatch snapshots follow [`task-dispatch.md`](design.md) and do not enter State.
+- The dispatch contract. Dispatch snapshots follow [Task Dispatch](#task-dispatch) and do not enter State.
 - Large content. Prompt bodies, complete task-output aggregation, and dispatch payloads are rebuildable or
   referenced and are not copied into State.
 
@@ -44,7 +44,7 @@ Content that grows with task or retry count must be budgeted per WorkflowActionA
 only fields required for its own decisions. It does not duplicate shared data such as every Prompt or all
 earlier task output.
 
-A superseded or terminal attempt does not retain a dispatch snapshot. [`recovery.md`](design.md) determines
+A superseded or terminal attempt does not retain a dispatch snapshot. [Task Recovery](#task-recovery) determines
 recovery-chain attempt count. State adds no historical limit. Enforce size through the content boundary, not
 truncation.
 
@@ -57,7 +57,7 @@ open feedback obligations when they replace or reset stage execution. Request fa
 
 Resolved feedback beyond the window is not archived in full. Events retain request and task-completion facts,
 but resolution details of evicted cycles are not reconstructable. [`definition.md`](../definition/design.md#approval-feedback)
-defines Approval Feedback and Feedback Tasks. This document defines only their State boundary.
+defines Approval Feedback and Feedback Tasks. This section defines only their State boundary.
 
 ### Read and Write Cost
 
@@ -141,7 +141,7 @@ reconstruct current State.
 
 ## Status
 
-Dispatch snapshots remain external to WorkflowRun State and follow [`task-dispatch.md`](design.md). List and
+Dispatch snapshots remain external to WorkflowRun State and follow [Task Dispatch](#task-dispatch). List and
 status reads use small projections and a versioned status cache. A cold-start upgrader converts historical
 State before service traffic, so normal reads do not carry a legacy converter. Retention for events,
 transcripts, and telemetry remains a database-wide lifecycle concern and does not expand WorkflowRun State or
@@ -151,7 +151,7 @@ its read path.
 Task dispatch is Workflow-owned work. `mohist/agent` tasks enter the durable AgentJob launch boundary described in
 [launch convergence](../../session/input-and-turns/design.md#launch-convergence).
 
-This document is the sole authority for evaluating task input templates. `tasks[*].with` and task-level `expect`
+This section is the sole authority for evaluating task input templates. `tasks[*].with` and task-level `expect`
 remain Workflow declarations. Server dispatches them unchanged. Runner evaluates them once at the execution
 entry point against an immutable attempt snapshot. Runner never receives a Profile template expression:
 `uses` is a literal Action name before dispatch.
@@ -256,7 +256,7 @@ that snapshot.
 
 Runner expands `${{ failure.* }}` while constructing a recovery task because it holds the triggering task's output.
 Other expressions, including unbound `vars.*` in that task, remain in the original declaration and are
-expanded during the new attempt's rendering. See [`recovery.md`](design.md).
+expanded during the new attempt's rendering. See [Task Recovery](#task-recovery).
 
 #### Dispatch Context
 
@@ -321,7 +321,7 @@ Arbitration therefore depends on current execution facts instead of payload hist
 ## Aggregate Coordination
 
 Issue and Epic belong to the Issue context. WorkflowRun belongs to the Workflow context. AgentJob, Runner, and
-Session belong to Agent execution. This document defines their cross-context coordination without creating a
+Session belong to Agent execution. This section defines their cross-context coordination without creating a
 second owner for any business fact.
 
 In the diagrams, `->` is a synchronous command and `[Event]` is an asynchronous reaction started by a
@@ -680,7 +680,7 @@ successful output that matches `when: output.promise=FAIL` also triggers recover
 handles only results with an error, including final failures produced after the Action completes.
 
 Author-visible syntax and semantics, including budget, first match, `retrySelf`, and manual retry, are defined
-in [`recovery`](../definition/spec.md#recovery-failure-recovery). This document defines execution.
+in [`recovery`](../definition/spec.md#recovery-failure-recovery). This section defines execution.
 
 ### Design Drivers
 
@@ -705,7 +705,7 @@ remaining budget minus one.
 
 Runner expands only `${{ failure.* }}` references while constructing a recovery task. Other expressions remain in the
 new task declaration and are evaluated at that attempt's dispatch entry point. See
-[`task-dispatch.md`](design.md).
+[Task Dispatch](#task-dispatch).
 
 A `retrySelf` task copies the triggering attempt's original dispatch declaration, not this Action execution's
 rendered input. The copy includes `with`, task-level `expect`, artifacts, `setVars`, recovery
