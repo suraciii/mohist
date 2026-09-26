@@ -19,6 +19,7 @@ function fixture(): string {
   write(root, 'docs/README.md', '# Product documentation\n')
   write(root, 'design/README.md', '# Design documentation\n')
   write(root, 'eng/README.md', '# Engineering practices\n')
+  write(root, 'specs/README.md', '# Feature specifications\n')
   return root
 }
 
@@ -367,6 +368,99 @@ test('gates eng/ documents with the same prose rules', () => {
     write(root, 'eng/note.md', '# Note\n\n非拉丁文字。\n')
 
     assert.ok(rules(root).includes('latin-script-prose-only'))
+  })
+})
+
+test('gates specs/ documents with the same prose and link rules', () => {
+  withFixture((root) => {
+    write(root, 'specs/runner/work-confirmation/design.md', '# Work confirmation design\n\n## Renewal\n')
+    write(
+      root,
+      'specs/runner/work-confirmation/spec.md',
+      [
+        '# Work confirmation',
+        '',
+        '非拉丁文字。',
+        '',
+        '[Sibling design](design.md#renewal)',
+        '[Missing sibling](../missing/spec.md)',
+        '[Missing fragment](design.md#missing-heading)',
+      ].join('\n'),
+    )
+
+    const result = checkDocumentation(root)
+    assert.ok(result.files.some((file) => file.endsWith('/specs/runner/work-confirmation/spec.md')))
+    assert.ok(result.files.some((file) => file.endsWith('/specs/runner/work-confirmation/design.md')))
+    assert.equal(result.violations.filter((item) => item.rule === 'latin-script-prose-only').length, 1)
+    assert.equal(result.violations.filter((item) => item.rule === 'relative-link-target-exists').length, 1)
+    assert.equal(result.violations.filter((item) => item.rule === 'markdown-heading-fragment-exists').length, 1)
+  })
+})
+
+test('requires the specs documentation root', () => {
+  withFixture((root) => {
+    rmSync(resolve(root, 'specs'), { recursive: true, force: true })
+
+    assert.ok(rules(root).includes('documentation-root-exists'))
+  })
+})
+
+test('resolves links across specs and the remaining documentation roots', () => {
+  withFixture((root) => {
+    write(
+      root,
+      'design/decisions/adr-stays-here.md',
+      [
+        '# Keep architecture decisions in design/decisions',
+        '',
+        'Status: accepted',
+        '',
+        '## Alternatives considered',
+        '',
+        'A.',
+        '',
+      ].join('\n'),
+    )
+    write(root, 'specs/runner/work-confirmation/spec.md', '# Work confirmation\n')
+    write(
+      root,
+      'specs/session/execution-evidence/spec.md',
+      [
+        '# Execution evidence',
+        '',
+        '## Freshness',
+        '',
+        '[Current decision](../../../design/decisions/adr-stays-here.md#alternatives-considered)',
+        '[Sibling feature](../../runner/work-confirmation/spec.md#work-confirmation)',
+      ].join('\n'),
+    )
+    write(
+      root,
+      'docs/README.md',
+      [
+        '# Product documentation',
+        '',
+        '[Execution evidence](../specs/session/execution-evidence/spec.md#freshness)',
+      ].join('\n'),
+    )
+
+    assert.deepEqual(checkDocumentation(root).violations, [])
+  })
+})
+
+test('keeps decision-record requirements in design/decisions', () => {
+  withFixture((root) => {
+    write(root, 'specs/agent-ops/activity/spec.md', '# Activity\n\n## Scope\n\nText.\n')
+
+    const specRules = rules(root)
+    assert.ok(!specRules.includes('decision-record-status'))
+    assert.ok(!specRules.includes('decision-record-alternatives'))
+  })
+
+  withFixture((root) => {
+    write(root, 'design/decisions/unshaped.md', '# Unshaped\n\nText.\n')
+
+    assert.ok(rules(root).includes('decision-record-status'))
   })
 })
 

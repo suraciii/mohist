@@ -1,8 +1,14 @@
 # Agents — Writing Design Specs
 
-`design/` is the design spec layer: why the system has its boundaries and which
-contracts an implementation must preserve. It is written for developers and
-agents who implement the design, not for readers tracing the current code.
+`design/` holds domain analysis, decision records, and design specifications
+that have not moved to `specs/`. The design-spec writing rules below also
+apply to feature `design.md` files through
+[specs/AGENTS.md](../specs/AGENTS.md). They explain why the system has its
+boundaries and which contracts implementations must preserve.
+
+Do not keep a second design body here after it moves to a feature directory.
+Link to its new home instead. Existing domain analysis and decision records
+remain here; keep the README for human navigation.
 
 Shared writing rules (language, diagrams, fences, tables, examples) live in
 [`../eng/context-management.md`](../eng/context-management.md#writing-rules).
@@ -21,8 +27,8 @@ Do not let agents guess rules. Do not let the current code decide for the target
 - Name the forces that shape the solution: ownership, lifecycle, consistency, reliability,
   security, cost, or operability.
 - Explain why the chosen boundary satisfies those forces and which trade-off it accepts.
-- Record rejected alternatives only when they could reasonably return in a later change. State the
-  reason for rejection, not the history of the discussion.
+- When rejected alternatives could reasonably return in a later change, link to a decision record
+  that owns their rationale. Do not copy that record into the design spec.
 - Describe the macro structure before fields, endpoints, algorithms, or persistence. A reader must
   understand the dependency direction before implementation detail appears.
 - Keep exact mechanics only when they form a durable contract or remove a real ambiguity. Do not
@@ -82,7 +88,7 @@ A **concept spec** defines one concept: one resource, mechanism, or contract.
 The problem and why a design decision is necessary.
 
 ## Design Drivers
-Constraints, forces, chosen trade-offs, and rejected alternatives that may recur.
+Current constraints and forces; links to relevant decision records.
 
 ## Model
 Resources, ownership, references, and the minimal data shape.

@@ -8,7 +8,7 @@ Active development.
 - runner: TypeScript, Node (`packages/runner/`)
 - web: React 19 + Vite + TanStack Query (`packages/web/`)
 - cli: static Go binary, command `mo` (`packages/go/mohist-cli/`)
-- `docs/` user docs · `design/` developer design · `eng/` repository engineering practices
+- `specs/` feature contracts · `docs/` user docs · `design/` domain design and ADRs · `eng/` repository practices
 
 ## Engineering Principles
 
@@ -31,7 +31,7 @@ Active development.
 
 ## Specs
 
-- Write the spec before implementing: `docs/` = product spec, `design/` = design spec.
+- Write the spec before implementing. Locate it at `specs/<subdomain>/<feature>/spec.md`; read optional `design.md` and direct dependencies when needed. Unmoved specs remain in `docs/` and `design/`.
 - The repository holds durable context only; transient artifacts (plans, research notes, progress logs) belong to the Issue and the workspace, not git. Context layout and rules: `eng/context-management.md`.
 - Body is the spec; the gap is the footnote.
 - This file holds only rules that apply across the whole repo. Narrow-scope technical details belong in code comments, not here.

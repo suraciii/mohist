@@ -6,6 +6,9 @@ mechanics, and cross-module design conventions. It is not a tour of the current 
 documents live in
 [`../docs/`](../docs/). Repository engineering practices (testing, context management) live in
 [`../eng/`](../eng/).
+Feature-local specifications live under [`../specs/`](../specs/README.md).
+This directory retains domain analysis, decision records, and design contracts
+that have not moved into a feature directory.
 
 The design-spec writing rules live in [`AGENTS.md`](AGENTS.md). Read them before writing or
 changing a document in `design/`.
