@@ -289,14 +289,17 @@ func TestSegmentDispatchReferenceRejectsSeparatorCollisionBeforePosting(t *testi
 	}
 }
 
-func TestReconcileSegmentsRequiresEverySegmentReference(t *testing.T) {
+func TestReconcileSegmentsSettlesOnCompleteEvidenceOnly(t *testing.T) {
 	payload := `{"operation":"post_message","segments":["one","two","three"],"clientMessageId":"cmid-seg-reconcile"}`
-	missing := &fakeWeb{historyFn: func(HistoryInput) ([]HistoryMessage, error) {
+	partial := &fakeWeb{historyFn: func(HistoryInput) ([]HistoryMessage, error) {
 		return []HistoryMessage{{TS: "1702.2", ClientMsgID: "cmid-seg-reconcile"}}, nil
 	}}
-	ack := reconcileNow(t, missing, testDelivery("d-17b", payload))
-	if ack.Outcome != OutcomeRetry || ack.Reason != providerMutationAbsent {
+	ack := reconcileNow(t, partial, testDelivery("d-17b", payload))
+	if ack.Outcome != OutcomeUncertain || ack.Reason != providerHistoryPartial {
 		t.Fatalf("partial segment history ack = %+v", ack)
+	}
+	if partial.postCount() != 0 {
+		t.Fatalf("partial segment history posted %d messages", partial.postCount())
 	}
 
 	complete := &fakeWeb{historyFn: func(HistoryInput) ([]HistoryMessage, error) {
@@ -538,6 +541,30 @@ func TestReconcileChatUpdateVerifiesStoredText(t *testing.T) {
 	ack = reconcileNow(t, fallbackable, testDelivery("rc-3", fallbackPayload))
 	if ack.Outcome != OutcomeDelivered || fallbackable.postCount() != 1 {
 		t.Fatalf("fallback reconcile ack = %+v", ack)
+	}
+}
+
+func TestThreadedSegmentReconciliationReadsTheThread(t *testing.T) {
+	thread := "1700.0"
+	delivery := &Delivery{
+		ID:             "d-seg-thread",
+		ConversationID: testConversation,
+		ThreadTs:       &thread,
+		PayloadJSON:    `{"operation":"post_message","segments":["one","two"],"clientMessageId":"cmid-seg-thread"}`,
+	}
+	web := &fakeWeb{repliesFn: func(RepliesInput) ([]HistoryMessage, error) {
+		return []HistoryMessage{
+			{TS: "1701.0", ClientMsgID: "cmid-seg-thread"},
+			{TS: "1701.1", ClientMsgID: "cmid-seg-thread" + segmentDispatchSeparator + "1"},
+		}, nil
+	}}
+
+	ack := reconcileNow(t, web, delivery)
+	if ack.Outcome != OutcomeDelivered || ack.ProviderMessageIdentity == nil || ack.ProviderMessageIdentity.MessageTs != "1701.0" {
+		t.Fatalf("threaded segment ack = %+v", ack)
+	}
+	if len(web.historyInputs) != 0 || len(web.repliesInputs) != 1 || web.repliesInputs[0].TS != thread {
+		t.Fatalf("history %+v replies %+v", web.historyInputs, web.repliesInputs)
 	}
 }
 

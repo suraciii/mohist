@@ -32,6 +32,15 @@ public sealed record SlackOutboxDraft(
 /// </summary>
 public sealed record SlackOutboxEnqueueResult(string Id, bool MergedIntoExisting, bool Suppressed = false);
 
+/// <summary>
+/// Outcome of an operator re-send request for a delivery without a confirmed
+/// outcome. It never reports a queued mutation: a re-send always passes the
+/// adapter's provider reconciliation, and <see cref="Revived"/> only says that
+/// an exhausted delivery returned to <c>delivery_uncertain</c> to be
+/// reconciled again.
+/// </summary>
+public sealed record SlackDeliveryReconciliationRequest(string Id, string State, bool Revived);
+
 public sealed record SlackDeliveryPayload(
     [property: JsonPropertyName("operation")] string Operation,
     [property: JsonPropertyName("text")] string? Text = null,
@@ -49,7 +58,26 @@ public sealed record SlackDeliveryPayload(
     [property: JsonPropertyName("segments")] IReadOnlyList<string>? Segments = null,
     [property: JsonPropertyName("responseKind")] string? ResponseKind = null,
     [property: JsonPropertyName("progressDispatchRef")] string? ProgressDispatchRef = null,
-    [property: JsonPropertyName("replyParts")] IReadOnlyList<string>? ReplyParts = null)
+    [property: JsonPropertyName("replyParts")] IReadOnlyList<string>? ReplyParts = null,
+    /// <summary>
+    /// Canonical Session the content belongs to. Content intents carry it so a
+    /// delivery notice can render the same identity section as the Session card
+    /// without parsing Agent text.
+    /// </summary>
+    [property: JsonPropertyName("sessionId")] string? SessionId = null,
+    /// <summary>
+    /// Set on delivery-notice payloads only: which settlement the notice
+    /// reports. <c>delivery_uncertain</c> while the outcome is unknown,
+    /// <c>delivery_exhausted</c> once retries stopped.
+    /// </summary>
+    [property: JsonPropertyName("notice")] string? Notice = null,
+    /// <summary>
+    /// Set on delivery-notice payloads only: whether the original content may
+    /// already be visible to users. An intent that was ever unknown keeps this
+    /// true, so an exhaustion notice never claims the content was never
+    /// delivered.
+    /// </summary>
+    [property: JsonPropertyName("possiblyDelivered")] bool? PossiblyDelivered = null)
 {
     public static SlackDeliveryPayload Parse(string payloadJson)
     {
@@ -108,7 +136,13 @@ public sealed record SlackAgentReplyResult(
     bool MergedIntoExisting = false,
     bool ConflictingDuplicate = false,
     string? Code = null,
-    string? Message = null);
+    string? Message = null,
+    /// <summary>
+    /// True when a re-send converged on an exhausted intent that returned to
+    /// delivery reconciliation. The content is not posted until provider
+    /// evidence shows the original mutation never occurred.
+    /// </summary>
+    bool RequeuedForReconciliation = false);
 
 /// <summary>
 /// The non-secret origin facts required to route a Manager reply. The

@@ -14,10 +14,11 @@ namespace Mohist.Server.Infrastructure.Slack;
 /// <summary>
 /// Cluster-singleton safety net for the Slack outbound outbox. The
 /// <see cref="ISlackOutboxDispatcherGrain"/> Orleans reminder drives
-/// <see cref="DispatchAsync"/>; this service runs four independent
+/// <see cref="DispatchAsync"/>; this service runs five independent
 /// sweeps that together enforce the spec's "Delivery uncertain",
-/// "DeadLettered", and "Backpressure is reversible" guarantees
-/// without overriding AgentJob/AgentTurn authority:
+/// "DeadLettered", "Delivery Notices", and "Backpressure is
+/// reversible" guarantees without overriding AgentJob/AgentTurn
+/// authority:
 /// <list type="number">
 ///   <item>
 ///     <b>Retry budget cutoff</b>: Pending rows whose
@@ -39,6 +40,13 @@ namespace Mohist.Server.Infrastructure.Slack;
 ///     passed without an operator action are dead-lettered.
 ///   </item>
 ///   <item>
+///     <b>Notice recovery sweep</b>: Content rows that settled without a
+///     confirmed outcome but whose bounded delivery notice is missing —
+///     an interruption between the settlement write and the notice
+///     authoring — get that idempotent notice authored here, so the
+///     visibility obligation survives a restart.
+///   </item>
+///   <item>
 ///     <b>Backpressure recovery sweep</b>: Degraded(Backpressured)
 ///     Connections whose pending inbox AND pending outbox counts have
 ///     dropped strictly below their per-Connection capacity are
@@ -57,10 +65,12 @@ public sealed class SlackOutboxDispatcherService : IDisposable
     private readonly AgentConnectionStore _connectionStore;
     private readonly ISlackConnectionHealthBackpressurer _healthBackpressurer;
     private readonly IDeadLetterStore _deadLetters;
+    private readonly SlackDeliveryNoticeAuthor _notices;
     private readonly TimeProvider _timeProvider;
     private readonly IOptions<SlackProviderOptions> _options;
     private readonly ILogger<SlackOutboxDispatcherService> _log;
     private readonly SemaphoreSlim _dispatchGate = new(1, 1);
+    private string? _noticeRecoveryAfterId;
     private bool _disposed;
 
     public const string DeadLetterOrigin = "SlackOutbox";
@@ -71,6 +81,7 @@ public sealed class SlackOutboxDispatcherService : IDisposable
         AgentConnectionStore connectionStore,
         ISlackConnectionHealthBackpressurer healthBackpressurer,
         IDeadLetterStore deadLetters,
+        SlackDeliveryNoticeAuthor notices,
         TimeProvider timeProvider,
         IOptions<SlackProviderOptions> options,
         ILogger<SlackOutboxDispatcherService> log)
@@ -80,6 +91,7 @@ public sealed class SlackOutboxDispatcherService : IDisposable
         _connectionStore = connectionStore ?? throw new ArgumentNullException(nameof(connectionStore));
         _healthBackpressurer = healthBackpressurer ?? throw new ArgumentNullException(nameof(healthBackpressurer));
         _deadLetters = deadLetters ?? throw new ArgumentNullException(nameof(deadLetters));
+        _notices = notices ?? throw new ArgumentNullException(nameof(notices));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _log = log;
@@ -94,6 +106,7 @@ public sealed class SlackOutboxDispatcherService : IDisposable
             await DeadLetterRetryExhaustedAsync(batch, ct).ConfigureAwait(false);
             await SurfaceClaimedTimeoutAsync(batch, ct).ConfigureAwait(false);
             await DeadLetterUncertainTimeoutAsync(batch, ct).ConfigureAwait(false);
+            await RecoverMissingNoticesAsync(batch, ct).ConfigureAwait(false);
             await RecoverBackpressureAsync(ct).ConfigureAwait(false);
         }
         finally
@@ -127,6 +140,7 @@ public sealed class SlackOutboxDispatcherService : IDisposable
                 _log.LogInformation(
                     "Slack outbox row {RowId} (ConnectionId={ConnectionId}, Kind={Kind}, AttemptCount={AttemptCount}) dead-lettered: retry budget exhausted",
                     row.Id, row.ConnectionId, row.Kind, row.AttemptCount);
+                await _notices.TryNoticeAsync(row.ProjectId, row.OwnerKind, row.ConnectionId, row.Id, ct).ConfigureAwait(false);
             }, ct).ConfigureAwait(false);
         }
     }
@@ -156,6 +170,7 @@ public sealed class SlackOutboxDispatcherService : IDisposable
                 _log.LogInformation(
                     "Slack outbox row {RowId} (ConnectionId={ConnectionId}, ClaimedAt={ClaimedAt}) flipped to DeliveryUncertain: claim timeout",
                     row.Id, row.ConnectionId, row.ClaimedAt);
+                await _notices.TryNoticeAsync(row.ProjectId, row.OwnerKind, row.ConnectionId, row.Id, ct).ConfigureAwait(false);
             }, ct).ConfigureAwait(false);
         }
     }
@@ -185,8 +200,49 @@ public sealed class SlackOutboxDispatcherService : IDisposable
                 _log.LogInformation(
                     "Slack outbox row {RowId} (ConnectionId={ConnectionId}, DeliveryUncertainAt={DeliveryUncertainAt}) dead-lettered: uncertain timeout",
                     row.Id, row.ConnectionId, row.DeliveryUncertainAt);
+                await _notices.TryNoticeAsync(row.ProjectId, row.OwnerKind, row.ConnectionId, row.Id, ct).ConfigureAwait(false);
             }, ct).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Repairs the gap between a settlement and its notice. Settlement and
+    /// notice authoring are separate writes, so an interruption between them
+    /// leaves a content row settled without a notice; this bounded sweep finds
+    /// those rows and idempotently authors the missing notice, so the
+    /// visibility obligation survives a restart instead of being lost.
+    /// The sweep resumes after the last row it examined and restarts from the
+    /// beginning once the batch comes back short, so a row that cannot be
+    /// authored — a payload that no longer parses, or an owner that went away
+    /// between the read and the enqueue — cannot keep the first slots busy
+    /// while other owners wait. The store already excludes owners that are no
+    /// longer live.
+    /// </summary>
+    private async Task RecoverMissingNoticesAsync(int batchSize, CancellationToken ct)
+    {
+        var rows = await _store
+            .ListSettledContentRowsMissingNoticeAsync(batchSize, _noticeRecoveryAfterId, ct)
+            .ConfigureAwait(false);
+        if (rows.Count == 0)
+        {
+            _noticeRecoveryAfterId = null;
+            return;
+        }
+        foreach (var row in rows)
+        {
+            ct.ThrowIfCancellationRequested();
+            _noticeRecoveryAfterId = row.Id;
+            await ProcessRowAsync(row, "notice-recovery", async () =>
+            {
+                if (!await _notices.TryNoticeAsync(row.ProjectId, row.OwnerKind, row.ConnectionId, row.Id, ct).ConfigureAwait(false))
+                    return;
+                _log.LogInformation(
+                    "Slack delivery notice recovered for row {RowId} (ConnectionId={ConnectionId}, State={State})",
+                    row.Id, row.ConnectionId, row.State);
+            }, ct).ConfigureAwait(false);
+        }
+        if (rows.Count < batchSize)
+            _noticeRecoveryAfterId = null;
     }
 
     private async Task ProcessRowAsync(

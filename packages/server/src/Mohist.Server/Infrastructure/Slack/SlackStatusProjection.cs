@@ -99,7 +99,8 @@ public sealed class SlackStatusProjection : IScopedService
                 ClientMessageId: DispatchRef(source, "status"),
                 FallbackDispatchRef: DispatchRef(source, "status"),
                 StatusDispatchRef: DispatchRef(source, "status"),
-                Blocks: blocks)),
+                Blocks: blocks,
+                SessionId: sessionId)),
             threadTs ?? source.MessageTs,
             OwnerKindFor(projectId)), ct);
 

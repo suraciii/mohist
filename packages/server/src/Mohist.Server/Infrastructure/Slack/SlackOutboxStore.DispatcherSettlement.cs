@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Slack;
+using Mohist.Server.Slack.Domain;
 
 namespace Mohist.Server.Infrastructure.Slack;
 
@@ -45,8 +46,13 @@ public sealed partial class SlackOutboxStore
 
         var row = await db.SlackOutboxRows.FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Id == id, ct)
             ?? throw new SlackOutboxRowNotFoundException(id);
-        if (row.State is not (SlackOutboxStates.Claimed or SlackOutboxStates.Pending or SlackOutboxStates.DeliveryUncertain))
-            throw new SlackOutboxStateException(id, expectedState: "claimed|pending|delivery_uncertain", actualState: row.State);
+        // A replayed acknowledgement of an outcome that is already unknown is a
+        // duplicate, not a settlement: the unknown state, its first observation,
+        // and the notice already authored for it all stand.
+        if (row.State == SlackOutboxStates.DeliveryUncertain)
+            return 0;
+        if (row.State is not (SlackOutboxStates.Claimed or SlackOutboxStates.Pending))
+            throw new SlackOutboxStateException(id, expectedState: "claimed|pending", actualState: row.State);
         EnsureClaimOwnership(row, adapterId);
         row.State = SlackOutboxStates.DeliveryUncertain;
         row.DeliveryUncertainAt = now;
@@ -140,5 +146,57 @@ public sealed partial class SlackOutboxStore
             .OrderBy(row => row.Id)
             .Take(batchSize)
             .ToList();
+    }
+
+    /// <summary>
+    /// Content rows that settled without a confirmed outcome but whose notice
+    /// intent is missing. The settlement and the notice authoring are separate
+    /// writes, so this scan is what makes the notice obligation recoverable:
+    /// an interruption between them — or a single authoring failure — is
+    /// repaired by a later sweep, and the notice enqueue is idempotent on the
+    /// notice dispatch key, so a repair never posts a second notice.
+    /// Bounded like the other sweeps: at most <paramref name="batchSize"/>
+    /// rows per dispatch, and <paramref name="afterRowId"/> lets the caller
+    /// resume after the rows it already examined so a candidate that cannot be
+    /// authored never occupies the first slots of every tick. Rows whose owner
+    /// is no longer live are excluded here — their obligation stays recorded
+    /// on the row, but they can neither receive a notice nor block the
+    /// owners that can.
+    /// </summary>
+    public async Task<IReadOnlyList<SlackOutboxRow>> ListSettledContentRowsMissingNoticeAsync(
+        int batchSize,
+        string? afterRowId = null,
+        CancellationToken ct = default)
+    {
+        if (batchSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(batchSize));
+
+        const string noticePrefix = SlackDeliveryNoticeAuthor.DispatchPrefix;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var query = db.SlackOutboxRows.AsNoTracking()
+            .Where(row => (row.Kind == SlackOutboxKinds.TerminalResult
+                    || row.Kind == SlackOutboxKinds.ReplaceableProgress)
+                && (row.State == SlackOutboxStates.DeliveryUncertain
+                    || row.State == SlackOutboxStates.DeadLettered)
+                && ((row.OwnerKind == SlackDeliveryOwnerKinds.Manager
+                        && db.SlackWorkspaceEnrollments.Any(enrollment =>
+                            enrollment.Id == row.ConnectionId
+                            && enrollment.Lifecycle == SlackEnrollmentLifecycle.Active
+                            && enrollment.DeletedAt == null))
+                    || (row.OwnerKind == SlackDeliveryOwnerKinds.Connection
+                        && db.AgentConnections.Any(connection =>
+                            connection.ProjectId == row.ProjectId
+                            && connection.Id == row.ConnectionId
+                            && connection.DeletedAt == null)))
+                && !db.SlackOutboxRows.Any(notice =>
+                    notice.OwnerKind == row.OwnerKind
+                    && notice.ConnectionId == row.ConnectionId
+                    && notice.DispatchRef == noticePrefix + row.Id));
+        if (afterRowId is not null)
+            query = query.Where(row => string.Compare(row.Id, afterRowId) > 0);
+        return await query
+            .OrderBy(row => row.Id)
+            .Take(batchSize)
+            .ToListAsync(ct);
     }
 }

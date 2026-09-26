@@ -614,8 +614,37 @@ func (w *SlackWeb) GetConversationHistory(ctx context.Context, input HistoryInpu
 	if err != nil {
 		return HistoryPage{}, err
 	}
-	messages := make([]HistoryMessage, 0, len(resp.Messages))
-	for _, message := range resp.Messages {
+	return HistoryPage{
+		Messages:   historyMessages(resp.Messages),
+		HasMore:    resp.HasMore,
+		NextCursor: resp.ResponseMetaData.NextCursor,
+	}, nil
+}
+
+// GetConversationReplies reads one thread's messages. Message mutations that
+// post into a thread are invisible to conversations.history, so reconciling a
+// threaded delivery must read the thread itself; pagination metadata is
+// preserved so callers can distinguish absence from an incomplete read.
+func (w *SlackWeb) GetConversationReplies(ctx context.Context, input RepliesInput) (HistoryPage, error) {
+	messages, hasMore, nextCursor, err := w.api.GetConversationRepliesContext(ctx, &slack.GetConversationRepliesParameters{
+		ChannelID: input.Channel,
+		Timestamp: input.TS,
+		Cursor:    input.Cursor,
+		Limit:     input.Limit,
+	})
+	if err != nil {
+		return HistoryPage{}, err
+	}
+	return HistoryPage{
+		Messages:   historyMessages(messages),
+		HasMore:    hasMore,
+		NextCursor: nextCursor,
+	}, nil
+}
+
+func historyMessages(messages []slack.Message) []HistoryMessage {
+	converted := make([]HistoryMessage, 0, len(messages))
+	for _, message := range messages {
 		historyMessage := HistoryMessage{
 			TS:          message.Timestamp,
 			ClientMsgID: message.ClientMsgID,
@@ -624,13 +653,9 @@ func (w *SlackWeb) GetConversationHistory(ctx context.Context, input HistoryInpu
 		for _, file := range message.Files {
 			historyMessage.FileIDs = append(historyMessage.FileIDs, file.ID)
 		}
-		messages = append(messages, historyMessage)
+		converted = append(converted, historyMessage)
 	}
-	return HistoryPage{
-		Messages:   messages,
-		HasMore:    resp.HasMore,
-		NextCursor: resp.ResponseMetaData.NextCursor,
-	}, nil
+	return converted
 }
 
 func (w *SlackWeb) UploadFileV2(ctx context.Context, input FileUploadInput) (FileUploadResult, error) {

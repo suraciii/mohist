@@ -291,6 +291,32 @@ public sealed class SlackProviderReliabilityStoreSpecs
     }
 
     [Fact]
+    public async Task Outbox_replayed_uncertain_acknowledgement_keeps_the_first_observation()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        var time = new FakeTimeProvider(Start);
+        await SeedEnabledConnectionAsync(database);
+        var store = NewOutbox(database, new RecordingHealthBackpressurer(), capacity: 3, time);
+        var queued = await store.EnqueueAsync(OutboxDraft(SlackOutboxKinds.TerminalResult, "done"));
+        Assert.NotNull(await store.ClaimAsync("proj_a", "conn_1", "adapter-a"));
+        await store.MarkDeliveryUncertainAsync("proj_a", queued.Id, "socket closed", "adapter-a");
+        var first = Assert.Single((await store.ListAsync("proj_a", "conn_1")).Entries);
+
+        // An adapter that reconnects replays the acknowledgement for a delivery
+        // it never saw settled: the outcome stays unknown, unchanged.
+        time.Advance(TimeSpan.FromMinutes(1));
+        var updated = await store.MarkDeliveryUncertainAsync(
+            "proj_a", queued.Id, "socket closed again", "adapter-a");
+
+        Assert.Equal(0, updated);
+        var replayed = Assert.Single((await store.ListAsync("proj_a", "conn_1")).Entries);
+        Assert.Equal(SlackOutboxStates.DeliveryUncertain, replayed.State);
+        Assert.Equal(first.LastError, replayed.LastError);
+        Assert.Equal(first.DeliveryUncertainAt, replayed.DeliveryUncertainAt);
+        Assert.Equal(first.UpdatedAt, replayed.UpdatedAt);
+    }
+
+    [Fact]
     public async Task Outbox_claim_timeout_skips_a_row_delivered_after_the_sweep_listing()
     {
         using var database = TestSqliteDatabase.CreateModelSchema();

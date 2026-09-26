@@ -85,6 +85,7 @@ public sealed partial class SlackOutboxStore
             var requestedPayload = BuildManagerReplyPayload(
                 redactedText,
                 inputDispatchRef,
+                anchor.SessionId,
                 existingPayload.ProviderMessageIdentity,
                 imageUrl,
                 fileName,
@@ -104,17 +105,23 @@ public sealed partial class SlackOutboxStore
             }
 
             await transaction.CommitAsync(ct);
+            var requeued = existingTerminal.Kind == SlackOutboxKinds.TerminalResult
+                && existingTerminal.State == SlackOutboxStates.DeadLettered
+                && await ReviveDeadLetteredForReconciliationAsync(
+                    db, existingTerminal.Id, existingTerminal.UpdatedAt, ct);
             return new SlackAgentReplyResult(
                 Accepted: true,
                 ConnectionId: anchor.EnrollmentId,
                 DeliveryId: existingTerminal.Id,
                 DispatchRef: existingTerminal.DispatchRef,
-                MergedIntoExisting: true);
+                MergedIntoExisting: true,
+                RequeuedForReconciliation: requeued);
         }
 
         var payload = BuildManagerReplyPayload(
             redactedText,
             inputDispatchRef,
+            anchor.SessionId,
             null,
             imageUrl,
             fileName,
@@ -175,6 +182,7 @@ public sealed partial class SlackOutboxStore
     private static SlackDeliveryPayload BuildManagerReplyPayload(
         string text,
         string dispatchRef,
+        string sessionId,
         SlackProviderMessageIdentity? providerIdentity,
         string? imageUrl,
         string? fileName,
@@ -187,7 +195,8 @@ public sealed partial class SlackOutboxStore
                 text,
                 ClientMessageId: dispatchRef,
                 FileName: fileName,
-                FileContentBase64: fileContentBase64);
+                FileContentBase64: fileContentBase64,
+                SessionId: sessionId);
         }
 
         if (!string.IsNullOrWhiteSpace(imageUrl))
@@ -197,7 +206,8 @@ public sealed partial class SlackOutboxStore
                 text,
                 ClientMessageId: dispatchRef,
                 ProviderMessageIdentity: providerIdentity,
-                Blocks: BuildImageBlocks(text, imageUrl));
+                Blocks: BuildImageBlocks(text, imageUrl),
+                SessionId: sessionId);
         }
 
         var segments = SlackFinalReplyRenderer.SegmentReplyText(text);
@@ -211,7 +221,8 @@ public sealed partial class SlackOutboxStore
             FallbackText: text,
             FallbackDispatchRef: $"{dispatchRef}:fallback",
             Segments: segments.Count > 1 ? segments : null,
-            ReplyParts: [text]);
+            ReplyParts: [text],
+            SessionId: sessionId);
     }
 
     private static bool SameReplyContent(SlackDeliveryPayload existing, SlackDeliveryPayload requested) =>

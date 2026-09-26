@@ -91,6 +91,58 @@ func TestSlackWebUpdateMessageUsesInjectedAPIBaseURL(t *testing.T) {
 	}
 }
 
+func TestSlackWebGetConversationRepliesScopesThreadAndPagination(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/conversations.replies" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+			return
+		}
+		for key, want := range map[string]string{
+			"channel": "C1",
+			"ts":      "1700.1",
+			"cursor":  "page-2",
+			"limit":   "200",
+		} {
+			if got := r.PostForm.Get(key); got != want {
+				t.Errorf("form[%s] = %q, want %q", key, got, want)
+			}
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"messages":[{"ts":"1700.2","client_msg_id":"cmid","text":"hi"}],"has_more":true,"response_metadata":{"next_cursor":"page-3"}}`))
+	}))
+	defer server.Close()
+	web := newSlackWebWithAPIBaseURL("xoxb-test", server.Client(), server.URL)
+
+	page, err := web.GetConversationReplies(context.Background(), RepliesInput{Channel: "C1", TS: "1700.1", Cursor: "page-2", Limit: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 1 || page.Messages[0].ClientMsgID != "cmid" || page.Messages[0].TS != "1700.2" {
+		t.Fatalf("messages = %+v", page.Messages)
+	}
+	if !page.HasMore || page.NextCursor != "page-3" {
+		t.Fatalf("page = %+v", page)
+	}
+}
+
+func TestSlackWebGetConversationRepliesRejectionReturnsCodedError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":false,"error":"thread_not_found"}`))
+	}))
+	defer server.Close()
+	web := newSlackWebWithAPIBaseURL("xoxb-test", server.Client(), server.URL)
+
+	_, err := web.GetConversationReplies(context.Background(), RepliesInput{Channel: "C1", TS: "missing", Limit: 200})
+
+	// The typed slack-go face returns its own rejection type; SlackErrorCode
+	// is the normalization every caller uses, so assert through it.
+	if code := SlackErrorCode(err); code != "thread_not_found" {
+		t.Fatalf("error = %#v (code %q)", err, code)
+	}
+}
+
 func TestSlackWebChatRejectionReturnsCodedError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"ok":false,"error":"channel_not_found"}`))

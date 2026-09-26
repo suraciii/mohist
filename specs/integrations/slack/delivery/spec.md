@@ -83,3 +83,62 @@ later input or another Connection gets a separate answer.
   stable IDs, not copied artifact files.
 - After restart or reconnect, delivery resumes from the last confirmed position
   without duplicating Jobs, Inputs, or confirmed replies.
+
+### Delivery Notices
+
+The Agent reply and the Session card carry separate delivery outcomes. A
+delivery that stays **Delivery uncertain**, or that exhausts its retries
+without a confirmed outcome, gets at most one Server-authored notice in the
+same thread, keyed by the original delivery identity. A delivery that is
+retrying within budget or already delivered gets none.
+
+- The notice states the delivery fact only: which projection it concerns (Agent
+  reply or Session card), whether its content may already be present, and
+  whether retries stopped. It is never Agent speech, never rewrites an
+  AgentTurn result, and is labelled so it cannot be mistaken for the Agent
+  reply, the Session card, or the Agent-crash system failure. The statement is
+  carried in the message's own section blocks — the top-level text is only
+  Slack's notification fallback — so the fact is readable in the message body.
+- The notice obligation is durable and recoverable. The settlement and the
+  notice are separate writes, so a restart or a failed authoring attempt
+  between them is repaired by a bounded, idempotent recovery scan; the notice
+  dispatch key makes that repair converge on the same notice instead of
+  posting a second one. The scan selects only owners that can currently receive
+  a notice and resumes after the rows it already examined, so an obligation
+  that cannot be authored right now — a gone owner, an unreadable payload —
+  stays recorded without blocking another owner's notice.
+- Uncertainty is never rewritten as definite failure. A notice posted while the
+  delivery was unknown keeps stating that its content may already be present
+  once the retry budget is exhausted; an exhaustion notice for a delivery that
+  was never unknown states that the content was generated but not delivered. A
+  delivery still unknown when its retention expires stays unknown. The
+  uncertainty fact survives retries and re-queues; only a confirmed provider
+  identity resolves it.
+- The notice carries the canonical Session reference, and **Open in Mohist**
+  when a usable External Web URL exists. Without a usable URL it still shows
+  the Session ID. It never sends a localhost address and never carries a Slack
+  App action that could re-run work.
+- Notices use the same bounded outbox budget. A notice that is itself unknown
+  or exhausted produces no further notice, so notices never recurse. When no
+  Slack send path is usable, the durable server records stay queryable.
+- A re-send of an unknown delivery reconciles first: the original intent is
+  posted again only after provider evidence shows the original mutation never
+  occurred. The evidence must cover the original Conversation and the original
+  thread: when the intent posts into a thread, only a complete, authorized read
+  of that thread can establish absence; an incomplete pagination, a permission
+  failure, or any other inconclusive read leaves the delivery **Delivery
+  uncertain** and performs no provider mutation. A segmented intent follows the
+  same rule part by part: only a complete read showing that none of its parts
+  landed authorizes posting the sequence again, and a partly present sequence
+  stays **Delivery uncertain** instead of re-posting the parts the provider
+  already confirmed. A re-send keeps the original
+  content, Conversation, thread, and dispatch key, and never starts a Turn or
+  Job. Inconclusive evidence leaves the delivery **Delivery uncertain**, and an
+  exhausted delivery returns to that same state rather than being queued
+  directly. Repeating the request, a replayed event, a restart, or a repeated
+  Agent send converge on the same intent and never produce a second answer.
+- A re-send revalidates the current authorization and the original target
+  before accepting either recoverable state — an unknown delivery as well as an
+  exhausted one. A revoked access, a disabled Connection, or a changed binding
+  never redirects the result to a new destination and never leaks the original
+  content.

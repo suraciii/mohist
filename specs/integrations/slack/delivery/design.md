@@ -197,7 +197,11 @@ calls and Runner logs are not user messages.
   never create another progress or final answer.
 - **Uncertain**: timeout, connection loss, or unparseable response. Never
   resend blindly: reconcile by stable identity first, and retry the original
-  intent only after confirming no side effect occurred.
+  intent only after confirming no side effect occurred. A segmented intent
+  follows the same rule part by part: only a complete read showing that none of
+  its parts landed authorizes the sequence again, a partly present sequence
+  stays unknown, and a provider rejection that interrupts the sequence after
+  the first part settles unknown instead of re-posting the confirmed parts.
 - **Dead-letter**: definite non-retryable failure or human intervention.
   Retain the intent, reason, and actionable next step. A confirmed AgentTurn
   result is never rewritten as provider failure.
@@ -207,6 +211,64 @@ claim/ack/uncertain semantics. When an update is confirmed impossible, Server
 may append exactly one final answer in the same thread, under its own stable
 terminal delivery key, so retry, reconnect, and duplicate ingress never append
 a second final answer.
+
+### Delivery Notices and Re-send
+
+A delivery notice is one outbox intent per original delivery, under the
+reserved dispatch key `slack-delivery-notice:{originalDeliveryId}`, reusing the
+terminal explicit-failure kind so the outbox keeps a single state machine and
+its existing capacity, ordering, and dead-letter rules. It targets the original
+Conversation and thread, carries no Agent text, and renders the Session card's
+identity section plus the same optional navigation rules. Its statement is
+carried in a `section` block of the message body: Slack renders a blocks
+message from its blocks, so the top-level text stays only the notification
+fallback.
+
+Settlement and notice authoring are separate writes. The dispatcher's
+notice-recovery sweep therefore re-derives the obligation from durable row
+state — a content row settled uncertain or dead-lettered whose notice intent is
+missing — and authors it idempotently, so a crash between the two writes, or a
+single failed authoring attempt, converges on the same notice on a later tick
+instead of leaving the delivery permanently silent. The sweep is bounded in
+progress as well as in size: it selects only rows whose owner can currently
+receive a notice, and it resumes after the last row it examined, restarting
+from the beginning once the batch comes back short. A row that cannot be
+authored — a gone owner, a payload that no longer parses — keeps its obligation
+without holding the first slots of every tick, so one owner's failure never
+stalls another owner's notice.
+
+Server authors it only for content intents — terminal Agent reply and
+replaceable Session card — and only on the settlement transition that actually
+happened: unknown (claim timeout, uncertain ack) or dead-letter (retry budget
+exhausted, unknown retention expired). Reaction mutations, explicit failures,
+and notices themselves never produce a notice, so no notice about a notice can
+exist. The dispatch key makes a replayed ack, a restart, an operator retry, or a
+sweep rerun converge on the same intent instead of posting again.
+
+The original intent carries the canonical Session ID so the notice can render
+the identity section, and it keeps the uncertainty evidence: once an intent has
+been unknown, its uncertainty timestamp is never cleared by a retry, a merge
+back to Pending, or a re-send — only a confirmed provider identity resolves it —
+so a later exhaustion notice cannot claim the content was never delivered.
+Payload facts (`notice`, `possiblyDelivered`) keep that distinction queryable
+without parsing message text.
+
+The re-send entry points never queue a mutation directly. An unknown intent
+stays unknown and is left to the adapter's claim-uncertain path, which
+reconciles through provider history and re-posts the original payload only when
+the evidence proves the mutation absent. The evidence must cover the original
+Conversation and the original thread: a threaded intent is reconciled against
+`conversations.replies` for that thread, and an incomplete pagination, a
+permission failure, or any other inconclusive read is treated as inconclusive —
+the delivery stays unknown and performs no provider mutation. An exhausted
+intent is revived into unknown with a fresh retention window, so it passes the
+same reconciliation before any provider call. Both paths revalidate the
+Connection is live and Enabled before accepting the request — an unknown
+delivery as well as an exhausted one — and keep the intent's original
+Conversation and thread, so a changed binding is never redirected and original
+content is never leaked; the Agent's repeated send for an existing terminal key
+follows the same rule instead of reporting convergence for content that never
+landed.
 
 ### Capability Boundaries
 
