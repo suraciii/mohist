@@ -16,7 +16,7 @@ import {
   resolveManagerRequestCapability,
   type ManagerRequestLimits,
 } from './manager-capability-surface.js'
-import { isManagerLauncherConnection, isManagerProcessConnection } from './manager-launcher-auth.js'
+import { inspectManagerPeer, type ManagerPeerVerdict } from './manager-launcher-auth.js'
 
 export interface ManagerExecutionGrant {
   readonly managementCredential: string
@@ -46,6 +46,15 @@ export interface ManagerExecutionBoundaryOptions {
 }
 
 const DEFAULT_TERMINATION_TIMEOUT_MS = 5_000
+
+// The launcher's conventional failure exit for an unreachable or refused
+// Manager request. The broker answers with the same code so a refusal is
+// distinguishable from transport loss on both sides.
+const REFUSED_EXIT_CODE = 126
+
+type ManagerRequestAdmission =
+  | { readonly admitted: true; readonly kind: 'management' | 'reply'; readonly args: readonly string[] }
+  | { readonly admitted: false; readonly reason: string }
 
 // The broker uses Linux kernel peer information to admit only the generated
 // launcher process. Capability confinement remains a second gate: bearer
@@ -396,18 +405,25 @@ export class ManagerExecutionBoundary {
     const launcher = this.launcherPath
     const source = `#!/usr/bin/env node
 const net = require('node:net')
+const fail = (reason) => {
+  try { process.stderr.write('manager launcher: ' + reason + '\\n') } catch {}
+  process.exit(126)
+}
 const broker = process.env.MOHIST_MANAGER_BROKER
-if (!broker) process.exit(126)
+if (!broker) fail('the broker locator is missing from the environment')
 const args = process.argv.slice(2)
 const kind = args[0] === 'slack' && args[1] === 'message' && args[2] === 'send' ? 'reply' : 'management'
 const socket = net.createConnection(broker)
 let body = ''
 socket.on('data', (chunk) => { body += chunk.toString() })
-socket.on('error', () => process.exit(126))
+socket.on('error', (error) => fail('the broker connection failed' + (error && error.code ? ' (' + error.code + ')' : '')))
 socket.on('end', () => {
+  if (body.length === 0) fail('the broker returned no response')
   let response
-  try { response = JSON.parse(body) } catch { process.exit(126); return }
-  if (!response || typeof response.exitCode !== 'number') { process.exit(126); return }
+  try { response = JSON.parse(body) } catch { fail('the broker returned a malformed response') }
+  if (!response || typeof response.exitCode !== 'number') fail('the broker response carried no exit code')
+  if (typeof response.signal === 'string' && response.signal.length > 0)
+    process.stderr.write('manager broker: the Manager command was terminated by ' + response.signal + '\\n')
   if (typeof response.stdout === 'string') process.stdout.write(response.stdout)
   if (typeof response.stderr === 'string') process.stderr.write(response.stderr)
   process.exit(response.exitCode)
@@ -461,8 +477,9 @@ socket.end(JSON.stringify({ kind, args }))
   }
 
   private async handleRequest(socket: Socket, body: string): Promise<void> {
-    if (!(await isManagerLauncherConnection(socket, this.launcherPath))) {
-      socket.end('{}')
+    const peer = await inspectManagerPeer(socket, this.launcherPath)
+    if (!peer.admitted) {
+      this.refuseRequest(socket, `peer identity not verified (${describeRefusal(peer)})`)
       return
     }
 
@@ -470,15 +487,32 @@ socket.end(JSON.stringify({ kind, args }))
     try {
       request = JSON.parse(body) as { kind?: unknown; args?: unknown; cwd?: unknown }
     } catch {
-      socket.end('{}')
+      this.refuseRequest(socket, 'the request body is not valid JSON')
       return
     }
-    const verdict = this.admitRequest(request)
-    if (verdict === null) {
-      socket.end('{}')
+    const admission = this.admitRequest(request)
+    if (!admission.admitted) {
+      this.refuseRequest(socket, admission.reason)
       return
     }
-    await this.executeCli(socket, verdict.kind, verdict.args)
+    await this.executeCli(socket, admission.kind, admission.args)
+  }
+
+  /**
+   * A refusal answers with the broker's exit-code convention and a
+   * category-only reason. The Manager can tell a refusal from transport loss,
+   * while the payload still carries no credentials, socket paths or process
+   * identifiers.
+   */
+  private refuseRequest(socket: Socket, reason: string): void {
+    if (socket.destroyed) return
+    socket.end(
+      JSON.stringify({
+        exitCode: REFUSED_EXIT_CODE,
+        stdout: '',
+        stderr: `manager broker: ${reason}\n`,
+      }),
+    )
   }
 
   /**
@@ -488,25 +522,29 @@ socket.end(JSON.stringify({ kind, args }))
    * credential-bearing child is running, and the kind still has request
    * budget. The caller-supplied working directory is never used.
    */
-  private admitRequest(request: {
-    kind?: unknown
-    args?: unknown
-    cwd?: unknown
-  }): { kind: 'management' | 'reply'; args: string[] } | null {
+  private admitRequest(request: { kind?: unknown; args?: unknown; cwd?: unknown }): ManagerRequestAdmission {
     const kind = request.kind === 'management' || request.kind === 'reply' ? request.kind : null
-    if (kind === null) return null
-    if (!Array.isArray(request.args) || request.args.length > 128) return null
-    if (request.args.some((arg) => typeof arg !== 'string' || arg.length === 0)) return null
-    if (this.disposed || this.expired()) return null
-    if (this.runningChildren > 0) return null
-    if (this.usedRequests[kind] >= this.requestLimits[kind]) return null
+    if (kind === null) return { admitted: false, reason: 'the request kind is not a Manager request kind' }
+    if (!Array.isArray(request.args) || request.args.length > 128) {
+      return { admitted: false, reason: 'the request arguments are not a bounded string list' }
+    }
+    if (request.args.some((arg) => typeof arg !== 'string' || arg.length === 0)) {
+      return { admitted: false, reason: 'the request arguments are not a bounded string list' }
+    }
+    if (this.disposed || this.expired()) return { admitted: false, reason: 'the execution is closed or expired' }
+    if (this.runningChildren > 0) return { admitted: false, reason: 'another Manager request is in flight' }
+    if (this.usedRequests[kind] >= this.requestLimits[kind]) {
+      return { admitted: false, reason: `the ${kind} request budget is exhausted` }
+    }
     const args = request.args as string[]
     const capability = resolveManagerRequestCapability(args)
     const admittedKind =
       capability !== null ? managerRequestKind(capability) : isManagerUsageRequest(args) ? 'management' : null
-    if (admittedKind !== kind) return null
+    if (admittedKind !== kind) {
+      return { admitted: false, reason: 'the request is outside the Manager capability catalog' }
+    }
     this.usedRequests[kind] += 1
-    return { kind, args }
+    return { admitted: true, kind, args }
   }
 
   private handleCredentialConnection(socket: Socket): void {
@@ -526,12 +564,11 @@ socket.end(JSON.stringify({ kind, args }))
 
   private async handleCredentialRequest(socket: Socket, body: string): Promise<void> {
     const child = [...this.children].find((candidate) => candidate.pid === this.activeCredentialChildPid)
-    if (
-      this.expired() ||
-      this.activeCredentialChildPid === null ||
-      !child ||
-      !(await isManagerProcessConnection(socket, this.realMoPath, this.activeCredentialChildPid))
-    ) {
+    if (this.expired() || this.activeCredentialChildPid === null || !child) {
+      socket.end('{}')
+      return
+    }
+    if (!(await inspectManagerPeer(socket, this.realMoPath, this.activeCredentialChildPid)).admitted) {
       socket.end('{}')
       return
     }
@@ -598,9 +635,9 @@ socket.end(JSON.stringify({ kind, args }))
     }
   }
 
-  private async executeCli(socket: Socket, kind: 'management' | 'reply', args: string[]): Promise<void> {
+  private async executeCli(socket: Socket, kind: 'management' | 'reply', args: readonly string[]): Promise<void> {
     if (this.expired()) {
-      socket.end('{}')
+      this.refuseRequest(socket, 'the execution is closed or expired')
       return
     }
     const childEnvironment = { ...this.baseEnvironment }
@@ -628,7 +665,10 @@ socket.end(JSON.stringify({ kind, args }))
     child.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString('utf8')
     })
+    let childCleared = false
     const clearChild = () => {
+      if (childCleared) return
+      childCleared = true
       this.children.delete(child)
       if (this.activeCredentialChildPid === child.pid) {
         this.activeCredentialChildPid = null
@@ -636,24 +676,36 @@ socket.end(JSON.stringify({ kind, args }))
       }
       this.runningChildren -= 1
     }
-    child.on('error', () => {
+    // A failed spawn emits `error` and then `close`. Exactly one response
+    // settles the request; a second write would surface as a reset instead of
+    // the diagnostic.
+    let responded = false
+    const respond = (payload: Record<string, unknown>) => {
+      if (responded) return
+      responded = true
+      if (socket.destroyed) return
+      socket.end(JSON.stringify(payload))
+    }
+    child.on('error', (error: Error & { readonly code?: string }) => {
       clearChild()
-      socket.end('{}')
+      respond({
+        exitCode: REFUSED_EXIT_CODE,
+        stdout: '',
+        stderr: `manager broker: the Manager command could not be started${error.code ? ` (${error.code})` : ''}\n`,
+      })
     })
-    child.on('close', (exitCode) => {
+    child.on('close', (exitCode, signal) => {
       clearChild()
       if (this.disposed) {
         socket.destroy()
         return
       }
-      if (socket.destroyed) return
-      socket.end(
-        JSON.stringify({
-          exitCode: typeof exitCode === 'number' ? exitCode : 1,
-          stdout: this.mask(stdout),
-          stderr: this.mask(stderr),
-        }),
-      )
+      respond({
+        exitCode: typeof exitCode === 'number' ? exitCode : 1,
+        ...(signal ? { signal } : {}),
+        stdout: this.mask(stdout),
+        stderr: this.mask(stderr),
+      })
     })
   }
 }
@@ -669,6 +721,11 @@ type ManagerCredentialResponse = {
   status: number
   headers: Record<string, string>
   bodyBase64: string
+}
+
+function describeRefusal(verdict: ManagerPeerVerdict): string {
+  const refusal = verdict.refusal ?? 'unknown'
+  return verdict.detail ? `${refusal}:${verdict.detail}` : refusal
 }
 
 function findRealMoPath(managerDirectory: string, pathValue: string): string | null {
