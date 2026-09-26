@@ -178,8 +178,8 @@ Implementation gaps:
 ## Agent Event Response
 
 An event response starts one AgentJob from an event-routing decision and
-records the resulting Agent work. [`event-routing.md`](design.md) owns
-launch idempotency. This document defines response execution and attribution.
+records the resulting Agent work. [Idempotency and Visibility](#idempotency-and-visibility)
+defines the shared launch key. This section defines response execution and attribution.
 
 ### Design Drivers
 
@@ -234,7 +234,7 @@ AgentJob decides whether the response completed or failed. AgentSession records 
 
 - One Agent starts at most once for one event, independent of whether the
   trigger came from a routing rule, watch, or mention. The durable key is
-  defined by [`event-routing.md`](design.md).
+  defined under [Idempotency and Visibility](#idempotency-and-visibility).
 - An event says what occurred. Before acting, the Agent uses the command
   surface to confirm current state. For example, it confirms that a run still
   waits at an Approval Point.
@@ -277,7 +277,7 @@ Every Agent decision must be distinguishable from a person's action.
 - A per-Issue response serialization lock.
 - Automatic response retry. Job failure surfaces through
   `agent.job.failed`; retry is a new event or manual action.
-- Trigger rate limits or cooldowns. See [`event-routing.md`](design.md).
+- Trigger rate limits or cooldowns. See the [routing non-goals](#non-goals).
 - Suppression of direct notification for a supervised event. See
   [`agent-supervision.md`](../supervision/design.md).
 
