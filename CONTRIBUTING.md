@@ -31,9 +31,10 @@ Thanks for your interest in mohist!
 
 ## Documentation
 
-Read the writing rules before editing documents:
-[`docs/README.md`](docs/README.md) for product docs,
-[`design/README.md`](design/README.md) for design docs. Before requesting a
+Read the applicable writing rules before editing documents:
+[`specs/AGENTS.md`](specs/AGENTS.md) for feature specifications,
+[`docs/AGENTS.md`](docs/AGENTS.md) for product docs, and
+[`design/AGENTS.md`](design/AGENTS.md) for design docs. Before requesting a
 review, re-read the code behind any fact you state, and check that every
 example runs and every link resolves.
 

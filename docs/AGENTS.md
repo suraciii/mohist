@@ -1,7 +1,13 @@
 # Agents: Writing Product Docs
 
-`docs/` is the product specification layer. It defines what the product must
-satisfy. Write for users and Agents who do not read the source code.
+`docs/` holds product guides and product specifications that have not moved
+to `specs/`. The product-spec writing rules below also apply to feature
+`spec.md` files through [specs/AGENTS.md](../specs/AGENTS.md). Write for users
+and Agents who do not read the source code.
+
+Guides explain how to use the product and link to the owning specification.
+Do not copy migrated feature rules back into a guide. Keep this directory's
+README focused on the human reading path, not Agent instructions.
 
 Shared writing rules (language, diagrams, fences, tables, examples) live in
 [`../eng/context-management.md`](../eng/context-management.md#writing-rules).

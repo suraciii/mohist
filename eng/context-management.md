@@ -6,7 +6,7 @@ lives. It governs every file whose purpose is to inform future readers, humans
 and agents, rather than to execute.
 
 This is an engineering practice of this repository, not a product
-specification. `docs/` and `design/` specify the Mohist product; `eng/`
+specification. Product and design specifications describe Mohist; `eng/`
 specifies how the repository itself is built, tested, and documented.
 
 ## Design Drivers
@@ -52,22 +52,34 @@ format.
 One fact has one home. Other documents link to the home; they never restate
 the fact.
 
-The subject of a document fixes its layer:
+Organize specifications by subdomain and feature, not by implementation
+package. A feature is a lasting capability, not an Issue or a release.
 
-- **`docs/`** — the product specification: what the product must satisfy.
-  Written for users.
-- **`design/`** — the product design: why the system has its boundaries and
-  which contracts implementations must preserve. Written for developers.
-- **`eng/`** — repository engineering practices: how this repository itself
-  is built, tested, and documented. Written for contributors and agents.
-  These documents govern the repository, not the product.
+- **`specs/<subdomain>/<feature>/spec.md`** defines observable behavior,
+  failure and unknown outcomes, safety boundaries, and acceptance scenarios.
+- **`specs/<subdomain>/<feature>/design.md`** explains mechanisms and
+  implementation contracts. Create it only when the feature needs a separate
+  design explanation. Link to product rules instead of repeating them.
+- **`specs/README.md`** is the single human-facing introduction to the spec
+  layout, with a few starting links. Do not add subdomain or feature READMEs,
+  duplicate the directory listing, or summarize each feature's rules here.
+- **`docs/`** holds product vision, tutorials, and operating guides. Guides
+  link to the owning specification instead of defining behavior again.
+- **`eng/`** holds repository engineering practices, not product behavior.
+
+Create directories only for content that exists. Do not require per-feature
+glossaries, manifests, rule files, or separate acceptance documents. Keep the
+existing domain map in [Domain Analysis](../design/domain-analysis.md); a new
+directory layout does not require another map or a new domain model.
 
 Cross-cutting homes:
 
 - **Root `AGENTS.md`** holds only rules that apply across the whole
   repository. Each rule links to the document that owns the detail.
 - **`CONTEXT.md`** is the single entry point for term definitions.
-- **`README.md` files** index their directory.
+- **`README.md` files** introduce the project or documentation to human
+  readers. They are not required in every directory. Agent instructions
+  belong in `AGENTS.md`; both entry points link to the same specifications.
 - **Scoped rule files are named `AGENTS.md`.** Agent tooling loads `AGENTS.md`
   files automatically when work enters their tree; a rules file that loads
   itself cannot be forgotten. Names such as `_agents.md` or `agents.md` hide
@@ -77,12 +89,42 @@ Cross-cutting homes:
 - **Code comments** hold narrow-scope technical detail. They explain why,
   never what.
 
+## Finding and changing context
+
+Start with the applicable `AGENTS.md` rules and locate the owning feature at
+`specs/<subdomain>/<feature>/spec.md`. The human-facing README is not a required
+step for agents. Read the spec before changing its behavior. Read its design and
+implementation when the task requires them. Follow dependency links only for
+rules the task relies on; do not load every feature in the subdomain.
+
+Each cross-feature dependency names the fact it consumes and links to that
+fact's owner. Runner owns work-confirmation sources, Session owns execution
+evidence interpretation, and AgentOps owns their presentation. None of these
+features duplicates another's rules.
+
+Before editing, identify the required behavior, its owner, relevant failure
+boundaries, and how the change will be verified. Resolve missing or conflicting
+contracts explicitly rather than treating current code or old chat as the spec.
+
+Change the spec when behavior changes and the design when mechanisms change.
+Update affected links in the same change. Do not require a documentation diff
+when no durable fact changes. Plans and verification output stay with the task.
+
+## Implementation Gaps
+
+Product and design specifications not yet organized by feature remain in
+`docs/` and `design/`. Their existing documents remain authoritative until
+each feature moves. The [product index](../docs/README.md) and
+[design index](../design/README.md) provide the remaining reading paths.
+Move each rule once, remove its old body, and update references together.
+
 ## Decision records
 
-A decision record is the only place that keeps why a boundary exists: the
-problem, the rejected alternatives, and the accepted trade-off. Specifications
-and `AGENTS.md` state the target state and never narrate history; a reader who
-needs the rationale follows the link to the record.
+A design specification explains the current boundary and the constraints it
+must satisfy. Use a decision record when rejected alternatives and an accepted
+trade-off must remain available to future changes. Keep that detailed rationale
+in the record and link to it from the specification. Specifications and
+`AGENTS.md` state the target state; they do not narrate change history.
 
 Each record carries, in order:
 
@@ -123,8 +165,8 @@ remain true after the current work item closes.
 
 ## Writing rules
 
-These rules govern every specification document, in `docs/`, `design/`, and
-`eng/` alike.
+These rules govern every specification document, including `specs/`, `docs/`,
+`design/`, and `eng/`.
 
 - Write active prose in English. Use short sentences, active voice, American
   spelling, and stable terms. Use ASD-STE100 writing rules as a target; do not
@@ -160,8 +202,8 @@ These rules govern every specification document, in `docs/`, `design/`, and
 
 ## Verification
 
-`npm run docs:check` gates documentation mechanics across `docs/`, `design/`,
-and `eng/`: Latin-script prose, link targets, and diagram fences. It also gates
+`npm run docs:check` gates documentation mechanics across `specs/`, `docs/`,
+`design/`, and `eng/`: Latin-script prose, link targets, and diagram fences. It also gates
 that every decision record carries a Status line and an `## Alternatives
 considered` section. Reviewers enforce the placement and durability rules in
 this document; no gate can judge them.

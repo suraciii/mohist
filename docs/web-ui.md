@@ -66,31 +66,9 @@ Use the top navigation to change pages.
 
 ## Dashboard execution summary
 
-The Dashboard must distinguish current execution from old records that need
-review. Its Runner headline and capacity use the
-[fleet summary](runner.md#fleet-summary); Session labels and counts use
-[current execution evidence](agent-sessions.md#current-execution-evidence).
-The sidebar and board warnings must preserve those same meanings.
-
-- Show queued, confirmed running, and **Needs verification** work separately.
-  Do not infer current execution from a nonempty historical Session list or
-  describe missing telemetry as a confirmed report of active Runner work.
-- Every work card must identify its real target. A Session without an Issue
-  link opens `/<projectName>/sessions/<sessionId>` and shows its Agent or
-  Session label. Never manufacture Issue number zero or an `/issues/0` link.
-  A genuine Issue card keeps its Issue link; Session evidence on it can link
-  separately to the Session.
-- A record without enough identity to build a valid link shows a non-clickable
-  **Target unavailable** label. It must not fabricate an identifier.
-- If a linked Issue or Session cannot be found, its page must show an explicit
-  not-found message and a return link to the relevant list. Permission and
-  network failures must remain distinguishable from a missing object; none
-  may leave a blank detail pane.
-
-A Session last observed executing seventeen days ago, with no current owner
-confirmation, must appear under **Needs verification**, not as confirmed
-running. If it has no Issue attribution, its card must open the Session even
-when the Runner currently reports zero occupied slots.
+Dashboard, sidebar, and board summaries follow
+[AgentOps activity](../specs/agent-ops/activity/spec.md), including fleet
+capacity, execution groups, Session card targets, and missing-target behavior.
 
 ## Board and Issue Review
 

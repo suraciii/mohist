@@ -11,7 +11,7 @@ import { VFile } from 'vfile'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const requiredDocuments = ['README.md', 'CONTEXT.md', 'CONTRIBUTING.md']
-const documentationDirectories = ['docs', 'design', 'eng']
+const documentationDirectories = ['docs', 'design', 'eng', 'specs']
 // These fence names identify diagrams without interpreting ordinary source-code examples.
 const forbiddenDiagramLanguages = new Set([
   'actdiag',

@@ -127,6 +127,8 @@ Start with [Getting Started](docs/getting-started.md). See
 [Product Vision](docs/vision.md) for the product direction and the
 [documentation index](docs/README.md) for the complete reading path.
 Architecture and design documents are under [`design/`](design/README.md).
+Feature-local behavior and design contracts are under
+[`specs/`](specs/README.md).
 
 ## Repository Structure
 
@@ -134,6 +136,7 @@ Architecture and design documents are under [`design/`](design/README.md).
 - `packages/runner/`: execution plane (TypeScript)
 - `packages/web/`: Web UI (React)
 - `packages/go/mohist-cli/`: static `mo` CLI
+- `specs/`: feature-local product and design specifications
 - `docs/`: user documentation
 - `design/`: architecture and design documentation
 - `eng/`: repository engineering practices

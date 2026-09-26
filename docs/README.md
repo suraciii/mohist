@@ -3,6 +3,8 @@
 This documentation is for **users**. The index is organized by product area;
 each guide appears once. Architecture and domain analysis are under
 [`../design/`](../design/).
+Feature-local behavior and design contracts are introduced in
+[`../specs/README.md`](../specs/README.md); guides link to those contracts.
 
 If you are new to Mohist, read the [repository README](../README.md) first.
 
