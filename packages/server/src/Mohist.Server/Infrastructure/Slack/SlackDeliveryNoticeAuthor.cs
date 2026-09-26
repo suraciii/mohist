@@ -15,7 +15,9 @@ namespace Mohist.Server.Infrastructure.Slack;
 /// instead of posting again. It reuses the terminal explicit-failure kind so
 /// the outbox keeps one state machine and one capacity / dead-letter policy,
 /// and it is posted in the original thread so it cannot redirect or duplicate
-/// the Agent reply.
+/// the Agent reply. Its statement is rendered into the message's own section
+/// blocks — the top-level text is only Slack's notification fallback — so the
+/// reason stays readable in the message body.
 /// </para>
 /// <para>
 /// Only content kinds (terminal Agent reply, replaceable Session card) get a
@@ -111,9 +113,14 @@ public sealed class SlackDeliveryNoticeAuthor : IScopedService
             var sessionId = string.IsNullOrWhiteSpace(original.SessionId)
                 ? null
                 : original.SessionId;
+            // Slack renders a blocks message from its blocks and treats the
+            // top-level text only as the notification fallback, so the
+            // statement must live in a real section block or a reader of the
+            // message body never sees why the content is missing.
+            var statementBlocks = BuildStatementBlocks(text);
             JsonElement? blocks = sessionId is null
-                ? null
-                : await _blocks.BuildAsync(projectId, sessionId, controlBlocks: null).ConfigureAwait(false);
+                ? statementBlocks
+                : await _blocks.BuildAsync(projectId, sessionId, controlBlocks: statementBlocks).ConfigureAwait(false);
 
             var dispatchRef = $"{DispatchPrefix}{row.Id}";
             var result = await _outbox.EnqueueRequiredAsync(new SlackOutboxDraft(
@@ -192,6 +199,22 @@ public sealed class SlackDeliveryNoticeAuthor : IScopedService
             : $" Session: {sessionId}.";
         return $"Delivery notice: {headline} Check the thread and the Session before sending it again; nothing is re-run automatically.{reference}";
     }
+
+    /// <summary>
+    /// The visible body of the notice: one <c>section</c> block carrying the
+    /// same statement as the fallback text, so Slack renders the system
+    /// label, the affected projection, the delivery fact, and the next step
+    /// in the message itself.
+    /// </summary>
+    private static JsonElement BuildStatementBlocks(string statement) =>
+        JsonSerializer.SerializeToElement(new[]
+        {
+            new
+            {
+                type = "section",
+                text = new { type = "mrkdwn", text = statement },
+            },
+        });
 
     private static SlackDeliveryPayload? TryParsePayload(string payloadJson)
     {

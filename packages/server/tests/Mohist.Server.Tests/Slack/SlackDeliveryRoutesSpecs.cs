@@ -176,6 +176,69 @@ public sealed class SlackDeliveryRoutesSpecs : IClassFixture<DefaultMohistIntegr
     }
 
     [Fact]
+    public async Task Resend_endpoint_rejects_a_disabled_connection_for_both_recoverable_states()
+    {
+        var connection = await CreateConnectionAsync();
+        string uncertainDeliveryId;
+        string exhaustedDeliveryId;
+        await using (var seedScope = _fixture.Services.CreateAsyncScope())
+        {
+            var outbox = seedScope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+            var db = seedScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var uncertain = await outbox.EnqueueAsync(new SlackOutboxDraft(
+                connection.ProjectId,
+                connection.Id,
+                connection.WorkspaceTeamId,
+                "D1",
+                SlackOutboxKinds.TerminalResult,
+                "agentjob_disabled_uncertain",
+                "{\"text\":\"uncertain\"}"));
+            await outbox.MarkDeliveryUncertainAsync(connection.ProjectId, uncertain.Id, "claim timeout");
+            uncertainDeliveryId = uncertain.Id;
+
+            var exhausted = await outbox.EnqueueAsync(new SlackOutboxDraft(
+                connection.ProjectId,
+                connection.Id,
+                connection.WorkspaceTeamId,
+                "D1",
+                SlackOutboxKinds.TerminalResult,
+                "agentjob_disabled_exhausted",
+                "{\"text\":\"exhausted\"}"));
+            var exhaustedRow = await db.SlackOutboxRows.AsNoTracking().SingleAsync(r => r.Id == exhausted.Id);
+            await outbox.MarkDeadLetteredAsync(
+                connection.ProjectId,
+                exhausted.Id,
+                "retry budget exhausted",
+                expectedState: SlackOutboxStates.Pending,
+                expectedUpdatedAt: exhaustedRow.UpdatedAt);
+            exhaustedDeliveryId = exhausted.Id;
+
+            await db.AgentConnections
+                .Where(row => row.Id == connection.Id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.DesiredState, DesiredStateKind.Disabled));
+        }
+
+        // Authorization is re-checked before accepting either recoverable
+        // state, so a disabled Connection never re-enters reconciliation.
+        using var uncertainResend = await _fixture.Client.PostAsync(
+            Path(connection, $"/deliveries/{uncertainDeliveryId}/resend"), content: null);
+        Assert.Equal(HttpStatusCode.Conflict, uncertainResend.StatusCode);
+
+        using var exhaustedResend = await _fixture.Client.PostAsync(
+            Path(connection, $"/deliveries/{exhaustedDeliveryId}/resend"), content: null);
+        Assert.Equal(HttpStatusCode.Conflict, exhaustedResend.StatusCode);
+
+        await using var verifyScope = _fixture.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Equal(
+            SlackOutboxStates.DeliveryUncertain,
+            (await verifyDb.SlackOutboxRows.AsNoTracking().SingleAsync(r => r.Id == uncertainDeliveryId)).State);
+        Assert.Equal(
+            SlackOutboxStates.DeadLettered,
+            (await verifyDb.SlackOutboxRows.AsNoTracking().SingleAsync(r => r.Id == exhaustedDeliveryId)).State);
+    }
+
+    [Fact]
     public async Task Agent_reply_route_requires_the_complete_anchor_for_every_dispatch()
     {
         var connection = await CreateConnectionAsync();

@@ -541,6 +541,30 @@ func TestReconcileChatUpdateVerifiesStoredText(t *testing.T) {
 	}
 }
 
+func TestThreadedSegmentReconciliationReadsTheThread(t *testing.T) {
+	thread := "1700.0"
+	delivery := &Delivery{
+		ID:             "d-seg-thread",
+		ConversationID: testConversation,
+		ThreadTs:       &thread,
+		PayloadJSON:    `{"operation":"post_message","segments":["one","two"],"clientMessageId":"cmid-seg-thread"}`,
+	}
+	web := &fakeWeb{repliesFn: func(RepliesInput) ([]HistoryMessage, error) {
+		return []HistoryMessage{
+			{TS: "1701.0", ClientMsgID: "cmid-seg-thread"},
+			{TS: "1701.1", ClientMsgID: "cmid-seg-thread" + segmentDispatchSeparator + "1"},
+		}, nil
+	}}
+
+	ack := reconcileNow(t, web, delivery)
+	if ack.Outcome != OutcomeDelivered || ack.ProviderMessageIdentity == nil || ack.ProviderMessageIdentity.MessageTs != "1701.0" {
+		t.Fatalf("threaded segment ack = %+v", ack)
+	}
+	if len(web.historyInputs) != 0 || len(web.repliesInputs) != 1 || web.repliesInputs[0].TS != thread {
+		t.Fatalf("history %+v replies %+v", web.historyInputs, web.repliesInputs)
+	}
+}
+
 func TestParseDeliveryPayloadRejectsNonObjects(t *testing.T) {
 	for _, bad := range []string{`[]`, `"text"`, `not json`} {
 		if _, err := ParseDeliveryPayload(bad); err == nil {

@@ -96,12 +96,21 @@ retrying within budget or already delivered gets none.
   reply or Session card), whether its content may already be present, and
   whether retries stopped. It is never Agent speech, never rewrites an
   AgentTurn result, and is labelled so it cannot be mistaken for the Agent
-  reply, the Session card, or the Agent-crash system failure.
+  reply, the Session card, or the Agent-crash system failure. The statement is
+  carried in the message's own section blocks — the top-level text is only
+  Slack's notification fallback — so the fact is readable in the message body.
+- The notice obligation is durable and recoverable. The settlement and the
+  notice are separate writes, so a restart or a failed authoring attempt
+  between them is repaired by a bounded, idempotent recovery scan; the notice
+  dispatch key makes that repair converge on the same notice instead of
+  posting a second one.
 - Uncertainty is never rewritten as definite failure. A notice posted while the
   delivery was unknown keeps stating that its content may already be present
   once the retry budget is exhausted; an exhaustion notice for a delivery that
   was never unknown states that the content was generated but not delivered. A
-  delivery still unknown when its retention expires stays unknown.
+  delivery still unknown when its retention expires stays unknown. The
+  uncertainty fact survives retries and re-queues; only a confirmed provider
+  identity resolves it.
 - The notice carries the canonical Session reference, and **Open in Mohist**
   when a usable External Web URL exists. Without a usable URL it still shows
   the Session ID. It never sends a localhost address and never carries a Slack
@@ -111,12 +120,18 @@ retrying within budget or already delivered gets none.
   Slack send path is usable, the durable server records stay queryable.
 - A re-send of an unknown delivery reconciles first: the original intent is
   posted again only after provider evidence shows the original mutation never
-  occurred. It keeps the original content, Conversation, thread, and dispatch
-  key, and never starts a Turn or Job. Inconclusive evidence leaves the
-  delivery **Delivery uncertain**, and an exhausted delivery returns to that
-  same state rather than being queued directly. Repeating the request, a
-  replayed event, a restart, or a repeated Agent send converge on the same
-  intent and never produce a second answer.
-- A re-send revalidates the current authorization and the original target. A
-  revoked access, a disabled Connection, or a changed binding never redirects
-  the result to a new destination and never leaks the original content.
+  occurred. The evidence must cover the original Conversation and the original
+  thread: when the intent posts into a thread, only a complete, authorized read
+  of that thread can establish absence; an incomplete pagination, a permission
+  failure, or any other inconclusive read leaves the delivery **Delivery
+  uncertain** and performs no provider mutation. A re-send keeps the original
+  content, Conversation, thread, and dispatch key, and never starts a Turn or
+  Job. Inconclusive evidence leaves the delivery **Delivery uncertain**, and an
+  exhausted delivery returns to that same state rather than being queued
+  directly. Repeating the request, a replayed event, a restart, or a repeated
+  Agent send converge on the same intent and never produce a second answer.
+- A re-send revalidates the current authorization and the original target
+  before accepting either recoverable state — an unknown delivery as well as an
+  exhausted one. A revoked access, a disabled Connection, or a changed binding
+  never redirects the result to a new destination and never leaks the original
+  content.

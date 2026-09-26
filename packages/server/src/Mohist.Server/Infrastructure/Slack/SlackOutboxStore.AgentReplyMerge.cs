@@ -107,6 +107,9 @@ public sealed partial class SlackOutboxStore
             ReplyParts = replyParts.Append(redactedText).ToArray(),
         });
         var now = _timeProvider.GetUtcNow();
+        // The retry keeps the uncertainty history: an intent that was ever
+        // unknown must not later be described as content that never landed.
+        // Only a confirmed provider identity clears that fact.
         var changed = await db.SlackOutboxRows
             .Where(row => row.Id == terminal.Id
                 && row.State == terminal.State
@@ -118,7 +121,6 @@ public sealed partial class SlackOutboxStore
                 .SetProperty(row => row.NextAttemptAt, now)
                 .SetProperty(row => row.ClaimedAt, (DateTimeOffset?)null)
                 .SetProperty(row => row.ClaimedByAdapterId, (string?)null)
-                .SetProperty(row => row.DeliveryUncertainAt, (DateTimeOffset?)null)
                 .SetProperty(row => row.DeliveredAt, (DateTimeOffset?)null)
                 .SetProperty(row => row.LastError, (string?)null)
                 .SetProperty(row => row.UpdatedAt, now), ct);

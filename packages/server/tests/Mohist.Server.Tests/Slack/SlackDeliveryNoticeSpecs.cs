@@ -342,6 +342,152 @@ public sealed partial class SlackDeliveryHandlerSpecs
         Assert.Equal(SlackOutboxStates.DeliveryUncertain, (await RowAsync(database, first.DeliveryId!)).State);
     }
 
+    [Fact]
+    public async Task Notice_keeps_identity_navigation_and_statement_when_a_web_url_is_usable()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var time = new FakeTimeProvider(Start);
+        var connection = await CreateConnectionAsync(database, time);
+        var outbox = CreateStore(database, time);
+        var options = Options.Create(new SlackProviderOptions { ExternalWebUrl = "https://mohist.example/base" });
+        var notices = CreateNoticeAuthor(database, outbox, options);
+        var content = await outbox.EnqueueAsync(ContentDraft(connection, "agentjob_notice_link"));
+        await outbox.MarkDeliveryUncertainAsync(connection.ProjectId, content.Id, "claim timeout");
+
+        Assert.True(await notices.TryNoticeAsync(
+            connection.ProjectId, SlackDeliveryOwnerKinds.Connection, connection.Id, content.Id));
+
+        var notice = Assert.Single(await NoticeRowsAsync(database, connection.Id));
+        var payload = SlackDeliveryPayload.Parse(notice.PayloadJson);
+        AssertNoticeBlocks(payload);
+        var rendered = payload.Blocks!.Value.GetRawText();
+        Assert.Contains($"Session: {NoticeSession}", rendered, StringComparison.Ordinal);
+        Assert.Contains("Open in Mohist", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("localhost", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Unknown_history_survives_a_retry_and_reports_possibly_delivered_when_exhausted()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var time = new FakeTimeProvider(Start);
+        var connection = await CreateConnectionAsync(database, time);
+        var options = Options.Create(new SlackProviderOptions
+        {
+            OutboxClaimTimeout = TimeSpan.FromSeconds(30),
+            OutboxUncertainTimeout = TimeSpan.FromMinutes(5),
+            OutboxMaxAttempts = 1,
+        });
+        var outbox = CreateStore(database, time, options: options);
+        var content = await outbox.EnqueueAsync(ContentDraft(connection, "agentjob_uncertain_retry"));
+
+        await outbox.MarkDeliveryUncertainAsync(connection.ProjectId, content.Id, "claim timeout");
+        await outbox.ClaimUncertainAsync(connection.ProjectId, connection.Id, "adapter-a");
+        await outbox.ScheduleRetryAsync(connection.ProjectId, content.Id, "provider_mutation_absent", "adapter-a");
+
+        // The retry must not erase the unknown-outcome history: the evidence
+        // cleared the previous mutation attempt, not the possibility that the
+        // content is already visible.
+        var retried = await RowAsync(database, content.Id);
+        Assert.Equal(SlackOutboxStates.Pending, retried.State);
+        Assert.NotNull(retried.DeliveryUncertainAt);
+
+        var dispatcher = CreateDispatcher(database, time, options, outbox);
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(SlackOutboxStates.DeadLettered, (await RowAsync(database, content.Id)).State);
+        var notice = Assert.Single(await NoticeRowsAsync(database, connection.Id));
+        var payload = SlackDeliveryPayload.Parse(notice.PayloadJson);
+        Assert.Equal(SlackDeliveryNoticeAuthor.Exhausted, payload.Notice);
+        Assert.True(payload.PossiblyDelivered);
+        Assert.Contains("may already be visible", payload.Text ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Restart_recovers_the_notice_when_the_settlement_committed_without_authoring()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var time = new FakeTimeProvider(Start);
+        var connection = await CreateConnectionAsync(database, time);
+        var outbox = CreateStore(database, time);
+        const string dispatchRef = "agentjob_notice_interrupted";
+        var content = await outbox.EnqueueAsync(ContentDraft(connection, dispatchRef));
+        var queued = await RowAsync(database, content.Id);
+        await outbox.MarkDeadLetteredAsync(
+            connection.ProjectId,
+            content.Id,
+            "retry budget exhausted",
+            expectedState: SlackOutboxStates.Pending,
+            expectedUpdatedAt: queued.UpdatedAt);
+
+        // The process exited between the settlement write and the notice
+        // authoring: the obligation must survive a restart.
+        Assert.Equal(SlackOutboxStates.DeadLettered, (await RowAsync(database, content.Id)).State);
+        Assert.Empty(await NoticeRowsAsync(database, connection.Id));
+
+        var restarted = CreateDispatcher(
+            database,
+            time,
+            Options.Create(new SlackProviderOptions()),
+            CreateStore(database, time));
+        await restarted.DispatchAsync(CancellationToken.None);
+
+        var notice = Assert.Single(await NoticeRowsAsync(database, connection.Id));
+        var payload = SlackDeliveryPayload.Parse(notice.PayloadJson);
+        Assert.Equal(SlackDeliveryNoticeAuthor.Exhausted, payload.Notice);
+        Assert.False(payload.PossiblyDelivered);
+
+        // The repair converges on the same notice instead of posting again.
+        await restarted.DispatchAsync(CancellationToken.None);
+        Assert.Single(await NoticeRowsAsync(database, connection.Id));
+        Assert.Single(await AllRowsAsync(database, connection.Id), row => row.DispatchRef == dispatchRef);
+    }
+
+    [Fact]
+    public async Task Notice_authoring_suppressed_while_the_owner_is_not_live_is_repaired_later()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var time = new FakeTimeProvider(Start);
+        var connection = await CreateConnectionAsync(database, time);
+        var options = Options.Create(new SlackProviderOptions { OutboxMaxAttempts = 1 });
+        var outbox = CreateStore(database, time, options: options);
+        var content = await outbox.EnqueueAsync(ContentDraft(connection, "agentjob_notice_suppressed"));
+        await outbox.ScheduleRetryAsync(connection.ProjectId, content.Id, "channel_not_found");
+
+        // The settlement commits while the authoring attempt cannot reach a
+        // live owner; no notice row exists and none was claimed.
+        await SetConnectionLiveAsync(database, connection, live: false);
+        var dispatcher = CreateDispatcher(database, time, options, outbox);
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(SlackOutboxStates.DeadLettered, (await RowAsync(database, content.Id)).State);
+        Assert.Empty(await NoticeRowsAsync(database, connection.Id));
+
+        // A later sweep repairs the missing obligation.
+        await SetConnectionLiveAsync(database, connection, live: true);
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        var notice = Assert.Single(await NoticeRowsAsync(database, connection.Id));
+        var payload = SlackDeliveryPayload.Parse(notice.PayloadJson);
+        Assert.Equal(SlackDeliveryNoticeAuthor.Exhausted, payload.Notice);
+        Assert.False(payload.PossiblyDelivered);
+
+        await dispatcher.DispatchAsync(CancellationToken.None);
+        Assert.Single(await NoticeRowsAsync(database, connection.Id));
+    }
+
+    private static async Task SetConnectionLiveAsync(
+        TestSqliteDatabase database,
+        AgentConnection connection,
+        bool live)
+    {
+        await using var db = database.CreateContext();
+        var deletedAt = live ? (DateTimeOffset?)null : DateTimeOffset.UnixEpoch;
+        await db.AgentConnections
+            .Where(row => row.Id == connection.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.DeletedAt, deletedAt));
+    }
+
     private static SlackOutboxDraft ContentDraft(AgentConnection connection, string dispatchRef) =>
         new(
             connection.ProjectId,
@@ -359,11 +505,12 @@ public sealed partial class SlackDeliveryHandlerSpecs
 
     private static SlackDeliveryNoticeAuthor CreateNoticeAuthor(
         TestSqliteDatabase database,
-        SlackOutboxStore outbox) =>
+        SlackOutboxStore outbox,
+        IOptions<SlackProviderOptions>? options = null) =>
         new(
             outbox,
             new SlackSessionCardBlocksBuilder(
-                new SlackWebLinkBuilder(Options.Create(new SlackProviderOptions())),
+                new SlackWebLinkBuilder(options ?? Options.Create(new SlackProviderOptions())),
                 new ProjectQuerier(new TestDbContextFactory(database.Options))),
             NullLogger<SlackDeliveryNoticeAuthor>.Instance);
 
@@ -421,8 +568,22 @@ public sealed partial class SlackDeliveryHandlerSpecs
         Assert.NotNull(payload.Blocks);
         var blocks = payload.Blocks!.Value;
         Assert.Equal(JsonValueKind.Array, blocks.ValueKind);
+
+        // Slack renders a blocks message from its blocks; the statement must
+        // be a real section of the message body, not only the fallback text.
+        var statements = blocks.EnumerateArray()
+            .Where(block => block.TryGetProperty("type", out var type)
+                && type.GetString() == "section")
+            .Select(block => block.GetProperty("text"))
+            .Where(text => text.TryGetProperty("type", out var type)
+                && type.GetString() == "mrkdwn")
+            .Select(text => text.GetProperty("text").GetString() ?? string.Empty)
+            .ToList();
+        var statement = Assert.Single(statements, text => text.StartsWith("Delivery notice:", StringComparison.Ordinal));
+        Assert.Equal(payload.Text, statement);
+        Assert.Contains("nothing is re-run automatically", statement, StringComparison.Ordinal);
+
         var rendered = blocks.GetRawText();
-        Assert.Contains($"Session: {NoticeSession}", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("\"actions\"", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("action_id", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("localhost", rendered, StringComparison.Ordinal);

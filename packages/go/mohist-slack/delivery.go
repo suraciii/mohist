@@ -176,13 +176,25 @@ func getReactions(ctx context.Context, web WebClient, target MessageIdentity, en
 }
 
 // FindStatusMessage looks up the status message for a dispatch ref by
-// client_msg_id in recent conversation history. A missing web client yields
-// no status target, mirroring the Node optional chain.
-func FindStatusMessage(ctx context.Context, web WebClient, conversationID, clientMessageID string, ensureCurrent func()) (*MessageIdentity, error) {
+// client_msg_id in the scope the delivery posts into: the original thread when
+// threadTs is set, otherwise the recent conversation history. Reading the
+// wrong scope would miss a status message that lives in the thread and
+// authorize a duplicate post. A missing web client yields no status target,
+// mirroring the Node optional chain.
+func FindStatusMessage(ctx context.Context, web WebClient, conversationID, threadTs, clientMessageID string, ensureCurrent func()) (*MessageIdentity, error) {
 	if web == nil {
 		return nil, nil
 	}
-	history, complete, err := readConversationHistory(ctx, web, HistoryInput{Channel: conversationID, Limit: 200}, ensureCurrent)
+	var (
+		history  []HistoryMessage
+		complete bool
+		err      error
+	)
+	if threadTs != "" {
+		history, complete, err = readConversationReplies(ctx, web, RepliesInput{Channel: conversationID, TS: threadTs, Limit: 200}, ensureCurrent)
+	} else {
+		history, complete, err = readConversationHistory(ctx, web, HistoryInput{Channel: conversationID, Limit: 200}, ensureCurrent)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +211,7 @@ func FindStatusMessage(ctx context.Context, web WebClient, conversationID, clien
 
 func readConversationHistory(ctx context.Context, web WebClient, input HistoryInput, ensureCurrent func()) ([]HistoryMessage, bool, error) {
 	history := make([]HistoryMessage, 0, input.Limit)
-	for pageNumber := 0; pageNumber < historyPageBudget; pageNumber++ {
+	for range historyPageBudget {
 		page, err := GetConversationHistory(ctx, web, input, ensureCurrent)
 		if err != nil {
 			return nil, false, err
@@ -216,12 +228,62 @@ func readConversationHistory(ctx context.Context, web WebClient, input HistoryIn
 	return history, false, nil
 }
 
+// readConversationReplies reads one thread with the same bounded pagination
+// and completeness rules as the conversation history scan. complete is false
+// whenever the page budget, a missing cursor, or a stuck cursor leaves any
+// part of the thread unobserved.
+func readConversationReplies(ctx context.Context, web WebClient, input RepliesInput, ensureCurrent func()) ([]HistoryMessage, bool, error) {
+	history := make([]HistoryMessage, 0, input.Limit)
+	for range historyPageBudget {
+		page, err := GetConversationReplies(ctx, web, input, ensureCurrent)
+		if err != nil {
+			return nil, false, err
+		}
+		history = append(history, page.Messages...)
+		if !page.HasMore {
+			return history, true, nil
+		}
+		if page.NextCursor == "" || page.NextCursor == input.Cursor {
+			return history, false, nil
+		}
+		input.Cursor = page.NextCursor
+	}
+	return history, false, nil
+}
+
+// readDeliveryEvidence reads the provider evidence a delivery's mutation can
+// appear in: the original thread when the delivery posts into one, otherwise
+// the top-level conversation. A threaded mutation is invisible to
+// conversations.history, so absence from the wrong scope would authorize a
+// duplicate post.
+func readDeliveryEvidence(ctx context.Context, web WebClient, delivery *Delivery, channelInput HistoryInput, ensureCurrent func()) ([]HistoryMessage, bool, error) {
+	if threadTs := derefString(delivery.ThreadTs); threadTs != "" {
+		return readConversationReplies(ctx, web, RepliesInput{Channel: delivery.ConversationID, TS: threadTs, Limit: 200}, ensureCurrent)
+	}
+	return readConversationHistory(ctx, web, channelInput, ensureCurrent)
+}
+
 // GetConversationHistory invokes conversations.history through the seam,
 // converting typed rejections into coded results the caller can inspect via
 // SlackErrorCode on the returned error.
 func GetConversationHistory(ctx context.Context, web WebClient, input HistoryInput, ensureCurrent func()) (HistoryPage, error) {
 	ensureCurrent()
 	page, err := web.GetConversationHistory(ctx, input)
+	ensureCurrent()
+	if err != nil {
+		if code := SlackErrorCode(err); code != "" {
+			err = &SlackError{Code: code}
+		}
+		return HistoryPage{}, err
+	}
+	return page, nil
+}
+
+// GetConversationReplies invokes conversations.replies through the seam with
+// the same coded-rejection normalization as the history read.
+func GetConversationReplies(ctx context.Context, web WebClient, input RepliesInput, ensureCurrent func()) (HistoryPage, error) {
+	ensureCurrent()
+	page, err := web.GetConversationReplies(ctx, input)
 	ensureCurrent()
 	if err != nil {
 		if code := SlackErrorCode(err); code != "" {
@@ -456,27 +518,46 @@ func uploadFile(ctx context.Context, web WebClient, delivery *Delivery, payload 
 	}
 	identity := fileShareIdentity(delivery, result)
 	if identity == nil && result.FileID != "" {
-		page, histErr := GetConversationHistory(ctx, web, HistoryInput{Channel: delivery.ConversationID, Limit: 200}, ensureCurrent)
-		if histErr == nil {
-			for _, candidate := range page.Messages {
-				if candidate.TS == "" {
-					continue
-				}
-				for _, fileID := range candidate.FileIDs {
-					if fileID == result.FileID {
-						identity = &MessageIdentity{ConversationID: delivery.ConversationID, MessageTs: candidate.TS}
-						break
-					}
-				}
-				if identity != nil {
-					break
-				}
-			}
-		} else if SlackErrorCode(histErr) == "" {
-			return DeliveryAck{}, histErr
+		identity, err = findFileShareIdentity(ctx, web, delivery, result.FileID, ensureCurrent)
+		if err != nil {
+			return DeliveryAck{}, err
 		}
 	}
 	return DeliveredAck(delivery, identity), nil
+}
+
+// findFileShareIdentity locates the message carrying an uploaded file in the
+// scope the delivery posts into: the original thread when the delivery posts
+// into one, otherwise the conversation history. A coded rejection leaves the
+// identity unknown instead of failing the delivery; an uncoded transport error
+// is a real failure.
+func findFileShareIdentity(ctx context.Context, web WebClient, delivery *Delivery, fileID string, ensureCurrent func()) (*MessageIdentity, error) {
+	var (
+		page HistoryPage
+		err  error
+	)
+	if threadTs := derefString(delivery.ThreadTs); threadTs != "" {
+		page, err = GetConversationReplies(ctx, web, RepliesInput{Channel: delivery.ConversationID, TS: threadTs, Limit: 200}, ensureCurrent)
+	} else {
+		page, err = GetConversationHistory(ctx, web, HistoryInput{Channel: delivery.ConversationID, Limit: 200}, ensureCurrent)
+	}
+	if err != nil {
+		if SlackErrorCode(err) == "" {
+			return nil, err
+		}
+		return nil, nil
+	}
+	for _, candidate := range page.Messages {
+		if candidate.TS == "" {
+			continue
+		}
+		for _, candidateFileID := range candidate.FileIDs {
+			if candidateFileID == fileID {
+				return &MessageIdentity{ConversationID: delivery.ConversationID, MessageTs: candidate.TS}, nil
+			}
+		}
+	}
+	return nil, nil
 }
 
 func fileShareIdentity(delivery *Delivery, result FileUploadResult) *MessageIdentity {
@@ -503,7 +584,7 @@ func postFallback(ctx context.Context, web WebClient, delivery *Delivery, payloa
 		fallbackText = payload.Text
 	}
 	fallbackRef := fallbackDispatchRef(payload)
-	existing, err := FindStatusMessage(ctx, web, delivery.ConversationID, fallbackRef, ensureCurrent)
+	existing, err := FindStatusMessage(ctx, web, delivery.ConversationID, derefString(delivery.ThreadTs), fallbackRef, ensureCurrent)
 	if err != nil {
 		if errors.Is(err, errHistorySearchIncomplete) {
 			return uncertainAck(delivery, providerHistoryIncomplete), nil
@@ -574,13 +655,16 @@ func findStatusTarget(ctx context.Context, web WebClient, delivery *Delivery, pa
 	if payload.StatusDispatchRef == "" {
 		return nil, nil
 	}
-	return FindStatusMessage(ctx, web, delivery.ConversationID, payload.StatusDispatchRef, ensureCurrent)
+	return FindStatusMessage(ctx, web, delivery.ConversationID, derefString(delivery.ThreadTs), payload.StatusDispatchRef, ensureCurrent)
 }
 
 // Reconcile settles an uncertain or unknown-operation delivery against
 // provider state: reactions via reactions.get compared with the intended
-// operation, messages via history matched on ts / client_msg_id /
-// fallbackDispatchRef.
+// operation, messages via the scope the delivery posts into — the original
+// thread for a threaded delivery, otherwise the conversation history — matched
+// on ts / client_msg_id / fallbackDispatchRef. Absence only counts when that
+// scope was read completely; an incomplete read stays uncertain and mutates
+// nothing.
 func Reconcile(ctx context.Context, web WebClient, delivery *Delivery, ensureCurrent func()) (DeliveryAck, error) {
 	ensureCurrent()
 	payload, err := ParseDeliveryPayload(delivery.PayloadJSON)
@@ -649,7 +733,7 @@ func Reconcile(ctx context.Context, web WebClient, delivery *Delivery, ensureCur
 		historyInput.Latest = ""
 		historyInput.Oldest = ""
 	}
-	history, complete, err := readConversationHistory(ctx, web, historyInput, ensureCurrent)
+	history, complete, err := readDeliveryEvidence(ctx, web, delivery, historyInput, ensureCurrent)
 	if err != nil {
 		if code := SlackErrorCode(err); code != "" {
 			return uncertainAck(delivery, code), nil

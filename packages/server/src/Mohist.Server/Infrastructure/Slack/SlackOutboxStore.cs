@@ -946,7 +946,9 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         row.State = SlackOutboxStates.Pending;
         row.AttemptCount++;
         row.NextAttemptAt = now + Backoff(row.AttemptCount);
-        row.DeliveryUncertainAt = null;
+        // The uncertainty timestamp is history, not this attempt's timer: an
+        // intent that was ever unknown keeps that fact through a retry, so a
+        // later notice never describes it as content that never landed.
         row.LastError = reason;
         row.UpdatedAt = now;
         return await db.SaveChangesAsync(ct);

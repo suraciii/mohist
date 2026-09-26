@@ -64,6 +64,15 @@ type HistoryPage struct {
 	NextCursor string
 }
 
+// RepliesInput scopes one conversations.replies call: the thread to read and
+// the pagination cursor within it.
+type RepliesInput struct {
+	Channel string
+	TS      string
+	Cursor  string
+	Limit   int
+}
+
 // HistoryMessage is one message from conversations.history.
 type HistoryMessage struct {
 	TS          string
@@ -102,6 +111,7 @@ type WebClient interface {
 	RemoveReaction(ctx context.Context, channel, name, timestamp string) error
 	GetReactions(ctx context.Context, channel, timestamp string) (names []string, err error)
 	GetConversationHistory(ctx context.Context, input HistoryInput) (HistoryPage, error)
+	GetConversationReplies(ctx context.Context, input RepliesInput) (HistoryPage, error)
 	UploadFileV2(ctx context.Context, input FileUploadInput) (FileUploadResult, error)
 }
 

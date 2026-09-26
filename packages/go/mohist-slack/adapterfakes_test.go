@@ -196,6 +196,7 @@ type fakeWeb struct {
 	removes       [][3]string
 	gets          [][2]string
 	historyInputs []HistoryInput
+	repliesInputs []RepliesInput
 	uploads       []FileUploadInput
 
 	postTS        string
@@ -205,6 +206,8 @@ type fakeWeb struct {
 	reactionErr   error
 	historyFn     func(HistoryInput) ([]HistoryMessage, error)
 	historyPageFn func(HistoryInput) (HistoryPage, error)
+	repliesFn     func(RepliesInput) ([]HistoryMessage, error)
+	repliesPageFn func(RepliesInput) (HistoryPage, error)
 	reactionList  []string
 	getErr        error
 	uploadResult  FileUploadResult
@@ -261,6 +264,21 @@ func (w *fakeWeb) GetConversationHistory(_ context.Context, input HistoryInput) 
 	w.mu.Lock()
 	w.historyInputs = append(w.historyInputs, input)
 	pageFn, fn := w.historyPageFn, w.historyFn
+	w.mu.Unlock()
+	if pageFn != nil {
+		return pageFn(input)
+	}
+	if fn != nil {
+		messages, err := fn(input)
+		return HistoryPage{Messages: messages}, err
+	}
+	return HistoryPage{}, nil
+}
+
+func (w *fakeWeb) GetConversationReplies(_ context.Context, input RepliesInput) (HistoryPage, error) {
+	w.mu.Lock()
+	w.repliesInputs = append(w.repliesInputs, input)
+	pageFn, fn := w.repliesPageFn, w.repliesFn
 	w.mu.Unlock()
 	if pageFn != nil {
 		return pageFn(input)

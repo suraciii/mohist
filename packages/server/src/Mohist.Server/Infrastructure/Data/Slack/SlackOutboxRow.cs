@@ -27,6 +27,14 @@ public sealed class SlackOutboxRow
     public DateTimeOffset? ClaimedAt { get; set; }
     public string? ClaimedByAdapterId { get; set; }
     public DateTimeOffset? DeliveredAt { get; set; }
+    /// <summary>
+    /// When the intent's outcome was first observed unknown. This is
+    /// delivery history, not a retry timer: once set it survives a retry or
+    /// a merge back to Pending, and only a confirmed provider identity
+    /// clears it, so a later notice can never describe unknown content as
+    /// never delivered. The uncertain-timeout sweep reads it only while the
+    /// row is <c>DeliveryUncertain</c>.
+    /// </summary>
     public DateTimeOffset? DeliveryUncertainAt { get; set; }
     public DateTimeOffset? DeadLetteredAt { get; set; }
     public string? LastError { get; set; }

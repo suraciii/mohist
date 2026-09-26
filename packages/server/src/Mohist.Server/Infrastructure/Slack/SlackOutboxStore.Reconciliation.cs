@@ -57,12 +57,12 @@ public sealed partial class SlackOutboxStore
         var row = await db.SlackOutboxRows
             .FirstOrDefaultAsync(r => r.ProjectId == projectId && r.ConnectionId == connectionId && r.Id == id, ct)
             ?? throw new SlackOutboxRowNotFoundException(id);
-        if (row.State == SlackOutboxStates.DeliveryUncertain)
-            return new SlackDeliveryReconciliationRequest(row.Id, row.State, Revived: false);
-        if (row.State != SlackOutboxStates.DeadLettered)
+        if (row.State is not (SlackOutboxStates.DeliveryUncertain or SlackOutboxStates.DeadLettered))
             return null;
         if (!await IsReconciliationOwnerLiveAsync(db, row, ct))
             return null;
+        if (row.State == SlackOutboxStates.DeliveryUncertain)
+            return new SlackDeliveryReconciliationRequest(row.Id, row.State, Revived: false);
 
         var revived = await ReviveDeadLetteredForReconciliationAsync(db, row.Id, row.UpdatedAt, ct);
         return revived

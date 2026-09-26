@@ -146,4 +146,35 @@ public sealed partial class SlackOutboxStore
             .Take(batchSize)
             .ToList();
     }
+
+    /// <summary>
+    /// Content rows that settled without a confirmed outcome but whose notice
+    /// intent is missing. The settlement and the notice authoring are separate
+    /// writes, so this scan is what makes the notice obligation recoverable:
+    /// an interruption between them — or a single authoring failure — is
+    /// repaired by a later sweep, and the notice enqueue is idempotent on the
+    /// notice dispatch key, so a repair never posts a second notice.
+    /// Bounded like the other sweeps: at most <paramref name="batchSize"/>
+    /// rows per dispatch; the remaining rows are handled by later ticks.
+    /// </summary>
+    public async Task<IReadOnlyList<SlackOutboxRow>> ListSettledContentRowsMissingNoticeAsync(int batchSize, CancellationToken ct = default)
+    {
+        if (batchSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(batchSize));
+
+        const string noticePrefix = SlackDeliveryNoticeAuthor.DispatchPrefix;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.SlackOutboxRows.AsNoTracking()
+            .Where(row => (row.Kind == SlackOutboxKinds.TerminalResult
+                    || row.Kind == SlackOutboxKinds.ReplaceableProgress)
+                && (row.State == SlackOutboxStates.DeliveryUncertain
+                    || row.State == SlackOutboxStates.DeadLettered)
+                && !db.SlackOutboxRows.Any(notice =>
+                    notice.OwnerKind == row.OwnerKind
+                    && notice.ConnectionId == row.ConnectionId
+                    && notice.DispatchRef == noticePrefix + row.Id))
+            .OrderBy(row => row.Id)
+            .Take(batchSize)
+            .ToListAsync(ct);
+    }
 }

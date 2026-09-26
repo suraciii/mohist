@@ -14,10 +14,11 @@ namespace Mohist.Server.Infrastructure.Slack;
 /// <summary>
 /// Cluster-singleton safety net for the Slack outbound outbox. The
 /// <see cref="ISlackOutboxDispatcherGrain"/> Orleans reminder drives
-/// <see cref="DispatchAsync"/>; this service runs four independent
+/// <see cref="DispatchAsync"/>; this service runs five independent
 /// sweeps that together enforce the spec's "Delivery uncertain",
-/// "DeadLettered", and "Backpressure is reversible" guarantees
-/// without overriding AgentJob/AgentTurn authority:
+/// "DeadLettered", "Delivery Notices", and "Backpressure is
+/// reversible" guarantees without overriding AgentJob/AgentTurn
+/// authority:
 /// <list type="number">
 ///   <item>
 ///     <b>Retry budget cutoff</b>: Pending rows whose
@@ -37,6 +38,13 @@ namespace Mohist.Server.Infrastructure.Slack;
 ///     <b>Uncertain-timeout sweep</b>: DeliveryUncertain rows whose
 ///     <see cref="SlackProviderOptions.OutboxUncertainTimeout"/> has
 ///     passed without an operator action are dead-lettered.
+///   </item>
+///   <item>
+///     <b>Notice recovery sweep</b>: Content rows that settled without a
+///     confirmed outcome but whose bounded delivery notice is missing —
+///     an interruption between the settlement write and the notice
+///     authoring — get that idempotent notice authored here, so the
+///     visibility obligation survives a restart.
 ///   </item>
 ///   <item>
 ///     <b>Backpressure recovery sweep</b>: Degraded(Backpressured)
@@ -97,6 +105,7 @@ public sealed class SlackOutboxDispatcherService : IDisposable
             await DeadLetterRetryExhaustedAsync(batch, ct).ConfigureAwait(false);
             await SurfaceClaimedTimeoutAsync(batch, ct).ConfigureAwait(false);
             await DeadLetterUncertainTimeoutAsync(batch, ct).ConfigureAwait(false);
+            await RecoverMissingNoticesAsync(batch, ct).ConfigureAwait(false);
             await RecoverBackpressureAsync(ct).ConfigureAwait(false);
         }
         finally
@@ -191,6 +200,30 @@ public sealed class SlackOutboxDispatcherService : IDisposable
                     "Slack outbox row {RowId} (ConnectionId={ConnectionId}, DeliveryUncertainAt={DeliveryUncertainAt}) dead-lettered: uncertain timeout",
                     row.Id, row.ConnectionId, row.DeliveryUncertainAt);
                 await _notices.TryNoticeAsync(row.ProjectId, row.OwnerKind, row.ConnectionId, row.Id, ct).ConfigureAwait(false);
+            }, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Repairs the gap between a settlement and its notice. Settlement and
+    /// notice authoring are separate writes, so an interruption between them
+    /// leaves a content row settled without a notice; this bounded sweep finds
+    /// those rows and idempotently authors the missing notice, so the
+    /// visibility obligation survives a restart instead of being lost.
+    /// </summary>
+    private async Task RecoverMissingNoticesAsync(int batchSize, CancellationToken ct)
+    {
+        var rows = await _store.ListSettledContentRowsMissingNoticeAsync(batchSize, ct).ConfigureAwait(false);
+        foreach (var row in rows)
+        {
+            ct.ThrowIfCancellationRequested();
+            await ProcessRowAsync(row, "notice-recovery", async () =>
+            {
+                if (!await _notices.TryNoticeAsync(row.ProjectId, row.OwnerKind, row.ConnectionId, row.Id, ct).ConfigureAwait(false))
+                    return;
+                _log.LogInformation(
+                    "Slack delivery notice recovered for row {RowId} (ConnectionId={ConnectionId}, State={State})",
+                    row.Id, row.ConnectionId, row.State);
             }, ct).ConfigureAwait(false);
         }
     }

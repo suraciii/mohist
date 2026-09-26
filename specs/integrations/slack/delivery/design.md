@@ -215,7 +215,17 @@ reserved dispatch key `slack-delivery-notice:{originalDeliveryId}`, reusing the
 terminal explicit-failure kind so the outbox keeps a single state machine and
 its existing capacity, ordering, and dead-letter rules. It targets the original
 Conversation and thread, carries no Agent text, and renders the Session card's
-identity section plus the same optional navigation rules.
+identity section plus the same optional navigation rules. Its statement is
+carried in a `section` block of the message body: Slack renders a blocks
+message from its blocks, so the top-level text stays only the notification
+fallback.
+
+Settlement and notice authoring are separate writes. The dispatcher's
+notice-recovery sweep therefore re-derives the obligation from durable row
+state — a content row settled uncertain or dead-lettered whose notice intent is
+missing — and authors it idempotently, so a crash between the two writes, or a
+single failed authoring attempt, converges on the same notice on a later tick
+instead of leaving the delivery permanently silent.
 
 Server authors it only for content intents — terminal Agent reply and
 replaceable Session card — and only on the settlement transition that actually
@@ -227,21 +237,28 @@ sweep rerun converge on the same intent instead of posting again.
 
 The original intent carries the canonical Session ID so the notice can render
 the identity section, and it keeps the uncertainty evidence: once an intent has
-been unknown, its uncertainty timestamp is never cleared by recovery, so a
-later exhaustion notice cannot claim the content was never delivered. Payload
-facts (`notice`, `possiblyDelivered`) keep that distinction queryable without
-parsing message text.
+been unknown, its uncertainty timestamp is never cleared by a retry, a merge
+back to Pending, or a re-send — only a confirmed provider identity resolves it —
+so a later exhaustion notice cannot claim the content was never delivered.
+Payload facts (`notice`, `possiblyDelivered`) keep that distinction queryable
+without parsing message text.
 
 The re-send entry points never queue a mutation directly. An unknown intent
 stays unknown and is left to the adapter's claim-uncertain path, which
 reconciles through provider history and re-posts the original payload only when
-the evidence proves the mutation absent. An exhausted intent is revived into
-unknown with a fresh retention window, so it passes the same reconciliation
-before any provider call. Both paths revalidate the Connection is live and
-Enabled and keep the intent's original Conversation and thread, so a changed
-binding is never redirected and original content is never leaked; the Agent's
-repeated send for an existing terminal key follows the same rule instead of
-reporting convergence for content that never landed.
+the evidence proves the mutation absent. The evidence must cover the original
+Conversation and the original thread: a threaded intent is reconciled against
+`conversations.replies` for that thread, and an incomplete pagination, a
+permission failure, or any other inconclusive read is treated as inconclusive —
+the delivery stays unknown and performs no provider mutation. An exhausted
+intent is revived into unknown with a fresh retention window, so it passes the
+same reconciliation before any provider call. Both paths revalidate the
+Connection is live and Enabled before accepting the request — an unknown
+delivery as well as an exhausted one — and keep the intent's original
+Conversation and thread, so a changed binding is never redirected and original
+content is never leaked; the Agent's repeated send for an existing terminal key
+follows the same rule instead of reporting convergence for content that never
+landed.
 
 ### Capability Boundaries
 
