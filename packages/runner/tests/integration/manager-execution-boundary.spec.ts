@@ -620,8 +620,7 @@ describe.sequential('ManagerExecutionBoundary', () => {
       inspector,
       `#!/usr/bin/env node
 for (let index = 0; index < ${rows}; index++) process.stdout.write(${JSON.stringify(`${fillerRow}\n`)})
-process.stdout.write(${JSON.stringify(`${matchingRow}\n`)})
-setTimeout(() => process.exit(0), 20_000)
+process.stdout.write(${JSON.stringify(`${matchingRow}\n`)}, () => process.exit(0))
 `,
       { encoding: 'utf8', mode: 0o700 },
     )
@@ -641,8 +640,8 @@ setTimeout(() => process.exit(0), 20_000)
 
     // The matching row is the last row of a table larger than the fixed 4 MiB
     // inspector buffer that used to refuse a legitimate launcher on a busy
-    // host. The stub outlives the match, so stopping early is part of the
-    // contract: waiting for its exit would hit the test deadline instead.
+    // host. The scan drains the table and accepts the row only because the
+    // inspector then ends cleanly.
     expect(verdict).toEqual({ admitted: true })
     expect(rows * (fillerRow.length + 1)).toBeGreaterThan(4 * 1024 * 1024)
   })

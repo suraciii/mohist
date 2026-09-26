@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { readFile, readlink, realpath } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 import type { Socket } from 'node:net'
+import type { Readable } from 'node:stream'
 import { delimiter, join } from 'node:path'
 
 interface SocketHandle {
@@ -34,7 +35,10 @@ export interface ManagerPeerVerdict {
 export interface ManagerPeerAuthDeps {
   readonly platform: NodeJS.Platform
   readonly socketInode: (path: string) => Promise<string | null>
-  /** Streams socket-table rows and stops early when `onRow` returns true. */
+  /**
+   * Streams socket-table rows; `onRow` accepts at most one row, and a scan
+   * that does not complete cleanly is a refusal.
+   */
   readonly scanSocketTable: (onRow: (row: string) => boolean | Promise<boolean>) => Promise<void>
   readonly readCommandLine: (pid: number) => Promise<string[]>
   readonly samePath: (left: string, right: string) => Promise<boolean>
@@ -125,22 +129,24 @@ export const defaultManagerPeerAuthDeps: ManagerPeerAuthDeps = {
   samePath,
 }
 
-/**
- * Streams the socket inspector's rows and stops at the first accepted row. A
- * large host socket table must cost time, not authentication: buffering the
- * whole table against a fixed byte cap refused legitimate launchers as soon as
- * a busy host crossed that cap, while leaving no trace of the cause.
- */
-export async function scanSocketInspectorRows(
-  inspectorPath: string,
-  onRow: (row: string) => boolean | Promise<boolean>,
-): Promise<void> {
+/** How one inspector run ended. */
+export interface SocketInspectorEnd {
+  readonly code: number | null
+  readonly signal: NodeJS.Signals | null
+  readonly error: Error | null
+}
+
+/** One inspector run: the rows it streams, and how it ended. */
+export interface SocketInspectorRun {
+  readonly stdout: Readable
+  readonly outcome: Promise<SocketInspectorEnd>
+}
+
+export type SocketInspectorSpawner = (inspectorPath: string) => SocketInspectorRun
+
+function spawnSocketInspector(inspectorPath: string): SocketInspectorRun {
   const child = spawn(inspectorPath, ['-xnp'], { stdio: ['ignore', 'pipe', 'ignore'] })
-  const outcome = new Promise<{
-    readonly code: number | null
-    readonly signal: NodeJS.Signals | null
-    readonly error: Error | null
-  }>((resolve) => {
+  const outcome = new Promise<SocketInspectorEnd>((resolve) => {
     let settled = false
     const settle = (code: number | null, signal: NodeJS.Signals | null, error: Error | null) => {
       if (settled) return
@@ -150,32 +156,42 @@ export async function scanSocketInspectorRows(
     child.once('error', (error: Error) => settle(null, null, error))
     child.once('exit', (code: number | null, signal: NodeJS.Signals | null) => settle(code, signal, null))
   })
+  return { stdout: child.stdout, outcome }
+}
 
-  let matched = false
+/**
+ * Streams the socket inspector's rows and accepts at most one through
+ * `onRow`. A large host socket table must cost time, not authentication:
+ * buffering the whole table against a fixed byte cap refused legitimate
+ * launchers as soon as a busy host crossed that cap, while leaving no trace of
+ * the cause.
+ *
+ * The scan does not stop the inspector: an early stop cannot be attributed to
+ * this process with the evidence available, and a partially observed table
+ * must never admit a peer. Rows are evidence only when the inspector ends
+ * cleanly — exit code 0, no signal — so a run that fails or is killed after
+ * printing a matching row refuses instead of admitting. Later rows are
+ * drained, not passed to `onRow`.
+ */
+export async function scanSocketInspectorRows(
+  inspectorPath: string,
+  onRow: (row: string) => boolean | Promise<boolean>,
+  spawnInspector: SocketInspectorSpawner = spawnSocketInspector,
+): Promise<void> {
+  const run = spawnInspector(inspectorPath)
+  let accepted = false
   try {
-    for await (const row of createInterface({ input: child.stdout, crlfDelay: Number.POSITIVE_INFINITY })) {
-      if (await onRow(row)) {
-        matched = true
-        child.kill('SIGTERM')
-        break
-      }
+    for await (const row of createInterface({ input: run.stdout, crlfDelay: Number.POSITIVE_INFINITY })) {
+      if (!accepted && (await onRow(row))) accepted = true
     }
   } catch (error) {
-    const spawnFailure = (await outcome).error
+    const spawnFailure = (await run.outcome).error
     if (spawnFailure) throw new SocketInspectorError(`inspector-spawn-failed:${failureCode(spawnFailure)}`)
     throw new SocketInspectorError(`inspector-stream-failed:${failureCode(error)}`)
   }
 
-  const { code, signal, error } = await outcome
+  const { code, signal, error } = await run.outcome
   if (error) throw new SocketInspectorError(`inspector-spawn-failed:${failureCode(error)}`)
-  // Only this scan's own early stop may end a matched run: the inspector died
-  // by the SIGTERM sent after it wrote a matching row. That attribution needs
-  // the signal, not just the exit code, because a child that had already
-  // failed on its own reports its own outcome here. Any other ending — a
-  // non-zero exit, or death by another signal even after a match — means the
-  // table is incomplete or was produced by a failing process, so its rows are
-  // not authentication evidence and the scan fails closed.
-  if (matched && signal === 'SIGTERM') return
   if (signal !== null) throw new SocketInspectorError(`inspector-terminated:${signal}`)
   if (code !== 0) throw new SocketInspectorError(`inspector-exit-nonzero:${code}`)
 }

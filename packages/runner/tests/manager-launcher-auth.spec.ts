@@ -1,9 +1,13 @@
 import type { Socket } from 'node:net'
+import { Readable } from 'node:stream'
 import { describe, expect, it } from 'vitest'
 import {
   SocketInspectorError,
   inspectManagerPeer,
+  scanSocketInspectorRows,
   type ManagerPeerAuthDeps,
+  type SocketInspectorEnd,
+  type SocketInspectorRun,
 } from '../src/runtime/manager-launcher-auth.js'
 
 const matchedPid = 77
@@ -192,5 +196,108 @@ describe('Manager peer authentication', () => {
     })
     expect(verdict).toEqual({ admitted: true })
     expect(visited).toEqual([matchingRow])
+  })
+})
+
+function inspectorRun(rows: readonly string[], end: Partial<SocketInspectorEnd> = {}): SocketInspectorRun {
+  return {
+    stdout: Readable.from(rows.map((row) => `${row}\n`)),
+    outcome: Promise.resolve({ code: end.code ?? 0, signal: end.signal ?? null, error: end.error ?? null }),
+  }
+}
+
+function failingStdout(): Readable {
+  return new Readable({
+    read() {
+      this.destroy(Object.assign(new Error('broken pipe'), { code: 'EPIPE' }))
+    },
+  })
+}
+
+// The inspector lifecycle is driven through its spawn seam: the rules that
+// decide whether rows count as evidence must not depend on real process
+// timing, and a real inspector cannot be made to fail at an exact point.
+describe('Socket inspector scan lifecycle', () => {
+  it('accepts rows from an inspector that ends cleanly', async () => {
+    const visited: string[] = []
+    await expect(
+      scanSocketInspectorRows(
+        '/usr/bin/ss',
+        async (row) => {
+          visited.push(row)
+          return false
+        },
+        () => inspectorRun([matchingRow, 'other-row']),
+      ),
+    ).resolves.toBeUndefined()
+    expect(visited).toEqual([matchingRow, 'other-row'])
+  })
+
+  it('drains rows after the accepted one without deciding again', async () => {
+    let calls = 0
+    await expect(
+      scanSocketInspectorRows(
+        '/usr/bin/ss',
+        async () => {
+          calls += 1
+          return true
+        },
+        () => inspectorRun([matchingRow, 'other-row']),
+      ),
+    ).resolves.toBeUndefined()
+    expect(calls).toBe(1)
+  })
+
+  it('fails closed when a matching inspector exits non-zero', async () => {
+    await expect(
+      scanSocketInspectorRows(
+        '/usr/bin/ss',
+        async () => true,
+        () => inspectorRun([matchingRow], { code: 7 }),
+      ),
+    ).rejects.toMatchObject({ code: 'inspector-exit-nonzero:7' })
+  })
+
+  it('fails closed when a matching inspector is terminated by a signal', async () => {
+    for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
+      await expect(
+        scanSocketInspectorRows(
+          '/usr/bin/ss',
+          async () => true,
+          () => inspectorRun([matchingRow], { signal }),
+        ),
+      ).rejects.toMatchObject({ code: `inspector-terminated:${signal}` })
+    }
+  })
+
+  it('fails closed when a signal ends the inspector without an accepted row', async () => {
+    await expect(
+      scanSocketInspectorRows(
+        '/usr/bin/ss',
+        async () => false,
+        () => inspectorRun([matchingRow], { signal: 'SIGTERM' }),
+      ),
+    ).rejects.toMatchObject({ code: 'inspector-terminated:SIGTERM' })
+  })
+
+  it('classifies a spawn failure separately from a stream failure', async () => {
+    await expect(
+      scanSocketInspectorRows(
+        '/usr/bin/ss',
+        async () => false,
+        () => inspectorRun([], { code: null, error: Object.assign(new Error('spawn failed'), { code: 'EACCES' }) }),
+      ),
+    ).rejects.toMatchObject({ code: 'inspector-spawn-failed:EACCES' })
+
+    await expect(
+      scanSocketInspectorRows(
+        '/usr/bin/ss',
+        async () => false,
+        () => ({
+          stdout: failingStdout(),
+          outcome: Promise.resolve({ code: null, signal: null, error: null }),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'inspector-stream-failed:EPIPE' })
   })
 })

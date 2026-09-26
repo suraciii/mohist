@@ -5,8 +5,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { inspectManagerPeer, scanSocketInspectorRows } from '../../src/runtime/manager-launcher-auth.js'
 
-// A row shape the scanner can accept. Its content does not matter to
-// termination attribution; it only selects which scan path the stub drives.
+// A row shape the scanner can accept. Its content does not matter to the scan
+// outcome; it only selects which path the stub drives.
 const acceptedRow = 'u_str ESTAB 0 0 * 4243 * 4242 users:(("node",pid=77,fd=9))'
 
 async function writeInspector(body: string): Promise<string> {
@@ -17,27 +17,26 @@ async function writeInspector(body: string): Promise<string> {
   return inspector
 }
 
-/** Writes one row and runs `after` once the row has left the process. */
+/**
+ * Writes one row and runs `after` once the row has left the process, so the
+ * ending is ordered after the scan could have read the row.
+ */
 function afterWrite(row: string, after: string): string {
   return `process.stdout.write(${JSON.stringify(`${row}\n`)}, () => {\n${after}\n})\n`
 }
 
-// The scanner spawns the real inspector executable, so a scan outcome that
-// must not be trusted cannot be covered through an injected `scanSocketTable`.
-// The stubs ignore SIGTERM where the scan's own stop would otherwise race the
-// inspector's failure and hide it.
-const inspectorFailsAfterRow = `process.on('SIGTERM', () => {})\n${afterWrite(acceptedRow, '  process.exit(7)')}`
-const inspectorDiesByOtherSignal = `process.on('SIGTERM', () => {})\n${afterWrite(acceptedRow, "  process.kill(process.pid, 'SIGKILL')")}`
-
+// The cases below keep real inspector processes in the loop. They are
+// supplements to the seam-driven lifecycle tests: they prove the production
+// spawn path, while the exact endings stay pinned without process timing.
 describe('Socket inspector row scanning', () => {
-  it('ends a matched scan by stopping the live inspector', async () => {
-    const inspector = await writeInspector(afterWrite(acceptedRow, '  setInterval(() => {}, 60_000)'))
+  it('accepts an accepted row from an inspector that ends cleanly', async () => {
+    const inspector = await writeInspector(afterWrite(acceptedRow, '  process.exit(0)'))
 
     await expect(scanSocketInspectorRows(inspector, () => true)).resolves.toBeUndefined()
   })
 
   it('fails closed when the inspector exits non-zero after writing an accepted row', async () => {
-    const inspector = await writeInspector(inspectorFailsAfterRow)
+    const inspector = await writeInspector(afterWrite(acceptedRow, '  process.exit(7)'))
 
     await expect(scanSocketInspectorRows(inspector, () => true)).rejects.toMatchObject({
       name: 'SocketInspectorError',
@@ -45,8 +44,17 @@ describe('Socket inspector row scanning', () => {
     })
   })
 
-  it('fails closed when the inspector dies by a signal the scan did not send', async () => {
-    const inspector = await writeInspector(inspectorDiesByOtherSignal)
+  it('fails closed when the inspector terminates itself after writing an accepted row', async () => {
+    const inspector = await writeInspector(afterWrite(acceptedRow, "  process.kill(process.pid, 'SIGTERM')"))
+
+    await expect(scanSocketInspectorRows(inspector, () => true)).rejects.toMatchObject({
+      name: 'SocketInspectorError',
+      code: 'inspector-terminated:SIGTERM',
+    })
+  })
+
+  it('fails closed when the inspector is killed by another signal after writing an accepted row', async () => {
+    const inspector = await writeInspector(afterWrite(acceptedRow, "  process.kill(process.pid, 'SIGKILL')"))
 
     await expect(scanSocketInspectorRows(inspector, () => true)).rejects.toMatchObject({
       name: 'SocketInspectorError',
@@ -65,40 +73,37 @@ describe('Socket inspector row scanning', () => {
     })
   })
 
-  it('accepts a scan that reaches the end of a cleanly exiting inspector', async () => {
-    const inspector = await writeInspector(afterWrite(acceptedRow, '  process.exit(0)'))
-
-    await expect(scanSocketInspectorRows(inspector, () => false)).resolves.toBeUndefined()
-  })
-
-  it('accepts an accepted row from an inspector that then completes cleanly', async () => {
-    const inspector = await writeInspector(
-      `process.on('SIGTERM', () => {})\n${afterWrite(acceptedRow, '  process.exit(0)')}`,
-    )
-
-    await expect(scanSocketInspectorRows(inspector, () => true)).resolves.toBeUndefined()
-  })
-
   it('refuses the peer when the inspector fails after printing its row', async () => {
-    const acceptedInode = '4242'
-    const peerInode = '4243'
-    const launcherPath = '/tmp/mohist-launcher-auth/mo'
-    const inspector = await writeInspector(inspectorFailsAfterRow)
-    const verdict = await inspectManagerPeer({ _handle: { fd: 9 } } as unknown as Socket, launcherPath, undefined, {
-      platform: 'linux',
-      socketInode: async (path) =>
-        path === `/proc/${process.pid}/fd/9` ? acceptedInode : path === '/proc/77/fd/9' ? peerInode : null,
-      scanSocketTable: async (onRow) => {
-        await scanSocketInspectorRows(inspector, onRow)
-      },
-      readCommandLine: async () => ['/usr/bin/node', launcherPath],
-      samePath: async (left, right) => left === right,
-    })
-
-    expect(verdict).toEqual({
+    await expectPeerRefusal(await writeInspector(afterWrite(acceptedRow, '  process.exit(7)')), {
       admitted: false,
       refusal: 'socket-table-unreadable',
       detail: 'inspector-exit-nonzero:7',
     })
   })
+
+  it('refuses the peer when the inspector terminates itself after printing its row', async () => {
+    await expectPeerRefusal(await writeInspector(afterWrite(acceptedRow, "  process.kill(process.pid, 'SIGTERM')")), {
+      admitted: false,
+      refusal: 'socket-table-unreadable',
+      detail: 'inspector-terminated:SIGTERM',
+    })
+  })
 })
+
+async function expectPeerRefusal(inspector: string, expected: unknown): Promise<void> {
+  const acceptedInode = '4242'
+  const peerInode = '4243'
+  const launcherPath = '/tmp/mohist-launcher-auth/mo'
+  const verdict = await inspectManagerPeer({ _handle: { fd: 9 } } as unknown as Socket, launcherPath, undefined, {
+    platform: 'linux',
+    socketInode: async (path) =>
+      path === `/proc/${process.pid}/fd/9` ? acceptedInode : path === '/proc/77/fd/9' ? peerInode : null,
+    scanSocketTable: async (onRow) => {
+      await scanSocketInspectorRows(inspector, onRow)
+    },
+    readCommandLine: async () => ['/usr/bin/node', launcherPath],
+    samePath: async (left, right) => left === right,
+  })
+
+  expect(verdict).toEqual(expected)
+}
