@@ -1,83 +1,13 @@
-# Design
+# Cross-Domain Design
 
-`design/` targets developers and agents. It explains why architecture boundaries exist and records
-the contracts that implementations must preserve. It covers domain decomposition, workflow
-mechanics, and cross-module design conventions. It is not a tour of the current code. User-facing
-documents live in
-[`../docs/`](../docs/). Repository engineering practices (testing, context management) live in
-[`../eng/`](../eng/).
-Feature-local specifications live under [`../specs/`](../specs/README.md).
-This directory retains domain analysis, decision records, and design contracts
-that have not moved into a feature directory.
+Read [Domain Analysis](domain-analysis.md) for business ownership,
+[Architecture](architecture.md) for shared system boundaries, and
+[Conventions](conventions.md) for identities and cross-domain contracts.
 
-The design-spec writing rules live in [`AGENTS.md`](AGENTS.md). Read them before writing or
-changing a document in `design/`.
-
-## Foundational
-
-- [AGENTS.md](AGENTS.md) — Design-document writing rules for agents; read before writing a spec in design/.
-- [../CONTEXT.md](../CONTEXT.md) — Cross-context unified language; single entry point for term definitions.
-- [architecture.md](architecture.md) — Runtime boundaries, control-plane/execution-plane responsibilities, placement rules.
-- [domain-analysis.md](domain-analysis.md) — Domain analysis and context mapping: subdomain split, bounded-context relations, dependency invariants.
-- [conventions.md](conventions.md) — Naming, layering, variable conventions, certainty vocabulary (facts, claims, settlement).
-- [cli.md](cli.md) — Command language for humans and agents: domain ownership, progressive help / Skill context, field-selection output, error and reliability contract.
-- [agent-operability.md](agent-operability.md) — Keyed control-plane writes, failure projection, and the read projection an Agent operates one Issue with; product contract in [`../docs/agent-operability.md`](../docs/agent-operability.md).
-- [observability.md](observability.md) — Observability signal split, resource budget, degradation rules, high-frequency path cost constraints.
-- [diagnostics.md](diagnostics.md) — Run failure diagnosis and deployment doctor: server-assembled read models, dispatch snapshot retention, logical path display contract.
-- [eventbus.md](eventbus.md) — Event bus: CloudEvent subscription contract + single dispatcher reliable at-least-once notification.
-- [event-protocol.md](event-protocol.md) — Event protocol: three-axis envelope model, business lineage stamping matrix, match expressions (CEL subset), conformance.
-
-## Agent and execution
-
-- [agent-execution.md](agent-execution.md) — Mohist Agent, AgentJob, Action, SessionInput, AgentTurn, AgentSession, Runtime Session: unified execution ownership, activity and transcript DSL.
-- [agent-api.md](agent-api.md) - Versioned direct API for PAT-authenticated external callers: public state, retry identity, event resume, and disclosure boundaries.
-- [subagents.md](subagents.md) — Subagents and session trees: child launch under flat Agent, capability snapshot, parent-child link, terminal callback, cascade stop, and detach.
-- [scheduled-input.md](scheduled-input.md) — Scheduled input: durable intent, wake-up and recovery, and ordinary follow-up delivery.
-- [slack.md](slack.md) — Slack integration component boundary: why the adapter is standalone and stateless, Session boundary trade-offs, reliability contract, implementation order; product behavior in `docs/slack.md`.
-- [event-routing.md](event-routing.md) — Agent event routing: project-scoped ordered routing table, expression matching + first-match/continue agent launch, replacing subscription priority arbitration.
-- [agent-supervision.md](agent-supervision.md) — Agent supervision presets: one command installs a supervisor agent and approval/failure routing rules; escalation via all-notifications-on + `[supervisor]` comment discipline, no escalate command or system-level rate limiting.
-- [agent-mentions.md](agent-mentions.md) — Comment mentions: `@` an agent name in an issue comment to launch it; third trigger path, zero config, mention is the routing decision.
-- [event-response.md](event-response.md) — Agent event response: response contract (at most once, current-state based, no serialization, visible failure, no self-response) and attribution (comment author, approval decidedBy).
-- [agent-subscriptions.md](agent-subscriptions.md) — Agent subscription contract: boundary, read states, writes and lifecycle for Agent event subscriptions.
-- [agent-runtime-reasoning-capability.md](agent-runtime-reasoning-capability.md) — Generic Agent reasoning capability: canonical execution tuple, versioned runtime catalog, one resolver with two adapters.
-- [issue-watch.md](issue-watch.md) — Issue watch: issue-level autopilot switch; watching/muted declarations, fixed event set, division of labor with the routing table.
-
-## Runtime integration
-
-- [runtimes/](runtimes/README.md) — External execution backends: process, SDK, physical session, event and compatibility boundaries; OpenCode, Pi, and Codex.
-
-## Workflow core domain
-
-- [workflow/definition.md](workflow/definition.md) — Workflow Definition DSL: semantic model (Expect as a first-class concept), single authoritative validator (rule catalog, three entry points incl. `mo` local validation), implementation-side semantic index; syntax authority in [`docs/workflow-definition.md`](../docs/workflow-definition.md).
-- [workflow/actions.md](workflow/actions.md) — Action plugin model: manifest contract, single input channel, structured output, capability injection, catalog validation, failure-recovery orchestration.
-- [workflow/builtin-workflows.md](workflow/builtin-workflows.md) — Design points of built-in workflows (local / github-pr); the yaml definitions are the source of truth.
-- [workflow/profile.md](workflow/profile.md) — Workflow Profile: Project-scoped collection, default selection, Issue override, Run snapshot.
-- [workflow/run-state.md](workflow/run-state.md) — WorkflowRun State: persisted content boundary, read/write cost, and one-way format migration rules at startup.
-- [workflow/variables.md](workflow/variables.md) — Workflow Variables: Project / Issue / Run resources, merging, live effect, `setVars` semantics.
-- [workflow/task-dispatch.md](workflow/task-dispatch.md) — Single authority for `with` / `expect` template evaluation timing: Server dispatch carries the original declaration and an immutable attempt snapshot; Runner renders once at the execution entry before calling the Action.
-- [workflow/recovery.md](workflow/recovery.md) — Failure recovery: recovery declarations, when matching, runner-built recovery tasks.
-- [workflow/plan-artifacts.md](workflow/plan-artifacts.md) — Plan artifacts: the task list, named artifacts, persistence and recovery, review as approval, prompt realignment, Web evidence surface.
-- [workflow/issue-coordination.md](workflow/issue-coordination.md) — Cross-aggregate interaction of Issue, WorkflowRun, Runner, Session.
-
-## Supporting topics
-
-- [auth.md](auth.md) — Auth and identity: single admin plus service/agent principals, file and signed credentials, device authorization login, Runner machine credentials, Scope enforcement, and attribution.
-- [repositories.md](repositories.md) — Repository execution: Project resource authority, Issue binding, live dispatch resolution.
-- [workspaces.md](workspaces.md) — Workspace: first-class persistent execution environment under a Project, with Origin resolution, named Runner materialization, binding affinity, archival, and reclamation.
-- [hermes-webhook.md](hermes-webhook.md) — Hermes notification gateway: event types, payload, signature, delivery reliability.
-- [outbound-webhook.md](outbound-webhook.md) — Outbound webhook: Project-scoped HTTP delivery with CloudEvents, event selection, and configurable authentication.
-- [github-integration.md](github-integration.md) — GitHub integration: signed ingress, intake and close translation, and write-back; product behavior in [`docs/github.md`](../docs/github.md).
-- [composite-issues.md](composite-issues.md) — Composite Issue design: parent-child model, status aggregation, composite advancement, and isolation constraints from Epic; multi-repo resources in `docs/repositories.md`.
-- [issue-templates.md](issue-templates.md) — Body structure and design rationale of the three issue templates (Feature / Bug / Refactor).
-- [prompt-management.md](prompt-management.md) — Project-scoped Prompt, builtin fallback, Workflow key reference.
-- [runner.md](runner.md) — Runner and scheduling: each owner is its own dispatch ledger (no second copy, no reconcile), pull-only claim / poll / report, report verdicts, restart as ordinary failure with generation closeout, stop settles by identity.
-- [runner-environment.md](runner-environment.md) — Host-local environment snapshots, safe application, generation confirmation, and sanitized diagnostics.
-- [runner-transport.md](runner-transport.md) — SignalR-to-WebSocket Runner control migration: preserved HTTP dispatch, JSON-RPC 2.0 methods, and cutover order.
-- [task-log.md](task-log.md) — Task execution log collection pipeline, report channel, storage ownership, settlement-recorded terminal ownership.
-- [db-migrations.md](db-migrations.md) — EF Core migration authoring contract and the squash procedure: baseline, squash floor, history remap, equivalence verification.
-- [issue-list-read.md](issue-list-read.md) — Low-bandwidth issue-list reading and request isolation: list summary model, event invalidation, cold transport.
-- [web-ui.md](web-ui.md) — Web UI design boundary.
-- [session-timeline.md](session-timeline.md) — AgentSession timeline presentation model: transcript-fact-derived activity entries, phrasing and salience discipline, Mohist domain action recognition, raw view.
+Feature-local mechanisms live beside their [product specifications](../specs/README.md).
+Database evolution is an [engineering practice](../eng/database-migrations.md).
+The records below preserve decisions and their rejected alternatives, not a
+second copy of each feature contract.
 
 ## Decision records
 

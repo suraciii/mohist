@@ -18,7 +18,7 @@ search existing issues/PRs for duplicates, link the closest one, or say
 ## Spec basis
 
 <!--
-Link the docs/ or design/ documents this change implements. If the change is
+Link the owning specs/<subdomain>/<feature>/spec.md and relevant design. If the change is
 not covered by any spec, say why it is still right. When spec and
 implementation diverge, state the gap here and in the document.
 -->

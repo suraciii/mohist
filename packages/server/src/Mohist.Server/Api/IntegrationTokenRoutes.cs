@@ -7,7 +7,7 @@ namespace Mohist.Server.Api;
 
 /// <summary>
 /// Integration token management: issue and revoke inbound-integration
-/// credentials (docs/auth.md "入站集成：独立令牌"). An integration token
+/// credentials (specs/platform/identity-and-access/spec.md "入站集成：独立令牌"). An integration token
 /// is narrowed to one project and carries the <c>webhook</c> scope; the
 /// full value appears in exactly one response — the issuance response —
 /// and the store only ever holds its hash. Unlike PATs this surface is

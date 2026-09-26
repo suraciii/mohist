@@ -71,7 +71,7 @@ Status reads must not delete, re-enroll, or otherwise repair Runner records.
 ## Source contracts
 
 Runner presence, admission reasons, owner rows, and snapshot timestamps come
-from the [Runner status projection](../../../docs/runner.md#runner-status-projection).
+from the [Runner status projection](../../runner/presence-and-capacity/spec.md#runner-status-projection).
 Session execution labels come from
 [Session execution evidence](../../session/execution-evidence/spec.md).
-The [Web UI guide](../../../docs/web-ui.md) owns the surrounding pages and routes.
+The [Web UI guide](../../interfaces/web/spec.md) owns the surrounding pages and routes.

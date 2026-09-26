@@ -13,7 +13,7 @@ low-risk pilot for the Go toolchain before considering larger ports.
 
 The adapter is a static Go binary in `packages/go/mohist-slack`, built with
 `slack-go/slack`, `gorilla/websocket`, the standard library HTTP client, and
-`log/slog`. The behavioral contract defined in [`../slack.md`](../slack.md)
+`log/slog`. The behavioral contract defined in [`../slack.md`](../../specs/integrations/slack/enrollment/design.md)
 does not change: wire behavior at the Server HTTP boundary and at the Slack
 Socket Mode and Web API boundary is preserved, service names are unchanged,
 and install and update flows keep their shape. The Node implementation is

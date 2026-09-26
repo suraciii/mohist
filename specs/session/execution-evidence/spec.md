@@ -51,6 +51,6 @@ computed by counting the other's visible rows.
 ## Related contracts
 
 [AgentOps activity](../../agent-ops/activity/spec.md) owns grouping, counts, and
-card navigation. [Session operations](../../../docs/agent-sessions.md#why-unknown-fails-closed)
+card navigation. [Session operations](../recovery/spec.md#why-unknown-fails-closed)
 own Stop, reconciliation, and safe actions; this observation contract does not
 replace their lifecycle rules.

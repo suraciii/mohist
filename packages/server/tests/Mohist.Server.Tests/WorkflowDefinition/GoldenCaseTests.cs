@@ -35,7 +35,7 @@ public sealed class GoldenCaseTests
         var example = ExtractCompleteDocumentationExample(ReadResource("GoldenCases.workflow-definition.md"));
         var result = WorkflowDefinitionParser.Parse(example);
 
-        Assert.True(result.IsValid, FormatErrors("docs/workflow-definition.md", result.Errors));
+        Assert.True(result.IsValid, FormatErrors("specs/workflow/definition/spec.md", result.Errors));
     }
 
     [Fact]

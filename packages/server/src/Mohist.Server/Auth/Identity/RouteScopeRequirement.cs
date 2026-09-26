@@ -8,7 +8,7 @@ namespace Mohist.Server.Auth.Identity;
 /// satisfies the route when it satisfies any declared scope; a route
 /// without this metadata falls back to the method-based default: GET is
 /// the business observation surface (operator or readonly), every other
-/// method requires operator (docs/auth.md scope table and sensitive
+/// method requires operator (specs/platform/identity-and-access/spec.md scope table and sensitive
 /// infrastructure surface attribution).
 /// </summary>
 public sealed record RouteScopeRequirement(IReadOnlyList<Scope> Scopes);

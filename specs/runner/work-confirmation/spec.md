@@ -24,7 +24,7 @@ treating a present row as fresh.
 [Session execution evidence](../../session/execution-evidence/spec.md) owns the
 freshness window and current-execution interpretation. Retaining or losing a
 confirmation does not by itself release ownership or capacity. The
-[Runner status projection](../../../docs/runner.md#runner-status-projection)
+[Runner status projection](../presence-and-capacity/spec.md#runner-status-projection)
 keeps ownership, capacity, and observations separate.
 
 ## Acceptance scenarios
@@ -34,3 +34,23 @@ keeps ownership, capacity, and observations separate.
   time unchanged; it does not release the retained owner.
 - After a Server restart, confirmation remains unknown until a new poll names
   the work. A confirmation from another process generation cannot confirm it.
+## Execution Ownership
+
+Runner owns host-specific effects because they are replaceable execution state.
+Server owns durable work decisions because a Runner can disappear. Unreported or
+uncommitted files are not durable results.
+
+For one task, Runner prepares an isolated Workspace, resolves the declared Action
+input, invokes the execution backend, and reports facts and outputs. It validates
+output expectations before reporting success and reclaims the Workspace when the
+Workflow no longer needs it. The complete Action contract is in
+[Action Contracts](../../workflow/actions/spec.md).
+
+Runner owns the complete process tree for every host command. A command result
+includes output produced before exit. A leftover subprocess cannot keep the
+result open or write into later work.
+
+When a Workflow Workspace is first materialized, Runner transfers only the
+repository data needed to establish its base and run branches. Later Stages can
+rebase and integrate that branch. Transfers remain bounded, and failed
+materialization does not publish or retain a partial Workspace.

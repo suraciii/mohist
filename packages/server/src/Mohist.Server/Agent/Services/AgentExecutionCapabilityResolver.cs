@@ -158,7 +158,7 @@ public static class AgentExecutionCapabilityResolver
         AgentExecutionCapabilityTuple tuple)
     {
         // The catalog is a configuration hint, not the execution
-        // authority (`design/runtimes/opencode.md` — the model catalog
+        // authority (`specs/interfaces/runtimes/opencode/design.md` — the model catalog
         // assists configuration; the runtime validates the model at
         // execution time). An unset model means the runtime uses its
         // default; an empty catalog model list means the catalog has no

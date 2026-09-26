@@ -136,7 +136,7 @@ mo skill install
 ```
 
 Then ask it to query or operate Mohist, for example: "Which Mohist Issues are
-advancing, and do any need my attention?" See [Skills](skills.md). The rest of
+advancing, and do any need my attention?" See [Skills](../specs/agent/skills/spec.md). The rest of
 this guide uses an External Agent or `mo`; you do not need to create a Mohist
 Agent first.
 
@@ -161,7 +161,7 @@ The connected Runner's `capabilities` array must include
 the Runner exports from the `MANAGER_PI_CAPABILITIES` set in
 `packages/runner/src/runtime/host-helpers.ts`, and it is the same signal the
 Runner uses internally to gate Pi-backed execution (`supportsManagerExecution`
-in that file). When it is absent, see [Runner](runner.md) for the
+in that file). When it is absent, see [Runner](../specs/runner/presence-and-capacity/spec.md) for the
 `ENABLED_AGENT_RUNTIMES` setting and confirm the Runner was started on a Linux
 host with the Pi catalog loaded.
 
@@ -177,10 +177,10 @@ When the OpenCode CLI is not installed, install it following the
 
 Without a model, the Agent uses its runtime default. The Runtime itself
 defaults to `pi` when an entry point does not supply one; see
-[Agents and AgentSessions](agent-sessions.md#execution-resolution) for the
+[Agents and AgentSessions](../specs/agent/configuration/spec.md#execution-resolution) for the
 resolution order. Configure a model on the named Agent from the Agents page or
-`mo agent edit`. See [Agents and AgentSessions](agent-sessions.md) and
-[Workflow Profiles](workflow-profiles.md#configure-the-agent-for-a-task).
+`mo agent edit`. See [Agents and AgentSessions](../specs/agent/execution/spec.md) and
+[Workflow Profiles](../specs/workflow/profiles/spec.md#configure-the-agent-for-a-task).
 
 ## 7. Create Your First Project
 
@@ -224,7 +224,7 @@ workspace, status, and canonical observation links. In table mode it also
 prints a generated idempotency key before the request when one was not supplied.
 Retry a lost response with the same key; an accepted retry returns the original
 identities without starting a second launch. Use
-[Agents and AgentSessions](agent-sessions.md) to refine the created Agent after
+[Agents and AgentSessions](../specs/agent/execution/spec.md) to refine the created Agent after
 launch. The definition-first `mo agent create` then `mo agent launch` flow
 remains the deliberate configuration path.
 
@@ -351,20 +351,20 @@ In your repository, verify that `GET /hello` works.
 
 ## Next Steps
 
-- [Skills](skills.md): Let an External Agent query, delegate to, and operate
+- [Skills](../specs/agent/skills/spec.md): Let an External Agent query, delegate to, and operate
   Mohist
-- [Agents and AgentSessions](agent-sessions.md): Configure and use a Mohist
+- [Agents and AgentSessions](../specs/agent/execution/spec.md): Configure and use a Mohist
   Agent directly
-- [Slack](slack.md): Bring a tested Agent to Slack and use the Mohist App to
+- [Slack](../specs/integrations/slack/enrollment/spec.md): Bring a tested Agent to Slack and use the Mohist App to
   manage its Agent Connection conversationally
 - [Core Concepts](concepts.md): Understand all terms used in this guide
-- [Issue Management](issues.md): Learn prerequisites, comments, force stop, and
+- [Issue Management](../specs/issue/lifecycle/spec.md): Learn prerequisites, comments, force stop, and
   retry
-- [Planning with Epics](epics.md): Organize separate Issues into a product plan
+- [Planning with Epics](../specs/issue/epics/spec.md): Organize separate Issues into a product plan
   that advances automatically
-- [Workflow Profile](workflow-profiles.md): Adapt the Workflow to your working
+- [Workflow Profile](../specs/workflow/profiles/spec.md): Adapt the Workflow to your working
   style
-- [CLI Reference](cli-reference.md): See all `mo` commands, options, and exit
+- [CLI Reference](../specs/interfaces/cli/spec.md): See all `mo` commands, options, and exit
   codes
 
 ## Implementation Gaps

@@ -118,13 +118,15 @@ Change the spec when behavior changes and the design when mechanisms change.
 Update affected links in the same change. Do not require a documentation diff
 when no durable fact changes. Plans and verification output stay with the task.
 
-## Implementation Gaps
+## Specification Ownership
 
-Product and design specifications not yet organized by feature remain in
-`docs/` and `design/`. Their existing documents remain authoritative until
-each feature moves. The [product index](../docs/README.md) and
-[design index](../design/README.md) provide the remaining reading paths.
+Feature behavior and feature-local mechanisms live together in `specs/`.
+`docs/` holds the vision, conceptual reading guide, tutorials, and operations
+guides. `design/` holds the domain map, cross-domain architecture and
+conventions, and decision records. Database migration practices live in
+[Database Migrations](database-migrations.md), not in a product feature.
 Move each rule once, remove its old body, and update references together.
+Do not keep compatibility copies of specifications in the guide directories.
 
 ## Decision records
 
@@ -215,3 +217,201 @@ These rules govern every specification document, including `specs/`, `docs/`,
 that every decision record carries a Status line and an `## Alternatives
 considered` section. Reviewers enforce the placement and durability rules in
 this document; no gate can judge them.
+
+## Product Specification Writing
+
+### Rules
+
+- Write the spec before implementing. Product documents define the target
+  product. Issues bring the implementation to the spec; the spec does not
+  follow the implementation. A document can describe a capability before
+  implementation, and its body does not need to change when delivery finishes.
+- Lead with the user problem and why the product behavior exists. Explain the
+  constraint or trade-off that makes the rule necessary before listing the
+  rule itself. Remove generic motivation, introductory padding, and common
+  knowledge.
+- One section, one purpose. A heading states the question that its section
+  answers. Prefer a list to a paragraph.
+- Explain the product, not the code. Conceptual guidance uses product and
+  domain language to explain mental models, ownership boundaries, and visible
+  behavior. Do not turn classes, methods, handlers, source call chains, or
+  storage steps into prose. Formal CLI, DSL, and API contracts can keep the
+  exact commands, syntax, and fields that users must use, in task guides and
+  reference sections. A single `Implementation source:` footer can point to
+  implementation entry points.
+- The body is the spec. If the implementation differs materially from a
+  document, add an Implementation Gaps section that states the current state
+  as a plain product fact. Never put divergence in a status list or delivery
+  ledger, and do not reduce the body to a current-feature list.
+- Check gaps before changing facts. Before you change a factual statement,
+  check whether the document's Implementation Gaps section already records the
+  difference. Do not change a target spec back to current behavior.
+- WIP product ideas use future-state language and record their current state
+  in an Implementation Gaps section. After the requirements and spec are
+  final, move the document to its product area.
+
+### Minimal structure
+
+A product spec states what the product must satisfy; the implementation
+aligns to it. Start from the structure below. Delete sections that have no
+content. Do not add empty sections for symmetry.
+
+```text literal
+# Name
+
+Opening paragraph: what this is and why the product behavior exists, in two
+to four sentences. It lets the reader decide whether this is the document
+they need.
+
+## Product Commitments
+What a user or Agent can rely on, stated as promises.
+
+## <Concept>
+One section per user-visible concept: what it is and is not, when it is
+created and ends, who owns it.
+
+## <Capability>
+One section per user-facing capability: how to use it and the rules that
+hold. Exact CLI, DSL, and API syntax lives here.
+
+## Boundary
+What the product deliberately does not do. Optional.
+
+## Implementation Gaps
+Where the implementation does not yet match this document, stated as plain
+product facts.
+```
+
+## Design Specification Writing
+
+A design spec is the authoritative statement of why the system is divided this way and how its
+parts must preserve target behavior. People, agents, and implementations must read the same model
+from it.
+Do not let agents guess rules. Do not let the current code decide for the target design.
+
+### Explain the design drivers
+
+- Start with the problem that requires a design decision. State why the existing or obvious model
+  is insufficient.
+- Name the forces that shape the solution: ownership, lifecycle, consistency, reliability,
+  security, cost, or operability.
+- Explain why the chosen boundary satisfies those forces and which trade-off it accepts.
+- When rejected alternatives could reasonably return in a later change, link to a decision record
+  that owns their rationale. Do not copy that record into the design spec.
+- Describe the macro structure before fields, endpoints, algorithms, or persistence. A reader must
+  understand the dependency direction before implementation detail appears.
+- Keep exact mechanics only when they form a durable contract or remove a real ambiguity. Do not
+  translate a method body, call chain, database procedure, or source tree into prose. Mention a
+  code symbol only when it names a durable implementation boundary or links a current gap to its
+  source.
+
+### Define the model first
+
+- After the design drivers, write what the concept is and what it is not.
+- State who owns it, where it applies, how to identify it, when it is created or ends, and what must always hold.
+- Introduce only concepts with business meaning. Do not add new nouns without an identity, behavior, or rules of their own.
+- Keep only the fields the current behavior needs. Do not add resources, scopes, or APIs ahead of possible future capabilities.
+- Do not invent a shared domain concept just because several data shapes look alike.
+- Do not treat read order, storage layout, or call chains as the domain model.
+- Mention providers, resolvers, or managers only to explain code boundaries. Do not use them as domain nouns.
+- Let one noun mean one thing. Rename or split immediately when names collide or become ambiguous.
+- Separate resources with different owners, scopes, or lifecycles. Do not bind them together with a generic `config`.
+- Define a rule in exactly one document. Other documents link to it; they do not copy it.
+
+### State the semantics
+
+- Write definite rules. Do not state only design intent.
+- Connect each important rule to the design force it protects. Do not record the whole discussion.
+- Write the full order. State who comes first, who comes after, and who overrides whom.
+- Write the resolution timing. State what takes effect live and what is fixed at startup.
+- Write the write target. State which resource one operation modifies and which it does not.
+- Write failure behavior. Reject invalid states; do not swallow errors silently.
+- Use pseudocode only when the algorithm itself is part of the contract. It must remove ambiguity
+  without mirroring a current method body or call chain.
+- Express merging, fallback, selection, and state changes with inputs and outputs.
+- Use the same interface for the same semantics. Do not duplicate APIs for different callers.
+- Write caller restrictions as parameter restrictions. Do not wrap them into a new domain capability.
+- Write behavior first; then write how YAML, JSON, API DTOs, or the database express it.
+- Let schema and validators decide whether a DSL is valid. Do not let the LLM guess.
+
+### Choose the right expression
+
+- State one rule per sentence.
+- Prefer domain nouns and product nouns. Use technical nouns only in implementation design, and
+  define terms a new reader may not know.
+- Use canonical names. Keep casing, singular/plural, and field paths consistent.
+- Use pseudocode for definite computations.
+- Use minimal input/output examples when ambiguity must be resolved.
+- Make examples behave like tests. Keep only examples that distinguish between readings.
+
+### Use the minimal structure
+
+Two kinds of design specs exist. Start from the matching structure below.
+Delete sections that have no content. Do not add empty sections for symmetry.
+
+A **concept spec** defines one concept: one resource, mechanism, or contract.
+
+```text literal
+# Name
+
+The problem and why a design decision is necessary.
+
+## Design Drivers
+Current constraints and forces; links to relevant decision records.
+
+## Model
+Resources, ownership, references, and the minimal data shape.
+
+## Semantics
+Selection, merging, state changes, timing, errors, and interfaces.
+
+## Examples
+A small number of inputs and expected outputs. Optional.
+
+## Status
+Open questions and current implementation gaps.
+```
+
+Put API, Writes, Merge, and similar topics in `Semantics` subsections. Split them into standalone sections only when they are complex enough.
+
+A **subsystem spec** defines one subsystem's boundaries and the decisions
+that must remain true.
+
+```text literal
+# Name
+
+The subsystem's boundary and what this document records.
+
+## Core Decisions
+The load-bearing choices, one line each; the rules live in the sections
+below. Include this register only when the subsystem carries many decisions.
+
+## System Boundary
+Components, the boundary diagram, and what each component owns and does not
+own.
+
+## <Concern>
+One section per design concern, named by the question it answers: the model,
+the rules, and the failure behavior.
+
+## Non-Goals
+Scope exclusions.
+
+## Status
+Current implementation state and gaps.
+```
+
+### Before committing
+
+- Confirm the reader can answer: what problem does this solve, why is this boundary here, and which
+  trade-off does it accept?
+- Confirm the reader can answer: what is it? who owns it? what is the scope?
+- Confirm the reader can answer: how is it selected? how is it read? how is it modified?
+- Confirm the reader can answer: who overrides whom on conflict? when does it take effect?
+- Confirm the reader can answer: what happens on failure? which states are not allowed?
+- Confirm the prose describes the target design. Move current implementation gaps to `Status`.
+- Delete duplicate rules, behavior-less abstractions, and prose that only explains code steps,
+  method bodies, storage operations, or call chains.
+- Check that diagrams, pseudocode, examples, and prose express the same semantics.
+- Have another agent read the spec read-only. If it still needs the code to implement, complete the spec.
+- Have two independent agents derive behavior from the spec. Remove ambiguity when they disagree.

@@ -14,7 +14,7 @@ using Xunit;
 namespace Mohist.Server.Tests.Auth;
 
 /// <summary>
-/// PAT issuance, listing and revocation (docs/auth.md "脚本与外部
+/// PAT issuance, listing and revocation (specs/platform/identity-and-access/spec.md "脚本与外部
 /// Agent：个人访问令牌"): the full token appears in exactly one response,
 /// every token must expire, names are unique among active credentials,
 /// revocation is immediate and list never echoes full values.

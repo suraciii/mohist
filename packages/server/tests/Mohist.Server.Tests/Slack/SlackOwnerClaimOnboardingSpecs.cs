@@ -19,7 +19,7 @@ namespace Mohist.Server.Tests.Slack;
 
 /// <summary>
 /// Spec tests for the first-use onboarding reply the Agent bot sends after a
-/// successful owner claim (docs/slack.md「绑定 Owner 并验证」). The owner sends
+/// successful owner claim (specs/integrations/slack/enrollment/spec.md「绑定 Owner 并验证」). The owner sends
 /// the claim code in the Bot DM; the Bot confirms and gives a self-contained
 /// first-use guide without echoing the code, and does not repeat the guide on
 /// an owner transfer.

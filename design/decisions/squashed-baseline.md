@@ -5,7 +5,7 @@ Status: accepted
 ## Problem
 
 The EF Core migration chain was squashed into one baseline migration. The
-squash procedure in [`../db-migrations.md`](../db-migrations.md) is durable,
+squash procedure in [`../db-migrations.md`](../../eng/database-migrations.md) is durable,
 but every squash produces a point-in-time list of accepted differences between
 upgraded and fresh databases. That list expires at the next squash, so it must
 not live inside the durable procedure document.

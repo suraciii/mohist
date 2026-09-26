@@ -15,7 +15,7 @@ using Xunit;
 namespace Mohist.Server.Tests.Auth;
 
 /// <summary>
-/// P2 scope enforcement (docs/auth.md "Scope 判定"): routes declare
+/// P2 scope enforcement (specs/platform/identity-and-access/spec.md "Scope 判定"): routes declare
 /// required scopes, credentials recorded at issuance (PAT #320) take
 /// effect, insufficient scope answers 403 with the principal — clearly
 /// distinct from the 401 of an unauthenticated request. Runner

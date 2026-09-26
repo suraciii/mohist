@@ -4,7 +4,7 @@ Status: accepted
 
 ## Problem
 
-The unified execution model ([`../agent-execution.md`](../agent-execution.md),
+The unified execution model ([`../agent-execution.md`](../../specs/agent/execution/design.md),
 [`../domain-analysis.md`](../domain-analysis.md)) makes AgentJob the sole
 top-level Agent execution owner and requires every Agent-backed Workflow task
 to launch a real Mohist Agent. Mechanical Actions remain Workflow orchestration.
@@ -90,7 +90,7 @@ the same `mohist/agent` syntax as ordinary tasks.
 
 ## Consequences
 
-- `docs/actions/agent.md` is the syntax and semantics reference for Agent task
+- `specs/workflow/actions/agent/spec.md` is the syntax and semantics reference for Agent task
   binding.
 - The legacy Workflow dispatch paths (`mohist/opencode`, `mohist/pi`, and the
   snapshot-only `mohist/agent`) are deleted by the implementation migration,

@@ -5,7 +5,7 @@ using Mohist.Server.Auth.Identity;
 namespace Mohist.Server.Api;
 
 /// <summary>
-/// Runner install registration (docs/auth.md "Runner：安装即注册"): the
+/// Runner install registration (specs/platform/identity-and-access/spec.md "Runner：安装即注册"): the
 /// admin mints a one-time enrollment token; a fresh runner consumes it to
 /// receive a machine credential bound to its RunnerId; the admin can
 /// revoke a runner's credential so its requests are rejected until it

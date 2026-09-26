@@ -14,7 +14,7 @@ using Xunit;
 namespace Mohist.Server.Tests.Auth;
 
 /// <summary>
-/// Auth audit trail (design/auth.md「审计事件」): credential issuance
+/// Auth audit trail (specs/platform/identity-and-access/design.md「审计事件」): credential issuance
 /// and revocation (PAT, runner), enrollment-token issuance and
 /// consumption, device approval persistence and session establishment
 /// are all queryable through <c>GET /api/audit/events</c> — with

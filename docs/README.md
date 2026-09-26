@@ -1,102 +1,17 @@
-# Mohist Documentation
+# User Guides
 
-This documentation is for **users**. The index is organized by product area;
-each guide appears once. Architecture and domain analysis are under
-[`../design/`](../design/).
-Feature-local behavior and design contracts are introduced in
-[`../specs/README.md`](../specs/README.md); guides link to those contracts.
+Start with the [Product Vision](vision.md) and [Core Concepts](concepts.md),
+then follow [Getting Started](getting-started.md) to deliver one real Issue.
 
-If you are new to Mohist, read the [repository README](../README.md) first.
+For ongoing operation, use [Self-Hosting](self-host.md),
+[Runner Operations](runner-operations.md), and [Troubleshooting](troubleshooting.md).
 
-## Part 1: Start
+For a particular capability, read the owning [feature specification](../specs/README.md).
+Common starting points are [Issue management](../specs/issue/lifecycle/spec.md),
+[Workflow execution](../specs/workflow/execution/spec.md),
+[Agent configuration](../specs/agent/configuration/spec.md),
+[Slack interaction](../specs/integrations/slack/interaction/spec.md), and the
+[CLI reference](../specs/interfaces/cli/spec.md).
 
-- [Product Vision](vision.md): Where Mohist is going and how independent Agents
-  work with external interaction locations
-- [Getting Started](getting-started.md): Start from zero and move one Issue
-  through the complete Workflow with a Mohist Agent, External Agent, or `mo`
-- [Core Concepts](concepts.md): Understand the Mohist production-line model
-- [Agents and AgentSessions](agent-sessions.md): Configure and use a Mohist
-  Agent directly, and understand the work and session relationship
-
-## Part 2: Workflows
-
-- [The Workflow](the-workflow.md): What happens in Draft, Plan, Build, Check,
-  and Integrate
-- [Workflow Profile](workflow-profiles.md): Configure stages, tasks, checks, and
-  Approval policy
-- [Workflow Definition Reference](workflow-definition.md): The complete syntax
-  for stages, tasks, expectations, recovery, and template expressions
-
-## Part 3: Work Management
-
-- [Agent Operability](agent-operability.md): Let Mohist and External Agents
-  discover, read, operate, supervise, recover, and report existing factory work
-- [Repositories](repositories.md): Declare multiple repositories as Project
-  execution resources and route each Issue to its target repository
-- [Workspace](workspaces.md): Use persistent execution environments across
-  sessions and Agents, with clean Issue initialization and persistent reuse for
-  a Slack channel
-- [Issue Management](issues.md): Create, start, approve, recover, and close
-  Issues
-- [Composite Issues and Child Issues](composite-issues.md): Track a cross-repository
-  requirement in one Issue and move its child Issues through separate Workflows
-- [Planning with Epics](epics.md): Organize separate Issues into a product goal
-  that can advance automatically
-
-## Part 4: Observation and Operations
-
-- [Web UI Guide](web-ui.md): The board, details, evidence, and settings in the
-  fallback operations and visualization plane
-- [CLI Reference](cli-reference.md): The `mo` command language, command map, and
-  interaction contract shared by External Agents and people
-- [Observability](observability.md): Detect runtime anomalies safely and retain
-  enough information for diagnosis
-
-## Part 5: Execution Backends and Extensions
-
-- [Action Contracts](actions/README.md): Workflow Action inputs, outputs, and
-  behavior, including `mohist/opencode` and `mohist/pi`
-  - [Agent Action](actions/agent.md): Launch a named Mohist Agent
-  - [Core Actions](actions/core.md): Run processes, scripts, and marker checks
-  - [Git Actions](actions/git.md): Prepare, rebase, inspect, merge, and push
-  - [GitHub PR Actions](actions/github-pr.md): Create and deliver Pull Requests
-  - [OpenCode Action](actions/opencode.md): Run one input through OpenCode
-  - [Pi Action](actions/pi.md): Run one input through Pi
-  - [Task-list Action](actions/task-list.md): Expand planned Build tasks
-- [External Agent API](agent-api.md): Call the shipped private API to delegate
-  Agent work, recover keyed writes, read public state, and resume Session events
-- [Runner Guide](runner.md): Run the execution plane and configure concurrency
-- [Runner Execution Environment](runner-environment.md): Capture, refresh, and verify the host environment used by Runner tasks
-- [Skills](skills.md): Give reusable capabilities to Mohist Agents and External
-  Agents
-- [Slack](slack.md): Use the Mohist App to manage connections conversationally,
-  and use each Agent App as an independent bot in direct messages and channels
-- [GitHub](github.md): Use GitHub as a requirement entry point, progress board,
-  and Approval source through labels, reviews, and progress updates
-- [Agent Event Routing](event-routing.md): Subscribe to events from any entity
-  with a Project routing expression, then trigger Mohist Agent responses in
-  order
-- [Agent Supervision](agent-supervision.md): Install a supervision Agent with
-  one command. It approves work and repairs failures for you until it stops and
-  asks you to act.
-- [Subagents and Session Trees](subagents.md): Let an Agent decompose work in its
-  session through child-session spawn, terminal reports, cascading stop, and
-  scheduled input
-
-## Part 6: Deployment and Operations
-
-- [Self-hosting](self-host.md): Run Mohist continuously on a NAS, home server,
-  or laptop
-- [Authentication and Access](auth.md): One Administrator plus machine
-  Principals, with local zero-login access, CLI device authorization, script
-  tokens, Runner registration, and Agent attribution
-- [Hermes Notifications](hermes-notifications.md): Push approval points,
-  failures, and completion to your chat tool
-- [Troubleshooting](troubleshooting.md): Handle failures, blocked state, and
-  drift
-
-## Writing Contract
-
-Read and follow [AGENTS.md](AGENTS.md) before you edit `docs/`.
-
-Open an Issue when you find an outdated statement.
+The [domain map](../design/domain-analysis.md) explains ownership boundaries;
+the [glossary](../CONTEXT.md) defines shared terms.

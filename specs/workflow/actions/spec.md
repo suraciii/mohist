@@ -1,0 +1,238 @@
+# Action Contracts
+
+> Agent-backed tasks use `mohist/agent` and create AgentJobs. Mechanical Actions remain
+> Workflow-owned orchestration. See
+> [`../../design/decisions/workflow-agent-binding.md`](../../../design/decisions/workflow-agent-binding.md).
+
+An Action is an execution interface selected by a Workflow task through
+`uses`. Each Action defines its own `with` inputs, outputs, and failure
+semantics. It does not decide whether the Workflow is complete and does not
+represent a Mohist Agent with an identity.
+
+Each Action contract is declarative and has three parts:
+
+- **Inputs**: Names, required status, and default values. A task's `with` value
+  is validated against the declaration. Unknown fields, missing required
+  fields, and invalid types are rejected when the Profile is saved instead of
+  failing only at runtime. There are no hidden inputs outside the declaration.
+- **Outputs**: Fields produced on success for `setVars`,
+  `${{ tasks.<id>.outputs.* }}`, and recovery matching.
+- **Error codes**: Stable identifiers for all business failures produced by
+  the Action. Recovery matches them with `when: error.code=...`. Human-readable
+  error messages are not matching contracts.
+
+The platform can also produce `invalid-input`, `unexpected-error`, and
+`timeout`. These indicate input validation failure, an unexpected platform
+failure, and a missed deadline. They are not business errors owned by an
+Action.
+
+This directory contains product contracts for Actions that need separate
+documentation. See [Workflow Profiles](../profiles/spec.md) for Workflow
+stages, tasks, `expect`, and recovery configuration. See
+[Agents and AgentSessions](../../agent/execution/spec.md) for the relationship among
+Actions, Inline Agents, and Mohist Agents.
+
+## Current Actions
+
+- [`mohist/agent`](agent/spec.md): Launches a named Mohist Agent for one Workflow
+  task through the AgentJob boundary. This is the only Agent task binding a
+  Workflow Profile can use.
+- [`mohist/opencode`](../../interfaces/runtimes/opencode/spec.md): Internal Agent-to-Runner contract that
+  executes one input through OpenCode. The Agent definition selects it; a
+  Workflow Profile `uses` cannot reference it directly.
+- [`mohist/pi`](../../interfaces/runtimes/pi/spec.md): Internal Agent-to-Runner contract that executes one
+  input through Pi. It is a peer of `mohist/opencode`, has different
+  installation and trust boundaries, and is likewise selected only by an Agent
+  definition.
+
+**Git Actions** define explicit `with` input contracts for workspace
+preparation, rebase, rebase status, merge readiness, and push.
+
+- [`mohist/workspace-prepare`](git/spec.md#mohistworkspace-prepare)
+- [`mohist/rebase`](git/spec.md#mohistrebase)
+- [`mohist/rebase-status`](git/spec.md#mohistrebase-status)
+- [`mohist/merge-ready`](git/spec.md#mohistmerge-ready)
+- [`mohist/push`](git/spec.md#mohistpush)
+
+**GitHub PR Actions** define explicit `with` input contracts for PR creation,
+ready state, checks, status validation, and squash merge.
+
+- [`mohist/create-github-pr`](github-pr/spec.md#mohistcreate-github-pr)
+- [`mohist/mark-github-pr-ready`](github-pr/spec.md#mohistmark-github-pr-ready)
+- [`mohist/enable-github-pr-auto-merge`](github-pr/spec.md#mohistenable-github-pr-auto-merge)
+- [`mohist/github-pr-checks`](github-pr/spec.md#mohistgithub-pr-checks)
+- [`mohist/github-pr-status`](github-pr/spec.md#mohistgithub-pr-status)
+
+**Core Actions** run processes and inline scripts, and check file existence and
+markers.
+
+- [`core/process`](core/spec.md#coreprocess)
+- [`core/script`](core/spec.md#corescript)
+- [`core/artifact-exists`](core/spec.md#coreartifact-exists)
+- [`core/marker`](core/spec.md#coremarker)
+
+**Task-list Actions** expand the plan Stage's task list into Build tasks.
+
+- [`mohist/task-list`](task-list/spec.md#mohisttask-list)
+
+### Model Selection
+
+A Workflow task that runs an Agent does not carry model options. The named
+Agent definition owns the backend (OpenCode, Pi, or Codex), model, optional
+Reasoning Effort, and true model variant. The AgentJob fixes these values at
+launch. The Workflow supplies only `name`, `prompt`, `session`, and `timeout`
+through `mohist/agent`.
+
+Model selection configures the named Agent on the Agents surface, not the
+Workflow. The available catalogs come from the runtime selected by the Agent. A
+configured model that is no longer discovered stays visible until it is changed
+or cleared. Mohist never substitutes a model from another backend.
+
+## Shared Semantics for Agent Execution Actions
+
+OpenCode, Pi, and Codex share the following Agent execution semantics. The
+OpenCode and Pi internal Actions and each Runtime design describe only their
+differences. `mohist/agent` launches the AgentJob and is the only Agent Action a
+Workflow Profile selects; Codex adds no user-selectable Runtime Action.
+
+### Workflow Session
+
+`session` identifies a logical AgentSession whose origin is a Workflow. Tasks
+with the same name in one WorkflowRun share conversation context. Different
+names are isolated. When `session` is omitted, Mohist uses the Work ID so two
+tasks do not accidentally share a conversation. A named Session continues only
+when the Agent and Workspace identities also match; a launch that reuses the
+name with a different Agent fails instead of silently switching identity.
+Changing the execution backend preserves the logical identity but starts an
+empty physical Session. Mohist does not migrate the old conversation or create
+physical Session history.
+
+### Physical Session Reuse Invariants
+
+When tasks in one WorkflowRun specify the same `session` name, Mohist must keep
+using the physical Session currently bound to that AgentSession. A different
+task, task retry, or Agent-side model change cannot replace it. Model selection
+affects only the current execution and takes effect in the existing Session.
+
+- A later task or retry that uses the same `session` name leaves the physical
+  Session unchanged.
+- A model or variant change in the Agent definition leaves the current binding
+  unchanged.
+- Compact leaves it unchanged.
+- Reset creates a new empty Session; the AgentSession keeps its conversation
+  content.
+- When the current Session is confirmed missing before a new independent input
+  is submitted, Mohist creates a new empty Session automatically.
+- A working-directory change rejects execution; use a new logical `session`
+  name.
+- An execution-backend change creates a new empty physical Session.
+
+Automatic recovery applies only when the responsible Runner still owns the
+current binding, the backend explicitly confirms that the old Session is
+missing, and the current input has not been accepted. Mohist fails explicitly
+when the request reaches another Runner, the backend is temporarily
+unavailable, the response is ambiguous, or the prompt might already have been
+submitted. It does not replace the binding or replay the prompt. The new
+Session has no old context. The same AgentSession continues to show existing
+messages and indicates that later work starts with reset context.
+
+When a task has completed its work but still has changes to commit or restore,
+Mohist continues the cleanup execution in the same AgentSession and physical
+Session. Cleanup does not replace the Session and does not require Reset first.
+
+Only one Workflow-originated input runs in an AgentSession at a time. Different
+AgentSessions can run concurrently. A follow-up submitted from the Session page
+is the exception: it joins the current execution when the Session is running
+and starts a new execution when the Session is idle.
+
+### Session Operations
+
+- Follow-up sends user text to the current physical Session and returns after
+  the backend accepts it.
+- Compact uses native backend compaction; the Runtime Session identity remains
+  unchanged.
+- Reset creates an empty physical Session while idle; the AgentSession keeps
+  its conversation content.
+
+Compact is a user operation within a Session, not a Workflow Action. Mohist
+does not simulate compaction with a synthetic summary and does not silently
+degrade when compaction fails. After a Runner restart, these operations still
+use the binding stored by the AgentSession. Compact and operations against a
+running execution do not recover a missing Session automatically. Reset can
+create an empty Session even when the old Session is already missing.
+
+### Completion and Failure
+
+After execution succeeds, the Workflow uses the task's `expect`, `artifacts`,
+`failIf`, and recovery rules to decide what happens next. When execution fails,
+is cancelled, or times out, that original error is the task result. Mohist does
+not then inspect files or markers. Action Output is `{ "promise": "..." }`
+only when a promise marker matches; otherwise it is `null`. Session ID, model,
+usage, full text, and validation details belong to Session or task state and
+are not placed in Action Output.
+
+The execution deadline starts before Mohist submits the prompt. Preparing the
+binding and audit input does not consume this budget. A cleanup prompt is a new
+execution with a new deadline. When the deadline expires, Mohist interrupts the
+current execution and reports `timeout`. Backend interruption is cleanup and
+cannot replace `timeout` with a missing-marker result. It also cannot replace
+the current Session binding or perform an automatic Reset. Mohist does not
+replay a prompt when submission is uncertain because that could execute one
+task twice.
+
+When the provider explicitly reports exhausted quota, balance, or billing,
+Mohist interrupts the current execution and fails the task without waiting for
+provider retries. The Session binding remains unchanged. After the Session
+becomes idle, work can continue with another model without Reset. If Mohist
+cannot confirm that execution stopped, it reports that interruption is
+unconfirmed instead of presenting a possibly running Session as safely idle.
+
+### Shared Error Codes
+
+AgentJob normalizes backend, resolver, binding, and workspace failures at one
+Agent-to-Runner result boundary. Runtime diagnostics keep their source
+categories, while these failures use a declared business code below or the
+platform-owned `invalid-input`, `unexpected-error`, or `timeout`. An undeclared
+backend, resolver, binding, or workspace code becomes `unexpected-error`.
+
+- `attachment-delivery-failed`: accepted attachments could not be delivered to
+  the execution workspace.
+- `conflict`: the Runtime rejected an operation because its Session state
+  conflicts with the request.
+- `generation-drain-timeout`: a quarantined Runtime generation did not drain
+  before replacement.
+- `incompatible-execution-configuration`: the selected Runtime cannot apply
+  the requested Agent execution configuration.
+- `incompatible-runtime`: the selected Runtime is incompatible with the
+  request.
+- `interrupted`: execution was interrupted outside the normal deadline path.
+- `invalid-dispatch`: an AgentJob executor received work owned by another
+  execution boundary.
+- `manager-credential-expired`: Manager credentials expired before execution
+  completed.
+- `permission-required`: the Runtime requires permission to continue.
+- `provider-quota-exhausted`: the provider reported exhausted quota, balance,
+  or billing.
+- `runtime-session-missing`: the physical Session is missing, but this
+  operation cannot rebuild or resubmit safely.
+- `runtime-unavailable`: backend execution capability is not ready or
+  available.
+- `session-binding-failed`: logical Session binding resolution or persistence
+  failed.
+- `skill-not-found`: an Agent Skill could not be resolved before execution.
+- `turn-failed`: execution failed for a reason that has no more specific
+  declared code.
+- `unavailable-runtime`: the backend reports that it is unavailable.
+- `unsupported-execution-configuration`: the backend rejected an execution
+  option it cannot support.
+- `workspace-home-claimed`: the named Workspace is currently owned by another
+  Runner.
+- `workspace-materialization-failed`: the named Workspace could not be
+  materialized.
+
+Source categories remain diagnostic facts. In particular, `skill_not_found`
+and `unsupported_execution_configuration` are recorded in diagnostics, while
+task results use `skill-not-found` and
+`unsupported-execution-configuration`. Provider quota diagnostics are promoted
+to `provider-quota-exhausted` so recovery does not retry the same exhausted
+provider.

@@ -71,21 +71,23 @@ Epic owns the goal and advancement policy, but no independent membership set.
 Membership, progress, and candidates are queries over current Issue state.
 Parent and child are also Issue-internal organization. They express work
 decomposition, not Epic feeding. Workflow does not inspect that relationship.
-See [`composite-issues.md`](composite-issues.md).
+See [`composite-issues.md`](../specs/issue/decomposition/design.md).
 
 Repository belongs to Project Space. Issue stores only the target Repository
 name. WorkflowRun stores the Project and Issue identity needed to resolve it.
 An unfinished Issue prevents changes to its Repository execution attributes.
-See [`repositories.md`](repositories.md).
+See [`repositories.md`](../specs/project-space/repositories/design.md).
 
 Workspace is separate from Project Space configuration. Issue and interaction
 origins resolve to Workspace through Origin. Runner materializes it as a
 directory. Workflow uses Workspace routing facts and Runner capacity to choose
-dispatch. See [`workspaces.md`](workspaces.md).
+dispatch. See [`workspaces.md`](../specs/workspace/lifecycle/design.md).
 
 See [`../CONTEXT.md`](../CONTEXT.md) for shared Agent terms and
-[`agent-execution.md`](agent-execution.md) for lifecycle ownership and
-invariants.
+[Agent execution](../specs/agent/execution/design.md) for work ownership,
+[Session inputs and Turns](../specs/session/input-and-turns/design.md) for
+conversation invariants, and [Session recovery](../specs/session/recovery/design.md)
+for Binding replacement.
 
 **Read-side: AgentOps.** AgentOps assembles cross-domain, read-only reports
 such as activity feeds, delivery cost, and cross-aggregate boards. Session is a
@@ -225,7 +227,7 @@ entries 15 and 16. Participants do not call it synchronously.
   Workflow task and direct Agent launch uses the same launch boundary.
   Mechanical Action attempts remain Workflow orchestration. `TaskRun`, Inline
   Agent, and Agent Definition Reference are not domain concepts. See
-  [`agent-execution.md`](agent-execution.md).
+  [`agent-execution.md`](../specs/agent/execution/design.md).
 - Agent consumes narrow Runner scheduling facts and Session association facts.
   Session has no reverse dependency on Agent behavior.
 - Agent owns Agent Connection as a separate resource. The Connection references

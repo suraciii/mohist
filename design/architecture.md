@@ -61,7 +61,7 @@ facts. Detailed domain contracts are indexed by [`domain-analysis.md`](domain-an
   External Agents keep their own conversations and use Mohist Skills plus `mo`.
 - Slack enters through the Server Connection boundary. The
   `mohist-slack` adapter translates Socket Mode and owns no persistent product
-  state. See [`slack.md`](slack.md).
+  state. See [`slack.md`](../specs/integrations/slack/enrollment/design.md).
 - The Agent API owns unified Agent launch, continuation, observation, and stop.
   Agent, Session, Workflow, and Connection contracts remain on the Server side.
 - The Control Plane owns product state and decisions. The Execution Plane
@@ -127,7 +127,7 @@ progress never depends on UI push.
 - Health checks expose latency, resource pressure, and degraded capabilities,
   not only process liveness.
 
-See [`observability.md`](observability.md) for detailed observability rules.
+See [`observability.md`](../specs/platform/observability/design.md) for detailed observability rules.
 
 ## Aggregates and Transactions
 
@@ -211,7 +211,7 @@ launch follows the first path.
 Slack is therefore neither a Runtime nor an Agent. The stateless adapter enters
 through the Connection boundary and Agent API. It never reads Mohist storage,
 parses Runner logs, invokes CLI as a hidden path, or stores shadow Agent
-configuration. See [`agent-api.md`](agent-api.md) and [`slack.md`](slack.md).
+configuration. See [`agent-api.md`](../specs/interfaces/agent-api/design.md) and [`slack.md`](../specs/integrations/slack/enrollment/design.md).
 
 ## Non-Goals
 

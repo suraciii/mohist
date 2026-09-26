@@ -13,8 +13,8 @@ using Xunit;
 namespace Mohist.Server.Tests.Auth;
 
 /// <summary>
-/// RFC 8628 device authorization (docs/auth.md "远程 CLI：设备授权登录",
-/// design/auth.md "CLI 设备授权"): the CLI mints a flow, the logged-in
+/// RFC 8628 device authorization (specs/platform/identity-and-access/spec.md "远程 CLI：设备授权登录",
+/// specs/platform/identity-and-access/design.md "CLI 设备授权"): the CLI mints a flow, the logged-in
 /// Web session resolves the user code and approves, the CLI polls for
 /// an access + refresh pair, refresh rotates with family revocation on
 /// replay, and logout revokes the chain. Verify/decision require a Web

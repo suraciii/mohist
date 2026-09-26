@@ -111,22 +111,22 @@ begins at Plan only after the Issue is ready and explicitly started.
 Multiple Issues advance concurrently and independently. Key stages, such as
 Plan and Check, stop at approval points. The Workflow continues after it
 receives an `Approve` or `Request Changes` decision. See
-[Workflow Profile](docs/workflow-profiles.md).
+[Workflow Profile](specs/workflow/profiles/spec.md).
 
 ## Event Responses
 
 Workflows, Issues, Epics, Runners, and AgentSessions produce events. Agent event
 routing lets you configure automatic Agent responses. An Agent can approve as a
 proxy, analyze failures, summarize progress, create follow-up Issues, and notify
-the owner. See [Agent Event Routing](docs/event-routing.md) and
-[Agent Supervision](docs/agent-supervision.md).
+the owner. See [Agent Event Routing](specs/agent/event-routing/spec.md) and
+[Agent Supervision](specs/agent/supervision/spec.md).
 
 ## Documentation
 
 Start with [Getting Started](docs/getting-started.md). See
 [Product Vision](docs/vision.md) for the product direction and the
 [documentation index](docs/README.md) for the complete reading path.
-Architecture and design documents are under [`design/`](design/README.md).
+Cross-domain architecture and decisions are under [`design/`](design/README.md).
 Feature-local behavior and design contracts are under
 [`specs/`](specs/README.md).
 
@@ -138,7 +138,7 @@ Feature-local behavior and design contracts are under
 - `packages/go/mohist-cli/`: static `mo` CLI
 - `specs/`: feature-local product and design specifications
 - `docs/`: user documentation
-- `design/`: architecture and design documentation
+- `design/`: cross-domain architecture, conventions, and decisions
 - `eng/`: repository engineering practices
 
 ## Contributing
