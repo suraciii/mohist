@@ -136,15 +136,19 @@ export async function scanSocketInspectorRows(
   onRow: (row: string) => boolean | Promise<boolean>,
 ): Promise<void> {
   const child = spawn(inspectorPath, ['-xnp'], { stdio: ['ignore', 'pipe', 'ignore'] })
-  const outcome = new Promise<{ readonly code: number | null; readonly error: Error | null }>((resolve) => {
+  const outcome = new Promise<{
+    readonly code: number | null
+    readonly signal: NodeJS.Signals | null
+    readonly error: Error | null
+  }>((resolve) => {
     let settled = false
-    const settle = (code: number | null, error: Error | null) => {
+    const settle = (code: number | null, signal: NodeJS.Signals | null, error: Error | null) => {
       if (settled) return
       settled = true
-      resolve({ code, error })
+      resolve({ code, signal, error })
     }
-    child.once('error', (error: Error) => settle(null, error))
-    child.once('exit', (code: number | null) => settle(code, null))
+    child.once('error', (error: Error) => settle(null, null, error))
+    child.once('exit', (code: number | null, signal: NodeJS.Signals | null) => settle(code, signal, null))
   })
 
   let matched = false
@@ -162,12 +166,18 @@ export async function scanSocketInspectorRows(
     throw new SocketInspectorError(`inspector-stream-failed:${failureCode(error)}`)
   }
 
-  const { code, error } = await outcome
+  const { code, signal, error } = await outcome
   if (error) throw new SocketInspectorError(`inspector-spawn-failed:${failureCode(error)}`)
-  // A match ends the scan early: the non-zero code is this process's own
-  // SIGTERM, not an inspector failure. Without a match a non-zero exit means
-  // the table was incomplete and stays a refusal.
-  if (!matched && code !== 0) throw new SocketInspectorError(`inspector-exit-nonzero:${code}`)
+  // Only this scan's own early stop may end a matched run: the inspector died
+  // by the SIGTERM sent after it wrote a matching row. That attribution needs
+  // the signal, not just the exit code, because a child that had already
+  // failed on its own reports its own outcome here. Any other ending — a
+  // non-zero exit, or death by another signal even after a match — means the
+  // table is incomplete or was produced by a failing process, so its rows are
+  // not authentication evidence and the scan fails closed.
+  if (matched && signal === 'SIGTERM') return
+  if (signal !== null) throw new SocketInspectorError(`inspector-terminated:${signal}`)
+  if (code !== 0) throw new SocketInspectorError(`inspector-exit-nonzero:${code}`)
 }
 
 function failureCode(error: unknown): string {

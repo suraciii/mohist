@@ -116,6 +116,28 @@ The directory persists across the Issue's Stages and bound Sessions, but it is
 rebuildable execution state. Commit and push work that must survive host loss.
 Do not manually delete or change its branch, marker, or origin while work runs.
 
+## Manager Execution
+
+The Slack Manager executes `mo` commands on a Runner without ever holding the
+Manager credential. A credential broker started for one Manager execution
+admits a request only from the launcher process that execution generated, and
+the execution environment receives only the non-secret broker locator.
+
+- **Local authentication fails closed.** The broker refuses whenever it cannot
+  establish that the connecting process is the generated launcher: an
+  unsupported host platform, an unavailable socket handle, a failed or
+  abnormal socket-table inspection, or a peer that is not that launcher. An
+  inspection that ends abnormally is not evidence even when it already
+  contained a matching row, and a partially observed table never admits a
+  peer.
+- **Failures stay distinguishable.** A refusal, a request that could not reach
+  or start the broker, and a command terminated by a signal report different
+  outcomes, so a Manager sees a named reason instead of an unexplained exit
+  and can tell a broker refusal from a lost request from a killed command.
+- **Diagnostics carry no credentials.** Refusal reasons and broker diagnostics
+  name a category only: no bearer values, credential files, socket paths, or
+  process identifiers.
+
 ## Runner Failure
 
 - Workflow work that has not begun waits for an eligible Runner.
