@@ -57,6 +57,7 @@ public sealed class SlackOutboxDispatcherService : IDisposable
     private readonly AgentConnectionStore _connectionStore;
     private readonly ISlackConnectionHealthBackpressurer _healthBackpressurer;
     private readonly IDeadLetterStore _deadLetters;
+    private readonly SlackDeliveryNoticeAuthor _notices;
     private readonly TimeProvider _timeProvider;
     private readonly IOptions<SlackProviderOptions> _options;
     private readonly ILogger<SlackOutboxDispatcherService> _log;
@@ -71,6 +72,7 @@ public sealed class SlackOutboxDispatcherService : IDisposable
         AgentConnectionStore connectionStore,
         ISlackConnectionHealthBackpressurer healthBackpressurer,
         IDeadLetterStore deadLetters,
+        SlackDeliveryNoticeAuthor notices,
         TimeProvider timeProvider,
         IOptions<SlackProviderOptions> options,
         ILogger<SlackOutboxDispatcherService> log)
@@ -80,6 +82,7 @@ public sealed class SlackOutboxDispatcherService : IDisposable
         _connectionStore = connectionStore ?? throw new ArgumentNullException(nameof(connectionStore));
         _healthBackpressurer = healthBackpressurer ?? throw new ArgumentNullException(nameof(healthBackpressurer));
         _deadLetters = deadLetters ?? throw new ArgumentNullException(nameof(deadLetters));
+        _notices = notices ?? throw new ArgumentNullException(nameof(notices));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _log = log;
@@ -127,6 +130,7 @@ public sealed class SlackOutboxDispatcherService : IDisposable
                 _log.LogInformation(
                     "Slack outbox row {RowId} (ConnectionId={ConnectionId}, Kind={Kind}, AttemptCount={AttemptCount}) dead-lettered: retry budget exhausted",
                     row.Id, row.ConnectionId, row.Kind, row.AttemptCount);
+                await _notices.TryNoticeAsync(row.ProjectId, row.OwnerKind, row.ConnectionId, row.Id, ct).ConfigureAwait(false);
             }, ct).ConfigureAwait(false);
         }
     }
@@ -156,6 +160,7 @@ public sealed class SlackOutboxDispatcherService : IDisposable
                 _log.LogInformation(
                     "Slack outbox row {RowId} (ConnectionId={ConnectionId}, ClaimedAt={ClaimedAt}) flipped to DeliveryUncertain: claim timeout",
                     row.Id, row.ConnectionId, row.ClaimedAt);
+                await _notices.TryNoticeAsync(row.ProjectId, row.OwnerKind, row.ConnectionId, row.Id, ct).ConfigureAwait(false);
             }, ct).ConfigureAwait(false);
         }
     }
@@ -185,6 +190,7 @@ public sealed class SlackOutboxDispatcherService : IDisposable
                 _log.LogInformation(
                     "Slack outbox row {RowId} (ConnectionId={ConnectionId}, DeliveryUncertainAt={DeliveryUncertainAt}) dead-lettered: uncertain timeout",
                     row.Id, row.ConnectionId, row.DeliveryUncertainAt);
+                await _notices.TryNoticeAsync(row.ProjectId, row.OwnerKind, row.ConnectionId, row.Id, ct).ConfigureAwait(false);
             }, ct).ConfigureAwait(false);
         }
     }

@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Project.Services;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Tests.Support;
 using Xunit;
@@ -309,7 +310,20 @@ public sealed class SlackOutboxBackpressureRecoverySpecs
             Array.Empty<IAgentConnectionProviderCleanup>(),
             time);
         var dispatcher = new SlackOutboxDispatcherService(
-            outbox, inbox, connectionStore, health, deadLetters, time, options, NullLogger<SlackOutboxDispatcherService>.Instance);
+            outbox,
+            inbox,
+            connectionStore,
+            health,
+            deadLetters,
+            new SlackDeliveryNoticeAuthor(
+                outbox,
+                new SlackSessionCardBlocksBuilder(
+                    new SlackWebLinkBuilder(options),
+                    new ProjectQuerier(factory)),
+                NullLogger<SlackDeliveryNoticeAuthor>.Instance),
+            time,
+            options,
+            NullLogger<SlackOutboxDispatcherService>.Instance);
         return (inbox, outbox, dispatcher);
     }
 

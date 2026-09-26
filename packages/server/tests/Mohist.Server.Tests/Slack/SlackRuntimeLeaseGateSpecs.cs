@@ -264,6 +264,74 @@ public sealed class SlackRuntimeLeaseGateSpecs : IClassFixture<DefaultMohistInte
         Assert.Equal(SlackOutboxStates.Pending, delivery.State);
     }
 
+    [Fact]
+    public async Task An_uncertain_acknowledgement_posts_exactly_one_thread_notice()
+    {
+        var connection = await SeedConnectionAsync();
+        var target = new { kind = SlackLeaseTargetKind.Connection, projectId = connection.ProjectId, connectionId = connection.ConnectionId };
+        var lease = await AcquireRuntimeLeaseAsync(target);
+        var deliveryId = await EnqueueContentDeliveryAsync(connection, "session-gate");
+
+        using var claim = await PostAsync(
+            IngressPath(connection, "/deliveries/claim"), new { leaseId = lease, adapterId = AdapterId });
+        Assert.Equal(HttpStatusCode.OK, claim.StatusCode);
+
+        using var ack = await PostAsync(
+            IngressPath(connection, "/deliveries/ack"),
+            new { id = deliveryId, outcome = "uncertain", reason = "socket closed", leaseId = lease, adapterId = AdapterId });
+        Assert.Equal(HttpStatusCode.OK, ack.StatusCode);
+
+        var notice = Assert.Single(await NoticeRowsAsync(connection));
+        Assert.Equal("C_GATE", notice.ConversationId);
+        Assert.Equal("1710000000.000500", notice.ThreadTs);
+        var payload = SlackDeliveryPayload.Parse(notice.PayloadJson);
+        Assert.Equal(SlackDeliveryOperations.PostMessage, payload.Operation);
+        Assert.Equal(SlackDeliveryNoticeAuthor.Uncertain, payload.Notice);
+        Assert.True(payload.PossiblyDelivered);
+        Assert.Equal("session-gate", payload.SessionId);
+        Assert.Contains($"Session: session-gate", payload.Text ?? string.Empty, StringComparison.Ordinal);
+        Assert.Contains("Session: session-gate", payload.Blocks!.Value.GetRawText(), StringComparison.Ordinal);
+        Assert.DoesNotContain("actions", payload.Blocks!.Value.GetRawText(), StringComparison.Ordinal);
+
+        var uncertainty = await OutboxRowAsync(deliveryId);
+        Assert.Equal(SlackOutboxStates.DeliveryUncertain, uncertainty.State);
+
+        // The ack is replayed on every reconnect: the notice must converge.
+        using var replay = await PostAsync(
+            IngressPath(connection, "/deliveries/ack"),
+            new { id = deliveryId, outcome = "uncertain", reason = "socket closed", leaseId = lease, adapterId = AdapterId });
+        var replayBody = await replay.Content.ReadAsStringAsync();
+        Assert.True(replay.StatusCode == HttpStatusCode.OK, $"replay status {replay.StatusCode}: {replayBody}");
+        Assert.Single(await NoticeRowsAsync(connection));
+
+        // A notice is visibility, not work: no Turn, Session, or Job is started.
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            Assert.Equal(0, await db.AgentSessions.CountAsync(row =>
+                row.LabelConnectionId == connection.ConnectionId));
+            Assert.Equal(0, await db.AgentJobs.CountAsync(row => row.ProjectId == connection.ProjectId));
+        }
+    }
+
+    private async Task<SlackOutboxRow> OutboxRowAsync(string deliveryId)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        return await db.SlackOutboxRows.AsNoTracking().SingleAsync(row => row.Id == deliveryId);
+    }
+
+    private async Task<IReadOnlyList<SlackOutboxRow>> NoticeRowsAsync(SeededConnection connection)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        return await db.SlackOutboxRows.AsNoTracking()
+            .Where(row => row.ConnectionId == connection.ConnectionId
+                && row.DispatchRef != null
+                && row.DispatchRef.StartsWith(SlackDeliveryNoticeAuthor.DispatchPrefix))
+            .ToListAsync();
+    }
+
     private async Task<int> CountConnectionInboxAsync(SeededConnection connection)
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -417,6 +485,27 @@ public sealed class SlackRuntimeLeaseGateSpecs : IClassFixture<DefaultMohistInte
             SlackOutboxKinds.TerminalResult,
             "gate:delivery:connection",
             JsonSerializer.Serialize(new { text = "gate reply" })));
+        return result.Id;
+    }
+
+    private async Task<string> EnqueueContentDeliveryAsync(SeededConnection connection, string sessionId)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        var result = await outbox.EnqueueAsync(new SlackOutboxDraft(
+            connection.ProjectId,
+            connection.ConnectionId,
+            TeamId,
+            "C_GATE",
+            SlackOutboxKinds.TerminalResult,
+            $"gate:delivery:{sessionId}",
+            JsonSerializer.Serialize(new SlackDeliveryPayload(
+                SlackDeliveryOperations.PostMessage,
+                "gate reply",
+                ClientMessageId: $"gate:delivery:{sessionId}",
+                FallbackText: "gate reply",
+                SessionId: sessionId)),
+            ThreadTs: "1710000000.000500"));
         return result.Id;
     }
 

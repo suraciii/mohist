@@ -57,14 +57,16 @@ public sealed class SlackDeliveryRoutesSpecs : IClassFixture<DefaultMohistIntegr
     }
 
     [Fact]
-    public async Task Resend_endpoint_transitions_uncertain_to_pending_without_touching_execution_result()
+    public async Task Resend_endpoint_requests_reconciliation_without_queuing_a_resend()
     {
         var connection = await CreateConnectionAsync();
         var dispatchRef = "agentjob_42";
-        string queuedDeliveryId;
+        string uncertainDeliveryId;
+        string exhaustedDeliveryId;
         await using (var seedScope = _fixture.Services.CreateAsyncScope())
         {
             var outbox = seedScope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+            var db = seedScope.ServiceProvider.GetRequiredService<MohistDbContext>();
             var queued = await outbox.EnqueueAsync(new SlackOutboxDraft(
                 connection.ProjectId,
                 connection.Id,
@@ -74,9 +76,25 @@ public sealed class SlackDeliveryRoutesSpecs : IClassFixture<DefaultMohistIntegr
                 dispatchRef,
                 "{\"text\":\"reply\"}"));
             await outbox.MarkDeliveryUncertainAsync(connection.ProjectId, queued.Id, "claim timeout");
-            queuedDeliveryId = queued.Id;
+            uncertainDeliveryId = queued.Id;
 
-            var db = seedScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var exhausted = await outbox.EnqueueAsync(new SlackOutboxDraft(
+                connection.ProjectId,
+                connection.Id,
+                connection.WorkspaceTeamId,
+                "D1",
+                SlackOutboxKinds.TerminalResult,
+                "agentjob_43",
+                "{\"text\":\"exhausted reply\"}"));
+            var exhaustedRow = await db.SlackOutboxRows.AsNoTracking().SingleAsync(r => r.Id == exhausted.Id);
+            await outbox.MarkDeadLetteredAsync(
+                connection.ProjectId,
+                exhausted.Id,
+                "retry budget exhausted",
+                expectedState: SlackOutboxStates.Pending,
+                expectedUpdatedAt: exhaustedRow.UpdatedAt);
+            exhaustedDeliveryId = exhausted.Id;
+
             var stateJson = $"{{\"input\":{{\"projectId\":\"{connection.ProjectId}\",\"agentId\":\"agent-1\"}},\"status\":\"{nameof(AgentJobStatus.Completed)}\",\"submittedAt\":\"{_fixture.TimeProvider.GetUtcNow():O}\"}}";
             var jobRow = new AgentJobRow
             {
@@ -89,14 +107,47 @@ public sealed class SlackDeliveryRoutesSpecs : IClassFixture<DefaultMohistIntegr
         }
 
         using var resend = await _fixture.Client.PostAsync(
-            Path(connection, $"/deliveries/{queuedDeliveryId}/resend"), content: null);
+            Path(connection, $"/deliveries/{uncertainDeliveryId}/resend"), content: null);
         Assert.Equal(HttpStatusCode.OK, resend.StatusCode);
+        using (var document = JsonDocument.Parse(await resend.Content.ReadAsStringAsync()))
+        {
+            var data = document.RootElement.GetProperty("data");
+            Assert.Equal(SlackOutboxStates.DeliveryUncertain, data.GetProperty("state").GetString());
+            Assert.False(data.GetProperty("requeued").GetBoolean());
+            Assert.False(data.GetProperty("revived").GetBoolean());
+        }
+
+        using var revive = await _fixture.Client.PostAsync(
+            Path(connection, $"/deliveries/{exhaustedDeliveryId}/resend"), content: null);
+        Assert.Equal(HttpStatusCode.OK, revive.StatusCode);
+        using (var document = JsonDocument.Parse(await revive.Content.ReadAsStringAsync()))
+        {
+            var data = document.RootElement.GetProperty("data");
+            Assert.Equal(SlackOutboxStates.DeliveryUncertain, data.GetProperty("state").GetString());
+            Assert.False(data.GetProperty("requeued").GetBoolean());
+            Assert.True(data.GetProperty("revived").GetBoolean());
+        }
+
+        // Clicking again converges on the same intent instead of queueing again.
+        using var repeated = await _fixture.Client.PostAsync(
+            Path(connection, $"/deliveries/{exhaustedDeliveryId}/resend"), content: null);
+        Assert.Equal(HttpStatusCode.OK, repeated.StatusCode);
 
         await using var verifyScope = _fixture.Services.CreateAsyncScope();
         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var row = await verifyDb.SlackOutboxRows.AsNoTracking()
-            .SingleAsync(r => r.Id == queuedDeliveryId);
-        Assert.Equal(SlackOutboxStates.Pending, row.State);
+        var uncertainRow = await verifyDb.SlackOutboxRows.AsNoTracking()
+            .SingleAsync(r => r.Id == uncertainDeliveryId);
+        Assert.Equal(SlackOutboxStates.DeliveryUncertain, uncertainRow.State);
+        Assert.Equal("claim timeout", uncertainRow.LastError);
+        Assert.Equal(0, uncertainRow.AttemptCount);
+
+        var revivedRow = await verifyDb.SlackOutboxRows.AsNoTracking()
+            .SingleAsync(r => r.Id == exhaustedDeliveryId);
+        Assert.Equal(SlackOutboxStates.DeliveryUncertain, revivedRow.State);
+        Assert.Null(revivedRow.DeadLetteredAt);
+        Assert.Equal("re-send requested; awaiting provider reconciliation", revivedRow.LastError);
+        Assert.Equal(2, await verifyDb.SlackOutboxRows.AsNoTracking()
+            .CountAsync(r => r.ConnectionId == connection.Id));
 
         var job = await verifyDb.AgentJobs.AsNoTracking()
             .SingleAsync(j => j.JobKey == dispatchRef);

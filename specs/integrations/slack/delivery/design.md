@@ -208,6 +208,41 @@ may append exactly one final answer in the same thread, under its own stable
 terminal delivery key, so retry, reconnect, and duplicate ingress never append
 a second final answer.
 
+### Delivery Notices and Re-send
+
+A delivery notice is one outbox intent per original delivery, under the
+reserved dispatch key `slack-delivery-notice:{originalDeliveryId}`, reusing the
+terminal explicit-failure kind so the outbox keeps a single state machine and
+its existing capacity, ordering, and dead-letter rules. It targets the original
+Conversation and thread, carries no Agent text, and renders the Session card's
+identity section plus the same optional navigation rules.
+
+Server authors it only for content intents — terminal Agent reply and
+replaceable Session card — and only on the settlement transition that actually
+happened: unknown (claim timeout, uncertain ack) or dead-letter (retry budget
+exhausted, unknown retention expired). Reaction mutations, explicit failures,
+and notices themselves never produce a notice, so no notice about a notice can
+exist. The dispatch key makes a replayed ack, a restart, an operator retry, or a
+sweep rerun converge on the same intent instead of posting again.
+
+The original intent carries the canonical Session ID so the notice can render
+the identity section, and it keeps the uncertainty evidence: once an intent has
+been unknown, its uncertainty timestamp is never cleared by recovery, so a
+later exhaustion notice cannot claim the content was never delivered. Payload
+facts (`notice`, `possiblyDelivered`) keep that distinction queryable without
+parsing message text.
+
+The re-send entry points never queue a mutation directly. An unknown intent
+stays unknown and is left to the adapter's claim-uncertain path, which
+reconciles through provider history and re-posts the original payload only when
+the evidence proves the mutation absent. An exhausted intent is revived into
+unknown with a fresh retention window, so it passes the same reconciliation
+before any provider call. Both paths revalidate the Connection is live and
+Enabled and keep the intent's original Conversation and thread, so a changed
+binding is never redirected and original content is never leaked; the Agent's
+repeated send for an existing terminal key follows the same rule instead of
+reporting convergence for content that never landed.
+
 ### Capability Boundaries
 
 The integration separates four capabilities because each has a different

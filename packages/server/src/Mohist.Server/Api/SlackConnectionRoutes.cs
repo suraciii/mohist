@@ -327,42 +327,7 @@ public static partial class SlackConnectionRoutes
             return ApiResults.Ok(new { members });
         });
 
-        management.MapGet("/{connectionId}/deliveries", async (HttpContext context, string connectionId, AgentConnectionStore connections, SlackOutboxStore outbox, CancellationToken ct) =>
-        {
-            var projectId = context.GetResolvedProject().Id;
-            var connection = await connections.GetAsync(projectId, connectionId, ct);
-            if (connection is null)
-                return ApiResults.NotFound("Slack Connection was not found.");
-            var list = await outbox.ListAsync(projectId, connectionId, ct);
-            return ApiResults.Ok(list);
-        });
-
-        management.MapPost("/{connectionId}/deliveries/{deliveryId}/resend", async (HttpContext context, string connectionId, string deliveryId, AgentConnectionStore connections, SlackOutboxStore outbox, CancellationToken ct) =>
-        {
-            var projectId = context.GetResolvedProject().Id;
-            var connection = await connections.GetAsync(projectId, connectionId, ct);
-            if (connection is null)
-                return ApiResults.NotFound("Slack Connection was not found.");
-            if (string.IsNullOrWhiteSpace(deliveryId))
-                return ApiResults.BadRequest("deliveryId is required.");
-            try
-            {
-                var updated = await outbox.ResendUncertainAsync(projectId, connectionId, deliveryId, ct);
-                if (updated == 0)
-                    return ApiResults.Conflict(
-                        "Only Delivery uncertain rows can be resent.",
-                        "delivery_not_uncertain");
-                return ApiResults.Ok(new { id = deliveryId, state = SlackOutboxStates.Pending });
-            }
-            catch (SlackOutboxRowNotFoundException)
-            {
-                return ApiResults.NotFound("Delivery was not found.");
-            }
-            catch (SlackOutboxStateException ex)
-            {
-                return ApiResults.Conflict(ex.Message, "delivery_state_conflict");
-            }
-        });
+        MapDeliveryManagementRoutes(management);
 
         management.MapPost("/{connectionId}/clear-gap", async (
             HttpContext context,
@@ -629,6 +594,7 @@ public static partial class SlackConnectionRoutes
             string connectionId,
             DeliveryAckBody body,
             SlackOutboxStore outbox,
+            SlackDeliveryNoticeAuthor notices,
             SlackAdapterLeaseService leases,
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
@@ -653,7 +619,15 @@ public static partial class SlackConnectionRoutes
             if (string.Equals(body.Outcome, "delivered", StringComparison.OrdinalIgnoreCase))
                 await outbox.MarkDeliveredAsync(projectId, body.Id, body.ProviderMessageIdentity, body.AdapterId, ct);
             else if (string.Equals(body.Outcome, "uncertain", StringComparison.OrdinalIgnoreCase))
+            {
                 await outbox.MarkDeliveryUncertainAsync(projectId, body.Id, body.Reason, body.AdapterId, ct);
+                await notices.TryNoticeAsync(
+                    projectId,
+                    SlackDeliveryOwnerKinds.Connection,
+                    connectionId ?? string.Empty,
+                    body.Id,
+                    ct);
+            }
             else
                 await outbox.ScheduleRetryAsync(projectId, body.Id, body.Reason, body.AdapterId, ct);
             return ApiResults.Ok(new { id = body.Id, outcome = body.Outcome });
@@ -734,6 +708,7 @@ public static partial class SlackConnectionRoutes
             string enrollmentId,
             DeliveryAckBody body,
             SlackOutboxStore outbox,
+            SlackDeliveryNoticeAuthor notices,
             SlackAdapterLeaseService leases,
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
@@ -756,7 +731,15 @@ public static partial class SlackConnectionRoutes
             if (string.Equals(body.Outcome, "delivered", StringComparison.OrdinalIgnoreCase))
                 await outbox.MarkDeliveredAsync(SlackDeliveryOwnerIds.ManagerProjectId, body.Id, body.ProviderMessageIdentity, body.AdapterId, ct);
             else if (string.Equals(body.Outcome, "uncertain", StringComparison.OrdinalIgnoreCase))
+            {
                 await outbox.MarkDeliveryUncertainAsync(SlackDeliveryOwnerIds.ManagerProjectId, body.Id, body.Reason, body.AdapterId, ct);
+                await notices.TryNoticeAsync(
+                    SlackDeliveryOwnerIds.ManagerProjectId,
+                    SlackDeliveryOwnerKinds.Manager,
+                    enrollmentId,
+                    body.Id,
+                    ct);
+            }
             else
                 await outbox.ScheduleRetryAsync(SlackDeliveryOwnerIds.ManagerProjectId, body.Id, body.Reason, body.AdapterId, ct);
             return ApiResults.Ok(new { id = body.Id, outcome = body.Outcome, ownerKind = SlackDeliveryOwnerKinds.Manager });

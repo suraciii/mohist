@@ -47,7 +47,7 @@ public sealed partial class SlackDeliveryHandlerSpecs
         Assert.Equal("channel_not_found", row.LastError);
     }
     [Fact]
-    public async Task ResendUncertain_only_advances_delivery_uncertain_rows()
+    public async Task Reconciliation_request_never_queues_a_blind_resend()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var time = new FakeTimeProvider(Start);
@@ -70,22 +70,91 @@ public sealed partial class SlackDeliveryHandlerSpecs
             "agentjob_uncertain",
             "{\"text\":\"uncertain\"}"));
         await outbox.MarkDeliveryUncertainAsync(connection.ProjectId, uncertain.Id, "claim timeout");
+        var exhausted = await outbox.EnqueueAsync(new SlackOutboxDraft(
+            connection.ProjectId,
+            connection.Id,
+            connection.WorkspaceTeamId,
+            "D1",
+            SlackOutboxKinds.TerminalResult,
+            "agentjob_exhausted",
+            "{\"text\":\"exhausted\"}"));
+        await outbox.MarkDeadLetteredAsync(
+            connection.ProjectId,
+            exhausted.Id,
+            "retry budget exhausted",
+            expectedState: SlackOutboxStates.Pending,
+            expectedUpdatedAt: (await RowAsync(database, exhausted.Id)).UpdatedAt);
 
-        var resendResult = await outbox.ResendUncertainAsync(connection.ProjectId, connection.Id, uncertain.Id);
-        Assert.Equal(1, resendResult);
+        var uncertainRequest = await outbox.RequestDeliveryReconciliationAsync(
+            connection.ProjectId, connection.Id, uncertain.Id);
+        Assert.NotNull(uncertainRequest);
+        Assert.False(uncertainRequest!.Revived);
+        Assert.Equal(SlackOutboxStates.DeliveryUncertain, uncertainRequest.State);
 
-        var notUncertainResult = await outbox.ResendUncertainAsync(connection.ProjectId, connection.Id, pending.Id);
-        Assert.Equal(0, notUncertainResult);
+        var exhaustedRequest = await outbox.RequestDeliveryReconciliationAsync(
+            connection.ProjectId, connection.Id, exhausted.Id);
+        Assert.NotNull(exhaustedRequest);
+        Assert.True(exhaustedRequest!.Revived);
+        Assert.Equal(SlackOutboxStates.DeliveryUncertain, exhaustedRequest.State);
+
+        var notReconcilable = await outbox.RequestDeliveryReconciliationAsync(
+            connection.ProjectId, connection.Id, pending.Id);
+        Assert.Null(notReconcilable);
 
         await using var verifyDb = database.CreateContext();
-        var advanced = await verifyDb.SlackOutboxRows.AsNoTracking()
+        var stillUncertain = await verifyDb.SlackOutboxRows.AsNoTracking()
             .SingleAsync(r => r.Id == uncertain.Id);
-        Assert.Equal(SlackOutboxStates.Pending, advanced.State);
-        Assert.Null(advanced.DeliveryUncertainAt);
+        Assert.Equal(SlackOutboxStates.DeliveryUncertain, stillUncertain.State);
+        Assert.Equal(0, stillUncertain.AttemptCount);
+        Assert.NotNull(stillUncertain.DeliveryUncertainAt);
+
+        var revived = await verifyDb.SlackOutboxRows.AsNoTracking()
+            .SingleAsync(r => r.Id == exhausted.Id);
+        Assert.Equal(SlackOutboxStates.DeliveryUncertain, revived.State);
+        Assert.Null(revived.DeadLetteredAt);
+        Assert.NotNull(revived.DeliveryUncertainAt);
 
         var untouched = await verifyDb.SlackOutboxRows.AsNoTracking()
             .SingleAsync(r => r.Id == pending.Id);
         Assert.Equal(SlackOutboxStates.Pending, untouched.State);
+    }
+
+    [Fact]
+    public async Task Reconciliation_request_refuses_when_the_connection_is_disabled()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var time = new FakeTimeProvider(Start);
+        var connection = await CreateConnectionAsync(database, time);
+        var outbox = CreateStore(database, time);
+        var exhausted = await outbox.EnqueueAsync(new SlackOutboxDraft(
+            connection.ProjectId,
+            connection.Id,
+            connection.WorkspaceTeamId,
+            "D1",
+            SlackOutboxKinds.TerminalResult,
+            "agentjob_disabled",
+            "{\"text\":\"exhausted\"}"));
+        await outbox.MarkDeadLetteredAsync(
+            connection.ProjectId,
+            exhausted.Id,
+            "retry budget exhausted",
+            expectedState: SlackOutboxStates.Pending,
+            expectedUpdatedAt: (await RowAsync(database, exhausted.Id)).UpdatedAt);
+        await using (var disable = database.CreateContext())
+        {
+            var row = await disable.AgentConnections.SingleAsync(c => c.Id == connection.Id);
+            row.DesiredState = DesiredStateKind.Disabled;
+            await disable.SaveChangesAsync();
+        }
+
+        var request = await outbox.RequestDeliveryReconciliationAsync(
+            connection.ProjectId, connection.Id, exhausted.Id);
+
+        Assert.Null(request);
+        await using var verifyDb = database.CreateContext();
+        var rowAfter = await verifyDb.SlackOutboxRows.AsNoTracking()
+            .SingleAsync(r => r.Id == exhausted.Id);
+        Assert.Equal(SlackOutboxStates.DeadLettered, rowAfter.State);
     }
     [Fact]
     public async Task Agent_reply_is_independent_from_the_liveness_session_card()
@@ -617,12 +686,13 @@ public sealed partial class SlackDeliveryHandlerSpecs
     private static SlackOutboxStore CreateStore(
         TestSqliteDatabase database,
         TimeProvider time,
-        int capacity = 100) =>
+        int capacity = 100,
+        IOptions<SlackProviderOptions>? options = null) =>
         new(
             new TestDbContextFactory(database.Options),
             new NoopHealthBackpressurer(),
             time,
-            Options.Create(new SlackProviderOptions { OutboxCapacityPerConnection = capacity }));
+            options ?? Options.Create(new SlackProviderOptions { OutboxCapacityPerConnection = capacity }));
 
     private static async Task<AgentConnection> CreateConnectionAsync(
         TestSqliteDatabase database,

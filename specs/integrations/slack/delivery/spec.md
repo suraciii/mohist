@@ -83,3 +83,40 @@ later input or another Connection gets a separate answer.
   stable IDs, not copied artifact files.
 - After restart or reconnect, delivery resumes from the last confirmed position
   without duplicating Jobs, Inputs, or confirmed replies.
+
+### Delivery Notices
+
+The Agent reply and the Session card carry separate delivery outcomes. A
+delivery that stays **Delivery uncertain**, or that exhausts its retries
+without a confirmed outcome, gets at most one Server-authored notice in the
+same thread, keyed by the original delivery identity. A delivery that is
+retrying within budget or already delivered gets none.
+
+- The notice states the delivery fact only: which projection it concerns (Agent
+  reply or Session card), whether its content may already be present, and
+  whether retries stopped. It is never Agent speech, never rewrites an
+  AgentTurn result, and is labelled so it cannot be mistaken for the Agent
+  reply, the Session card, or the Agent-crash system failure.
+- Uncertainty is never rewritten as definite failure. A notice posted while the
+  delivery was unknown keeps stating that its content may already be present
+  once the retry budget is exhausted; an exhaustion notice for a delivery that
+  was never unknown states that the content was generated but not delivered. A
+  delivery still unknown when its retention expires stays unknown.
+- The notice carries the canonical Session reference, and **Open in Mohist**
+  when a usable External Web URL exists. Without a usable URL it still shows
+  the Session ID. It never sends a localhost address and never carries a Slack
+  App action that could re-run work.
+- Notices use the same bounded outbox budget. A notice that is itself unknown
+  or exhausted produces no further notice, so notices never recurse. When no
+  Slack send path is usable, the durable server records stay queryable.
+- A re-send of an unknown delivery reconciles first: the original intent is
+  posted again only after provider evidence shows the original mutation never
+  occurred. It keeps the original content, Conversation, thread, and dispatch
+  key, and never starts a Turn or Job. Inconclusive evidence leaves the
+  delivery **Delivery uncertain**, and an exhausted delivery returns to that
+  same state rather than being queued directly. Repeating the request, a
+  replayed event, a restart, or a repeated Agent send converge on the same
+  intent and never produce a second answer.
+- A re-send revalidates the current authorization and the original target. A
+  revoked access, a disabled Connection, or a changed binding never redirects
+  the result to a new destination and never leaks the original content.

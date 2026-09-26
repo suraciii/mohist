@@ -45,8 +45,13 @@ public sealed partial class SlackOutboxStore
 
         var row = await db.SlackOutboxRows.FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Id == id, ct)
             ?? throw new SlackOutboxRowNotFoundException(id);
-        if (row.State is not (SlackOutboxStates.Claimed or SlackOutboxStates.Pending or SlackOutboxStates.DeliveryUncertain))
-            throw new SlackOutboxStateException(id, expectedState: "claimed|pending|delivery_uncertain", actualState: row.State);
+        // A replayed acknowledgement of an outcome that is already unknown is a
+        // duplicate, not a settlement: the unknown state, its first observation,
+        // and the notice already authored for it all stand.
+        if (row.State == SlackOutboxStates.DeliveryUncertain)
+            return 0;
+        if (row.State is not (SlackOutboxStates.Claimed or SlackOutboxStates.Pending))
+            throw new SlackOutboxStateException(id, expectedState: "claimed|pending", actualState: row.State);
         EnsureClaimOwnership(row, adapterId);
         row.State = SlackOutboxStates.DeliveryUncertain;
         row.DeliveryUncertainAt = now;
