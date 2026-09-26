@@ -1,5 +1,8 @@
 # Feature Specifications
 
+For the user goals these features serve, start with the
+[product capability areas](../docs/vision.md#product-capability-areas).
+
 Specifications are organized by subdomain and feature. Read a feature's
 `spec.md` for its behavior and acceptance scenarios. Read its optional
 `design.md` for mechanisms and implementation contracts. The

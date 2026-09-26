@@ -55,6 +55,14 @@ the fact.
 Organize specifications by subdomain and feature, not by implementation
 package. A feature is a lasting capability, not an Issue or a release.
 
+The [Product Vision](../docs/vision.md#product-capability-areas) owns capability
+areas and end-to-end user paths. [Domain Analysis](../design/domain-analysis.md)
+owns business boundaries and relationships; [CONTEXT.md](../CONTEXT.md#product-organization)
+defines the shared terms. Link these views rather than duplicating their
+contents. Do not add a capability-area directory above subdomains or reorganize
+source code merely to mirror the specification tree. Feature priorities and delivery plans
+belong to Issues, Epics, and pull requests, not another repository ledger.
+
 - **`specs/<subdomain>/<feature>/spec.md`** defines observable behavior,
   failure and unknown outcomes, safety boundaries, and acceptance scenarios.
 - **`specs/<subdomain>/<feature>/design.md`** explains mechanisms and

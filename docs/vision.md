@@ -30,6 +30,74 @@ Mohist Issues and Workflows form the execution layer. AgentSessions retain the
 traceable execution record. The Web UI is a fallback operations and
 visualization plane, not a workspace that users must adopt.
 
+## Product Capability Areas
+
+People organize work around outcomes, not internal resources. These areas
+describe what Mohist helps them accomplish; they are not a menu or a second
+domain model. [Domain Analysis](../design/domain-analysis.md) assigns business
+rules to their owners. Each area links to representative features, not a
+delivery-status inventory.
+
+### Work Organization
+
+Express a goal, divide the work, decide its order, and see what was delivered.
+This area covers requirements, decomposition, prerequisites, and goal-level
+progress; it does not decide how an execution runs or recovers. Its primary
+subdomain is Issue, including Epic organization. Start with
+[Issues](issues.md), [Composite Issues](composite-issues.md), and
+[Epics](epics.md).
+
+### Delivery Workflows
+
+Define how work reaches an accepted deliverable, then advance or recover a
+particular Run. Workflow owns the stages, checks, Approval Points, and recovery
+rules. It uses Agent execution and Workspace resources without owning their
+lifecycles. Start with [The Workflow](the-workflow.md) and
+[Workflow Profiles](workflow-profiles.md).
+
+### Agent Collaboration
+
+Configure an Agent, delegate a task, continue the conversation, and receive its
+result. Direct work does not require creating an Issue. Agent owns reusable
+execution capability and Connections; Session owns the continuing conversation
+and its inputs, Turns, and evidence. Start with
+[Agents and AgentSessions](agent-sessions.md), [Subagents](subagents.md), and
+[Slack interaction](slack.md).
+
+### Operations and Supervision
+
+Understand what is happening, identify work that needs attention, and take an
+authorized next action. This area combines facts from Workflow, Session,
+Runner, and other owners; it does not introduce another state authority.
+AgentOps assembles read-side views, while controls act through the domain that
+owns the operation. Start with
+[Activity](../specs/agent-ops/activity/spec.md),
+[Agent Supervision](agent-supervision.md), and
+[Observability](observability.md).
+
+Project and Repository configuration, Workspace, Runner, and access controls
+support these areas. They remain explicit resources without each becoming a
+top-level user task. Slack, CLI, Web, and API expose the same capabilities
+through different interaction locations.
+
+## End-to-End Paths
+
+The areas work together in two common paths:
+
+1. **Software delivery:** organize a requirement as an Issue, plan and approve
+   the work, build and check it, then integrate the verified deliverable.
+   Deployment belongs to the path only when the Workflow defines it; a merge
+   alone does not establish a deployed result.
+2. **Direct delegation:** select an Agent, launch a task, continue or stop its
+   Session as needed, and return the result to the originating context. A
+   recorded delivery attempt alone does not establish that the caller received
+   the result.
+
+Both paths use the same execution resources and supervision capabilities.
+When an outcome is unknown or work fails, expose the evidence and the safe
+recovery or human decision needed to continue. Keep execution and delivery
+outcomes distinct rather than reporting uncertainty as success.
+
 ## How the Factory Operates
 
 - **Issues carry intent:** Work enters as an Issue with requirements,
