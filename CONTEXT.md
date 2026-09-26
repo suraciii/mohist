@@ -4,6 +4,20 @@ This glossary defines the product and Agent execution language shared across
 Mohist contexts. See [`design/agent-execution.md`](design/agent-execution.md) for
 lifecycle, event, and module boundaries.
 
+## Product Organization
+
+**Capability area**: A grouping of things the product helps users accomplish.
+The [Product Vision](docs/vision.md#product-capability-areas) owns this view;
+an area is not necessarily one screen, resource, or subdomain.
+
+**Subdomain**: A business problem area with related concepts and rules.
+[Domain Analysis](design/domain-analysis.md) owns its boundaries and maps them
+to bounded contexts, not directly to source directories.
+
+**Feature**: A lasting product capability with observable behavior and
+acceptance scenarios. It has a primary specification owner and may depend on
+several subdomains. It is not an Issue, release, or implementation package.
+
 ## Product Interfaces
 
 **External Agent**:

@@ -4,6 +4,13 @@ This document assigns Mohist behavior to problem-space subdomains and
 solution-space bounded contexts. The relationship map is normative. Detailed
 component contracts live in the linked context specifications.
 
+The [product capability areas](../docs/vision.md#product-capability-areas)
+describe user goals across these boundaries. They are not additional bounded
+contexts. A feature can involve several subdomains; its primary specification
+links to the rules owned by each participant instead of absorbing them.
+Neither the capability areas nor the specification directories require a
+matching source-code hierarchy.
+
 ## Design Drivers
 
 - A business fact has one owner and one business language.
