@@ -9,6 +9,9 @@ class ApiError extends Error {
     public readonly data?: unknown,
     public readonly code?: string,
     public readonly details?: unknown,
+    public readonly effect?: string,
+    public readonly retrySafe?: boolean,
+    public readonly nextAction?: string,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -60,6 +63,9 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
       json.data,
       json.code,
       json.details,
+      json.effect,
+      json.retrySafe,
+      json.nextAction,
     )
   }
   return json.data as T

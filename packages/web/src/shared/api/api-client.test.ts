@@ -70,11 +70,14 @@ describe('api client', () => {
     server.use(
       http.get('*/api/agent/status', ({ request }) => {
         requests.push(request)
-        return HttpResponse.json({
-          success: false,
-          error: 'No active project',
-          code: 'bad_request',
-        }, { status: 400 })
+        return HttpResponse.json(
+          {
+            success: false,
+            error: 'No active project',
+            code: 'bad_request',
+          },
+          { status: 400 },
+        )
       }),
     )
 
@@ -88,6 +91,33 @@ describe('api client', () => {
     expect(requestPath(requests[0])).toBe('/api/agent/status')
     expect(requests[0].method).toBe('GET')
     expect(requests[0].headers.get('content-type')).toBe('application/json')
+  })
+
+  it('preserves recovery effect facts from JSON responses', async () => {
+    server.use(
+      http.post('*/api/projects/project-1/agent-sessions/session-1/compact', () =>
+        HttpResponse.json(
+          {
+            success: false,
+            error: 'Runner outcome is unknown',
+            code: 'runner_unavailable',
+            effect: 'unknown',
+            retrySafe: true,
+            nextAction: 'retry with the same key',
+          },
+          { status: 503 },
+        ),
+      ),
+    )
+
+    await expect(
+      request('/projects/project-1/agent-sessions/session-1/compact', { method: 'POST' }),
+    ).rejects.toMatchObject({
+      name: 'ApiError',
+      effect: 'unknown',
+      retrySafe: true,
+      nextAction: 'retry with the same key',
+    })
   })
 
   it('uses ApiError for invalid JSON responses', async () => {

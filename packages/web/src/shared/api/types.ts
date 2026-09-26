@@ -4,4 +4,7 @@ export interface ApiResponse<T = unknown> {
   error?: string
   code?: string
   details?: unknown
+  effect?: string
+  retrySafe?: boolean
+  nextAction?: string
 }

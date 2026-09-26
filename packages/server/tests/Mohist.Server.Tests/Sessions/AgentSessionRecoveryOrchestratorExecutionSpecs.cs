@@ -16,11 +16,11 @@ public sealed partial class AgentSessionRecoveryOrchestratorSpecs
         var dispatcher = new RecordingSessionCommandDispatcher();
         dispatcher.Enqueue(new SessionCommandResult(Ok: false, Error: SessionCommandError.RuntimeUnavailable));
 
-        var result = await ExecuteRecoveryAsync(command, sessionId, idempotencyKey: null, dispatcher);
+        var result = await ExecuteRecoveryAsync(command, sessionId, idempotencyKey: "disabled-runtime", dispatcher);
 
         Assert.Equal(503, result.Status);
         Assert.Equal("runtime_unavailable", result.Body.GetProperty("code").GetString());
-        Assert.Single(dispatcher.Requests);
+        Assert.Equal("none", result.Body.GetProperty("effect").GetString());
     }
 
     [Theory]
@@ -155,20 +155,20 @@ public sealed partial class AgentSessionRecoveryOrchestratorSpecs
         var compactDispatcher = new RecordingSessionCommandDispatcher();
         compactDispatcher.Enqueue(new SessionCommandResult(Ok: false, Error: SessionCommandError.Conflict));
 
-        var compact = await ExecuteRecoveryAsync(SessionCommandKind.Compact, compactSessionId, idempotencyKey: null, compactDispatcher);
+        var compact = await ExecuteRecoveryAsync(SessionCommandKind.Compact, compactSessionId, idempotencyKey: "conflict-operation", compactDispatcher);
 
         Assert.Equal(409, compact.Status);
         Assert.Equal("session_active", compact.Body.GetProperty("code").GetString());
-        Assert.Equal("runtime-handler-conflict", (await LoadAsync(compactSessionId))!.Status.AgentRuntimeSessionId);
+        Assert.Equal("none", compact.Body.GetProperty("effect").GetString());
 
         var (_, resetSessionId) = await CreateIdleSessionAsync("runtime-handler-missing");
         var resetDispatcher = new RecordingSessionCommandDispatcher();
         resetDispatcher.Enqueue(new SessionCommandResult(Ok: false, Error: SessionCommandError.Missing));
 
-        var reset = await ExecuteRecoveryAsync(SessionCommandKind.Reset, resetSessionId, idempotencyKey: null, resetDispatcher);
+        var reset = await ExecuteRecoveryAsync(SessionCommandKind.Reset, resetSessionId, idempotencyKey: "missing-operation", resetDispatcher);
 
         Assert.Equal(409, reset.Status);
         Assert.Equal("runtime_session_missing", reset.Body.GetProperty("code").GetString());
-        Assert.Equal("runtime-handler-missing", (await LoadAsync(resetSessionId))!.Status.AgentRuntimeSessionId);
+        Assert.Equal("none", reset.Body.GetProperty("effect").GetString());
     }
 }

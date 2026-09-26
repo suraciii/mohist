@@ -13,34 +13,27 @@ import {
 import { Tooltip } from '@/shared/ui/components/tooltip'
 import { cn } from '@/shared/lib/utils'
 import {
+  beginRecoveryRequest,
   compactGenericSession,
   compactSession,
+  completeRecoveryRequest,
   resetGenericSession,
   resetSession,
 } from '../../../entities/coder-session'
-import type { AgentSessionActivity } from '../../../entities/coder-session'
+import type { AgentSessionActivity, RecoveryOperation } from '../../../entities/coder-session'
+import { createIdempotencyKey } from '../../../shared/lib/idempotency-key'
 import { useProject } from '../../../entities/project'
 
 const DISABLED_REASON_TITLE = 'Session is running'
-const DISABLED_REASON_BODY =
-  'Finish or cancel the session before compacting or resetting.'
+const DISABLED_REASON_BODY = 'Finish or cancel the session before compacting or resetting.'
 const COMPACT_BINDING_TITLE = 'Runtime session unavailable'
 const COMPACT_BINDING_BODY = 'Compact requires an available runtime session.'
 const PENDING_REASON_TITLE = 'Recovery action in progress'
-const PENDING_REASON_BODY =
-  'Wait for the current recovery action to finish before starting another one.'
+const PENDING_REASON_BODY = 'Wait for the current recovery action to finish before starting another one.'
 const RESET_CONFIRM_BODY =
   'A new runtime session will start without prior context. Transcript and audit history remain available.'
 
-function DisabledReasonTooltip({
-  title,
-  body,
-  children,
-}: {
-  title: string
-  body: string
-  children: React.ReactNode
-}) {
+function DisabledReasonTooltip({ title, body, children }: { title: string; body: string; children: React.ReactNode }) {
   return (
     <Tooltip
       content={
@@ -69,6 +62,12 @@ function resolveErrorMessage(err: unknown): string {
   }
   if (err instanceof Error) return err.message
   return 'An unexpected error occurred.'
+}
+
+function hasKnownNoEffect(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false
+  if (err.effect) return err.effect === 'none'
+  return err.status === 400 || err.status === 404 || err.status === 409
 }
 
 export interface SessionRecoveryActionsProps {
@@ -136,8 +135,23 @@ export function SessionRecoveryActions({
   const active = recoveryAvailable === undefined ? activity !== 'idle' : !recoveryAvailable
   const [resetDialogOpen, setResetDialogOpen] = useState(false)
   const [inlineError, setInlineError] = useState<string | null>(null)
-  const [compactIdempotencyKey, setCompactIdempotencyKey] = useState<string | null>(null)
-  const [resetIdempotencyKey, setResetIdempotencyKey] = useState<string | null>(null)
+  const sessionKey = genericSessionId
+    ? `agent-session:${genericSessionId}`
+    : `issue-session:${issueNumber}:${sessionName}`
+
+  // The key is the operation's identity: it is minted before the request and
+  // kept until the outcome is known, so a lost response — including one that
+  // outlives this component — is retried as the same operation instead of
+  // starting a second one.
+  function recoveryRequestKey(operation: RecoveryOperation): string {
+    if (!projectId) return createIdempotencyKey()
+    return beginRecoveryRequest({ projectId, sessionKey, operation })
+  }
+
+  function releaseRecoveryRequest(operation: RecoveryOperation) {
+    if (!projectId) return
+    completeRecoveryRequest({ projectId, sessionKey, operation })
+  }
 
   useEffect(() => {
     setInlineError(null)
@@ -153,11 +167,12 @@ export function SessionRecoveryActions({
         : clients.compact(issueNumber, sessionName, projectId, idempotencyKey)
     },
     onSuccess: () => {
-      setCompactIdempotencyKey(null)
+      releaseRecoveryRequest('compact')
       setInlineError(null)
       onSuccess?.()
     },
     onError: (err) => {
+      if (hasKnownNoEffect(err)) releaseRecoveryRequest('compact')
       setInlineError(resolveErrorMessage(err))
     },
     onSettled,
@@ -173,27 +188,31 @@ export function SessionRecoveryActions({
         : clients.reset(issueNumber, sessionName, projectId, idempotencyKey)
     },
     onSuccess: () => {
-      setResetIdempotencyKey(null)
+      releaseRecoveryRequest('reset')
       setResetDialogOpen(false)
       setInlineError(null)
       onSuccess?.()
     },
     onError: (err) => {
+      if (hasKnownNoEffect(err)) releaseRecoveryRequest('reset')
       setInlineError(resolveErrorMessage(err))
     },
     onSettled,
   })
 
   const anyPending = compactMutation.isPending || resetMutation.isPending
-  const hasRuntimeBinding = typeof runtimeSessionId === 'string' && runtimeSessionId.trim().length > 0
-    && typeof runtime === 'string' && runtime.trim().length > 0
+  const hasRuntimeBinding =
+    typeof runtimeSessionId === 'string' &&
+    runtimeSessionId.trim().length > 0 &&
+    typeof runtime === 'string' &&
+    runtime.trim().length > 0
   const compactDisabledReason = active
     ? { title: DISABLED_REASON_TITLE, body: DISABLED_REASON_BODY }
     : !hasRuntimeBinding
       ? { title: COMPACT_BINDING_TITLE, body: COMPACT_BINDING_BODY }
-    : anyPending
-      ? { title: PENDING_REASON_TITLE, body: PENDING_REASON_BODY }
-      : null
+      : anyPending
+        ? { title: PENDING_REASON_TITLE, body: PENDING_REASON_BODY }
+        : null
   const resetDisabledReason = active
     ? { title: DISABLED_REASON_TITLE, body: DISABLED_REASON_BODY }
     : anyPending
@@ -202,9 +221,7 @@ export function SessionRecoveryActions({
 
   function handleCompact() {
     if (active || !hasRuntimeBinding || anyPending) return
-    const idempotencyKey = compactIdempotencyKey ?? crypto.randomUUID()
-    setCompactIdempotencyKey(idempotencyKey)
-    compactMutation.mutate(idempotencyKey)
+    compactMutation.mutate(recoveryRequestKey('compact'))
   }
 
   function openResetDialog() {
@@ -226,9 +243,7 @@ export function SessionRecoveryActions({
 
   function handleResetConfirm() {
     if (resetMutation.isPending) return
-    const idempotencyKey = resetIdempotencyKey ?? crypto.randomUUID()
-    setResetIdempotencyKey(idempotencyKey)
-    resetMutation.mutate(idempotencyKey)
+    resetMutation.mutate(recoveryRequestKey('reset'))
   }
 
   const compactButton = (
@@ -288,10 +303,7 @@ export function SessionRecoveryActions({
         </div>
       )}
 
-      <Dialog
-        open={resetDialogOpen}
-        onOpenChange={handleResetCancel}
-      >
+      <Dialog open={resetDialogOpen} onOpenChange={handleResetCancel}>
         <DialogContent data-testid="session-recovery-reset-dialog">
           <DialogHeader>
             <DialogTitle>Reset session?</DialogTitle>

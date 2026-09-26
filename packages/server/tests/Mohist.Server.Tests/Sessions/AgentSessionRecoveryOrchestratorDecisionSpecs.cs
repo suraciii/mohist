@@ -51,8 +51,8 @@ public sealed partial class AgentSessionRecoveryOrchestratorSpecs
         dispatcher.Enqueue(new SessionCommandResult(Ok: false, Error: SessionCommandError.NotStarted));
         dispatcher.EnqueueSuccess();
 
-        var first = await ExecuteRecoveryAsync(SessionCommandKind.Reset, sessionId, idempotencyKey: null, dispatcher);
-        var retry = await ExecuteRecoveryAsync(SessionCommandKind.Reset, sessionId, idempotencyKey: null, dispatcher);
+        var first = await ExecuteRecoveryAsync(SessionCommandKind.Reset, sessionId, "reset-not-started-1", dispatcher);
+        var retry = await ExecuteRecoveryAsync(SessionCommandKind.Reset, sessionId, "reset-not-started-2", dispatcher);
 
         Assert.Equal(503, first.Status);
         Assert.Equal("runner_command_not_started", first.Body.GetProperty("code").GetString());
@@ -63,37 +63,20 @@ public sealed partial class AgentSessionRecoveryOrchestratorSpecs
     [Theory]
     [InlineData(SessionCommandKind.Compact)]
     [InlineData(SessionCommandKind.Reset)]
-    public async Task RecoveryCommand_OmittedIdempotencyKeyDoesNotReplayCompletedOperation(SessionCommandKind command)
+    public async Task RecoveryCommand_OmittedIdempotencyKeyIsRejectedBeforeDispatch(SessionCommandKind command)
     {
         var (_, sessionId) = await CreateIdleSessionAsync($"runtime-omitted-{command.ToString().ToLowerInvariant()}");
         var dispatcher = new RecordingSessionCommandDispatcher();
         dispatcher.EnqueueSuccess();
-        dispatcher.EnqueueSuccess();
 
-        var first = await ExecuteRecoveryAsync(command, sessionId, idempotencyKey: null, dispatcher);
-        var second = await ExecuteRecoveryAsync(command, sessionId, idempotencyKey: null, dispatcher);
+        var rejected = await ExecuteRecoveryAsync(command, sessionId, idempotencyKey: null, dispatcher);
 
-        Assert.Equal(200, first.Status);
-        Assert.Equal(200, second.Status);
-        Assert.Equal(2, dispatcher.Requests.Count);
-        Assert.NotEqual(dispatcher.Requests[0].OperationId, dispatcher.Requests[1].OperationId);
-    }
-
-    [Fact]
-    public async Task Compact_ExplicitLegacyIdempotencyKeyDoesNotMergeWithOmittedKey()
-    {
-        var (_, sessionId) = await CreateIdleSessionAsync("runtime-explicit-legacy");
-        var dispatcher = new RecordingSessionCommandDispatcher();
-        dispatcher.EnqueueSuccess();
-        dispatcher.EnqueueSuccess();
-
-        var explicitLegacy = await ExecuteRecoveryAsync(SessionCommandKind.Compact, sessionId, "legacy", dispatcher);
-        var omitted = await ExecuteRecoveryAsync(SessionCommandKind.Compact, sessionId, idempotencyKey: null, dispatcher);
-
-        Assert.Equal(200, explicitLegacy.Status);
-        Assert.Equal(200, omitted.Status);
-        Assert.Equal(2, dispatcher.Requests.Count);
-        Assert.NotEqual(dispatcher.Requests[0].OperationId, dispatcher.Requests[1].OperationId);
+        Assert.Equal(400, rejected.Status);
+        Assert.Equal("idempotency_key_required", rejected.Body.GetProperty("code").GetString());
+        Assert.Equal("none", rejected.Body.GetProperty("effect").GetString());
+        Assert.True(rejected.Body.GetProperty("retrySafe").GetBoolean());
+        Assert.Empty(dispatcher.Requests);
+        Assert.Null((await LoadAsync(sessionId))!.Status.PendingReset);
     }
 
     [Theory]
@@ -117,7 +100,7 @@ public sealed partial class AgentSessionRecoveryOrchestratorSpecs
 
         Assert.Equal(503, duplicate.Status);
         Assert.Equal("runner_unavailable", duplicate.Body.GetProperty("code").GetString());
-        Assert.Single(dispatcher.Requests);
+        Assert.Equal("unknown", duplicate.Body.GetProperty("effect").GetString());
         var pending = (await LoadAsync(sessionId))!.Status.PendingReset;
         Assert.NotNull(pending);
         Assert.Equal(request.OperationId, pending!.OperationId);
@@ -143,10 +126,10 @@ public sealed partial class AgentSessionRecoveryOrchestratorSpecs
             return completeReset.Task;
         });
 
-        var resetTask = ExecuteRecoveryAsync(SessionCommandKind.Reset, sessionId, idempotencyKey: null, dispatcher);
+        var resetTask = ExecuteRecoveryAsync(SessionCommandKind.Reset, sessionId, idempotencyKey: "reset-in-flight", dispatcher);
         var resetRequest = await resetStarted.Task;
 
-        var compact = await ExecuteRecoveryAsync(SessionCommandKind.Compact, sessionId, idempotencyKey: null, dispatcher);
+        var compact = await ExecuteRecoveryAsync(SessionCommandKind.Compact, sessionId, idempotencyKey: "compact-overlap", dispatcher);
 
         Assert.Equal(409, compact.Status);
         Assert.Equal("recovery_in_progress", compact.Body.GetProperty("code").GetString());

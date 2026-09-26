@@ -9,6 +9,9 @@ namespace Mohist.Server.Api;
 
 /// <summary>
 /// Canonical Compact and Reset routes for AgentSessions from either source.
+/// Both require a caller <c>Idempotency-Key</c>: the header is the operation's
+/// identity, so a request that omits it is rejected before acceptance and a
+/// lost response is retried with the same key.
 /// Workflow-scoped aliases resolve their lookup keys to a stable session id
 /// and delegate to the same command executors used by these routes.
 /// Follow-up and stop already preserve that canonical AgentSession identity;
@@ -72,6 +75,8 @@ public static class AgentSessionRecoveryRoutes
         ISessionCommandDispatcher commands,
         CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(idempotencyKey))
+            return MissingRecoveryIdempotencyKey(sessionId, "compact");
         var grain = grains.GetGrain<IAgentSessionGrain>(sessionId);
         SessionCommandRequest? request = null;
         try
@@ -131,6 +136,8 @@ public static class AgentSessionRecoveryRoutes
         ISessionCommandDispatcher commands,
         CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(idempotencyKey))
+            return MissingRecoveryIdempotencyKey(sessionId, "reset");
         var grain = grains.GetGrain<IAgentSessionGrain>(sessionId);
         SessionCommandRequest? request = null;
         try
@@ -180,15 +187,22 @@ public static class AgentSessionRecoveryRoutes
                 {
                     sessionId = ex.SessionId,
                     actualRuntimeSessionId = ex.ActualRuntimeSessionId,
-                });
+                },
+                effect: ApiEffect.Unknown,
+                retrySafe: true);
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("currently active", StringComparison.OrdinalIgnoreCase))
         {
-            return ApiResults.Conflict(ex.Message, "session_active", new { sessionId });
+            return ApiResults.Conflict(ex.Message, "session_active", new { sessionId }, effect: ApiEffect.None, retrySafe: true);
         }
         catch (RecoveryOperationInProgressException ex)
         {
-            return ApiResults.Conflict(ex.Message, "recovery_in_progress", new { sessionId = ex.SessionId, operation = ex.Operation });
+            return ApiResults.Conflict(
+                ex.Message,
+                "recovery_in_progress",
+                new { sessionId = ex.SessionId, operation = ex.Operation },
+                effect: ApiEffect.None,
+                retrySafe: true);
         }
         catch
         {
@@ -201,7 +215,9 @@ public static class AgentSessionRecoveryRoutes
             "Runner command outcome is unavailable after its effect was admitted",
             503,
             "runner_unavailable",
-            new { sessionId = request.SessionId, runnerId = request.RunnerId });
+            new { sessionId = request.SessionId, runnerId = request.RunnerId },
+            effect: ApiEffect.Unknown,
+            retrySafe: true);
 
     private static IResult? MapCommandResult(
         SessionCommandRequest request,
@@ -228,7 +244,9 @@ public static class AgentSessionRecoveryRoutes
             SessionCommandError.Conflict => ApiResults.Conflict(
                 $"AgentSession {request.SessionId} is currently active; Compact and Reset require an idle session.",
                 "session_active",
-                new { sessionId = request.SessionId }),
+                new { sessionId = request.SessionId },
+                effect: ApiEffect.None,
+                retrySafe: true),
             SessionCommandError.Missing => RuntimeSessionMissingResult(new RuntimeSessionMissingException(
                 request.SessionId,
                 request.RuntimeSessionId,
@@ -237,17 +255,23 @@ public static class AgentSessionRecoveryRoutes
                 "Runner did not start the session command",
                 503,
                 "runner_command_not_started",
-                new { sessionId = request.SessionId, runnerId = request.RunnerId }),
+                new { sessionId = request.SessionId, runnerId = request.RunnerId },
+                effect: ApiEffect.None,
+                retrySafe: true),
             SessionCommandError.RuntimeUnavailable => ApiResults.Fail(
                 "Runtime is unavailable",
                 503,
                 "runtime_unavailable",
-                new { sessionId = request.SessionId, runnerId = request.RunnerId }),
+                new { sessionId = request.SessionId, runnerId = request.RunnerId },
+                effect: ApiEffect.None,
+                retrySafe: true),
             SessionCommandError.Unavailable => ApiResults.Fail(
                 "Runner is unavailable",
                 503,
                 "runner_unavailable",
-                new { sessionId = request.SessionId, runnerId = request.RunnerId }),
+                new { sessionId = request.SessionId, runnerId = request.RunnerId },
+                effect: ApiEffect.None,
+                retrySafe: true),
             _ => InvalidRunnerResult(request.SessionId),
         };
     }
@@ -256,14 +280,29 @@ public static class AgentSessionRecoveryRoutes
         ApiResults.Conflict(
             ex.Message,
             "runtime_session_missing",
-            new { sessionId = ex.SessionId });
+            new { sessionId = ex.SessionId },
+            effect: ApiEffect.None,
+            retrySafe: true);
 
     private static IResult InvalidRunnerResult(string sessionId) =>
         ApiResults.Fail(
             "Runner returned an invalid SessionCommand result",
             502,
             "runner_invalid_response",
-            new { sessionId });
+            new { sessionId },
+            effect: ApiEffect.Unknown,
+            retrySafe: true);
+
+    // Compact and Reset are caller-keyed writes. A request without a key is
+    // rejected before acceptance so the operation can never gain a hidden
+    // identity that a lost response cannot name.
+    private static IResult MissingRecoveryIdempotencyKey(string sessionId, string operation) =>
+        ApiResults.BadRequest(
+            $"Idempotency-Key is required for Session {operation}",
+            "idempotency_key_required",
+            new { sessionId, operation, fields = new[] { "Idempotency-Key" } },
+            effect: ApiEffect.None,
+            retrySafe: true);
 
     internal static string? RecoveryIdempotencyKey(HttpContext context) =>
         context.Request.Headers.TryGetValue("Idempotency-Key", out var values)
