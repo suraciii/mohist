@@ -52,7 +52,7 @@ public interface IGitHubCommentPort
     /// <summary>
     /// Finds the delivery pull request's HTML URL for the Mohist issue
     /// whose workflow opened the PR from the <c>mo/issue-{issueNumber}</c>
-    /// branch (the branch naming convention, see docs/issues.md). Returns
+    /// branch (the branch naming convention, see specs/issue/lifecycle/spec.md). Returns
     /// <c>null</c> when no such pull request exists (not delivered yet, or
     /// delivered outside the branch convention). Failures propagate like
     /// the other calls; best-effort semantics live in the caller.

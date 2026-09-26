@@ -32,7 +32,7 @@
     <EmbeddedResource Include="..\..\src\Mohist.Server\Workflow\Services\Profiles\*.workflow.yaml">
       <LogicalName>GoldenCases.%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="..\..\..\..\docs\workflow-definition.md">
+    <EmbeddedResource Include="..\..\..\..\specs\workflow\definition\spec.md">
       <LogicalName>GoldenCases.workflow-definition.md</LogicalName>
     </EmbeddedResource>
   </ItemGroup>

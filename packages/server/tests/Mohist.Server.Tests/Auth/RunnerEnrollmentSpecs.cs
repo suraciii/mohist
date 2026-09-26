@@ -9,7 +9,7 @@ using Xunit;
 namespace Mohist.Server.Tests.Auth;
 
 /// <summary>
-/// Runner install registration (docs/auth.md "Runner：安装即注册"): a
+/// Runner install registration (specs/platform/identity-and-access/spec.md "Runner：安装即注册"): a
 /// fresh runner registers through a one-time, 15-minute enrollment token
 /// and receives a machine credential bound to its RunnerId; revocation
 /// rejects that runner's requests immediately while others keep working;

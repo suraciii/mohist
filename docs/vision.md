@@ -44,16 +44,16 @@ Express a goal, divide the work, decide its order, and see what was delivered.
 This area covers requirements, decomposition, prerequisites, and goal-level
 progress; it does not decide how an execution runs or recovers. Its primary
 subdomain is Issue, including Epic organization. Start with
-[Issues](issues.md), [Composite Issues](composite-issues.md), and
-[Epics](epics.md).
+[Issues](../specs/issue/lifecycle/spec.md), [Composite Issues](../specs/issue/decomposition/spec.md), and
+[Epics](../specs/issue/epics/spec.md).
 
 ### Delivery Workflows
 
 Define how work reaches an accepted deliverable, then advance or recover a
 particular Run. Workflow owns the stages, checks, Approval Points, and recovery
 rules. It uses Agent execution and Workspace resources without owning their
-lifecycles. Start with [The Workflow](the-workflow.md) and
-[Workflow Profiles](workflow-profiles.md).
+lifecycles. Start with [The Workflow](../specs/workflow/execution/spec.md) and
+[Workflow Profiles](../specs/workflow/profiles/spec.md).
 
 ### Agent Collaboration
 
@@ -61,8 +61,8 @@ Configure an Agent, delegate a task, continue the conversation, and receive its
 result. Direct work does not require creating an Issue. Agent owns reusable
 execution capability and Connections; Session owns the continuing conversation
 and its inputs, Turns, and evidence. Start with
-[Agents and AgentSessions](agent-sessions.md), [Subagents](subagents.md), and
-[Slack interaction](slack.md).
+[Agents and AgentSessions](../specs/agent/execution/spec.md), [Subagents](../specs/session/subagents/spec.md), and
+[Slack interaction](../specs/integrations/slack/interaction/spec.md).
 
 ### Operations and Supervision
 
@@ -72,8 +72,8 @@ Runner, and other owners; it does not introduce another state authority.
 AgentOps assembles read-side views, while controls act through the domain that
 owns the operation. Start with
 [Activity](../specs/agent-ops/activity/spec.md),
-[Agent Supervision](agent-supervision.md), and
-[Observability](observability.md).
+[Agent Supervision](../specs/agent/supervision/spec.md), and
+[Observability](../specs/platform/observability/spec.md).
 
 Project and Repository configuration, Workspace, Runner, and access controls
 support these areas. They remain explicit resources without each becoming a
@@ -102,7 +102,7 @@ outcomes distinct rather than reporting uncertainty as success.
 
 - **Issues carry intent:** Work enters as an Issue with requirements,
   discussion, and history. Readiness stays outside execution so incomplete
-  requirements do not consume capacity. See [The Workflow](the-workflow.md).
+  requirements do not consume capacity. See [The Workflow](../specs/workflow/execution/spec.md).
 - **Workflows define the line:** A Workflow Definition declares stages, tasks,
   checks, Approval Points, and recovery. Changing the definition changes the
   production line.
@@ -163,22 +163,22 @@ outcomes distinct rather than reporting uncertainty as success.
 Mohist is moving toward a factory where people leave routine execution in the
 loop only when they choose to supervise it. Supervision Agents can handle
 proxy Approval and failure routing, while mentions and event routing make that
-help configurable and revocable. See [Agent Supervision](agent-supervision.md)
-and [Agent Event Routing](event-routing.md).
+help configurable and revocable. See [Agent Supervision](../specs/agent/supervision/spec.md)
+and [Agent Event Routing](../specs/agent/event-routing/spec.md).
 
 The same Agent should remain useful wherever the work starts. Agents should
 work independently in Mohist, join existing interaction locations with
 independent identities, and let External Agents use the same domain actions.
-See [Agents and AgentSessions](agent-sessions.md), [Slack](slack.md),
-[Skills](skills.md), and [CLI Reference](cli-reference.md).
+See [Agents and AgentSessions](../specs/agent/execution/spec.md), [Slack](../specs/integrations/slack/enrollment/spec.md),
+[Skills](../specs/agent/skills/spec.md), and [CLI Reference](../specs/interfaces/cli/spec.md).
 
 The factory should support work whose shape becomes clear only during
 execution, larger plans, and reliable fallback supervision. Session trees,
 Epics, composite Issues, the Web UI, and mobile supervision with anomaly
 notifications extend that direction without moving daily collaboration into
-Mohist. See [Subagents and Session Trees](subagents.md), [Planning with
-Epics](epics.md), [Composite Issues and Child Issues](composite-issues.md), and
-[Web UI Guide](web-ui.md).
+Mohist. See [Subagents and Session Trees](../specs/session/subagents/spec.md), [Planning with
+Epics](../specs/issue/epics/spec.md), [Composite Issues and Child Issues](../specs/issue/decomposition/spec.md), and
+[Web UI Guide](../specs/interfaces/web/spec.md).
 
 Parallel work depends on structure more than on scale. Workers need
 non-overlapping groups, written assignments, isolated work areas, interfaces

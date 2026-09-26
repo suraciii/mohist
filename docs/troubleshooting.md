@@ -27,7 +27,7 @@ is `blocked`, `cancelled`, or `done`; `status` is `in-progress`, `done`, or
 
 ## Health Actions
 
-See [Workflow Health](the-workflow.md#health) for the meaning of each value.
+See [Workflow Health](../specs/workflow/execution/spec.md#health) for the meaning of each value.
 Each value maps to an operator action:
 
 - `active`: wait.
@@ -220,7 +220,7 @@ Some drift resolves automatically and can be left alone.
 **Action:** Check the **Needs attention** banner above the Web UI board, the
 blocked indicator on the Issue card, the error panel on Issue details, or a
 Hermes notification for an Approval Point, failure, or completion. See
-[Hermes Notifications](hermes-notifications.md).
+[Hermes Notifications](../specs/integrations/notifications/spec.md).
 
 ## Repeated Failure Pattern
 
@@ -234,7 +234,7 @@ Profile. Repeated retries do not repair a shared cause.
 changing the base branch during Agent work. Check capacity with `mo runner
 status`; work above capacity waits instead of failing. Commit and push important
 Workspace changes so they survive Runner loss or cleanup. Repair the shared
-cause before increasing concurrency. See [Write an Effective Issue Body](issues.md#write-an-effective-issue-body).
+cause before increasing concurrency. See [Write an Effective Issue Body](../specs/issue/lifecycle/spec.md#write-an-effective-issue-body).
 
 ## Unknown Failure
 

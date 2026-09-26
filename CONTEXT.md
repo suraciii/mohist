@@ -1,7 +1,7 @@
 # Mohist Glossary
 
 This glossary defines the product and Agent execution language shared across
-Mohist contexts. See [`design/agent-execution.md`](design/agent-execution.md) for
+Mohist contexts. See [`specs/agent/execution/design.md`](specs/agent/execution/design.md) for
 lifecycle, event, and module boundaries.
 
 ## Product Organization

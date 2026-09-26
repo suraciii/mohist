@@ -3,7 +3,7 @@
 `eng/` documents how this repository itself is built, tested, and documented.
 These documents govern the repository, not the product. Product documents live
 in [`../specs/`](../specs/README.md), with unmoved specifications and guides in
-[`../docs/`](../docs/) and [`../design/`](../design/).
+[`../docs/`](../docs) and [`../design/`](../design).
 
 - [context-management.md](context-management.md) — Context management: what the
   repository stores, where each kind of context lives, and the shared writing

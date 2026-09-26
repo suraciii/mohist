@@ -396,7 +396,7 @@ The proxy must overwrite `X-Forwarded-Proto` and `X-Forwarded-Host` with the
 public scheme and authority. A forwarded pair must contain one value per
 header, not comma-separated chains. A mismatched browser Origin or a malformed
 pair rejects the live connection. See the [live origin validation
-contract](../design/event-protocol.md#boundary-and-authentication).
+contract](../specs/platform/events/spec.md#boundary-and-authentication).
 
 This setting trusts only the event socket's origin check. It does not make a
 remote peer local, grant credentials, enable cross-origin access, or change
@@ -494,7 +494,7 @@ migrations and required repository data upgrades at startup. A backup is the
 rollback boundary if migration or the new version fails.
 
 Older migrations are periodically squashed into a single baseline (see
-[`design/db-migrations.md`](../design/db-migrations.md)). A database last
+[`eng/database-migrations.md`](../eng/database-migrations.md)). A database last
 migrated by a build older than the squash floor cannot be upgraded directly:
 startup fails fast with an error naming the floor. In that case, first check
 out and start a build from before the squash once, then upgrade normally.

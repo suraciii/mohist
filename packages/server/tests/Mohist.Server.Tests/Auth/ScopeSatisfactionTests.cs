@@ -6,7 +6,7 @@ using Xunit;
 namespace Mohist.Server.Tests.Auth;
 
 /// <summary>
-/// The route-scope satisfaction rule (design/auth.md scope table):
+/// The route-scope satisfaction rule (specs/platform/identity-and-access/design.md scope table):
 /// operator satisfies every declaration, readonly satisfies only
 /// readonly-declared GET routes, runner and webhook satisfy their own
 /// declarations regardless of method.

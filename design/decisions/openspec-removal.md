@@ -8,7 +8,7 @@ OpenSpec was once the Workflow's implicit plan protocol: planning material was
 written as OpenSpec changes inside the repository, runner actions consumed
 `openspec/*` artifacts, and change archives accumulated under `openspec/`. The
 planning protocol has since narrowed to the task list as the only
-machine-readable plan artifact ([`../workflow/plan-artifacts.md`](../workflow/plan-artifacts.md)),
+machine-readable plan artifact ([`../workflow/plan-artifacts.md`](../../specs/workflow/execution/design.md)),
 leaving the OpenSpec material as repository residue.
 
 ## Decision

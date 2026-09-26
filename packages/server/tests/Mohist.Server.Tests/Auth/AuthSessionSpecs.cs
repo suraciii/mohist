@@ -14,7 +14,7 @@ using Xunit;
 namespace Mohist.Server.Tests.Auth;
 
 /// <summary>
-/// Web login (docs/auth.md「Web UI：令牌登录」): an operator-level token
+/// Web login (specs/platform/identity-and-access/spec.md「Web UI：令牌登录」): an operator-level token
 /// exchanges for a 7-day HttpOnly session cookie, the probe answers 200
 /// while the session lives, and logout revokes it server-side so the
 /// same cookie answers 401 afterwards.

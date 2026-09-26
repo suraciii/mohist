@@ -6,7 +6,7 @@ import { useMswServer } from './support/msw'
 import { DevicePage } from '../src/pages/device'
 
 /**
- * RFC 8628 confirmation page (docs/auth.md "远程 CLI：设备授权登录"):
+ * RFC 8628 confirmation page (specs/platform/identity-and-access/spec.md "远程 CLI：设备授权登录"):
  * typing a code resolves the pending authorization (case and hyphens
  * ignored) and the logged-in user can approve or deny; the server
  * enforces the Web session on top of AuthGate.
@@ -30,7 +30,10 @@ describe('DevicePage', () => {
           data: { flowId: 'device_flow_1', clientName: 'my-laptop', expiresAt: '2026-01-01T00:10:00+00:00' },
         })
       }
-      return HttpResponse.json({ success: false, error: 'Code not found.', code: 'device_code_not_found' }, { status: 404 })
+      return HttpResponse.json(
+        { success: false, error: 'Code not found.', code: 'device_code_not_found' },
+        { status: 404 },
+      )
     }),
     http.post('*/api/auth/device/decision', async ({ request }) => {
       const body = (await request.json()) as { flowId: string; decision: string }

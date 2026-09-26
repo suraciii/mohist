@@ -11,7 +11,7 @@ using Xunit;
 namespace Mohist.Server.Tests.Auth;
 
 /// <summary>
-/// Integration token issuance and revocation (docs/auth.md "入站集成：
+/// Integration token issuance and revocation (specs/platform/identity-and-access/spec.md "入站集成：
 /// 独立令牌"): an integration token is narrowed to one project, the full
 /// value appears in exactly one response, revocation is immediate and
 /// per-token, and the token authenticates through the unified bearer

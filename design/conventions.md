@@ -52,7 +52,7 @@ facts and deterministic decisions.
 - **Claim**: an edge assertion that is not yet a fact. Claims are settled, never
   trusted. An unqualified Runner `claim` means work acquisition, which
   `ClaimNext` settles synchronously. A Runner fact assertion is a report and is
-  settled asynchronously. See [`runner.md`](runner.md#report).
+  settled asynchronously. See [`runner.md`](../specs/runner/work-confirmation/design.md#report).
 - **Settlement**: the edge action that turns a claim into a fact or explicit
   unknown.
 - **Unknown**: a first-class value for what settlement cannot establish.
@@ -131,7 +131,7 @@ that a direct caller must never receive:
 `SessionOperationRead`.
 
 The direct API serializes only the explicit public projection in
-[`agent-api.md`](agent-api.md). It may expose canonical IDs, public
+[`agent-api.md`](../specs/interfaces/agent-api/design.md). It may expose canonical IDs, public
 status/output/error/reason code, timestamps, per-Session public sequence, and
 opaque cursor continuation. The projection is a durable Server-owned view fed
 by canonical aggregate and outbox facts. Its snapshot, journal entries, and
@@ -179,7 +179,9 @@ A binding operation carries an operation fence. `ownerFence` and
 `claimGeneration` are independent monotonic values. Within binding fences, an
 unqualified `generation` means `claimGeneration`, never `ContextGeneration`.
 Runner-side generations have explicit names: `processGeneration` and the
-readiness signal's `runtimeGeneration`. See [`runner.md`](runner.md).
+readiness signal's `runtimeGeneration`. See
+[Runtime readiness](../specs/runner/work-confirmation/design.md#runtime-readiness-signal)
+and [Runner process generations](../specs/runner/presence-and-capacity/design.md#restart-and-crash-semantics).
 
 The single `FenceToken` contract applies to every phase write, candidate
 create/get/discard/cleanup, binding CAS, completion, Compact, and per-target
@@ -205,7 +207,7 @@ work directory change requires a new logical Session identity.
 
 Canonical Session admission, launch, and Turn result projections are
 Server-owned read models whose field lists are code-expressed. Only the public
-projection allowlist in [`agent-api.md`](agent-api.md) crosses the External
+projection allowlist in [`agent-api.md`](../specs/interfaces/agent-api/design.md) crosses the External
 Agent API boundary.
 
 ### Canonical SessionInput and Dispatch Schema
@@ -215,7 +217,7 @@ copies the caller's `launchRequestId` into `requestId`. A follow-up caller must
 provide its own stable `requestId`. Server never invents one after a response is
 lost. SessionInput, dispatch, and retry-work field lists and the dispatch state
 machine are code-expressed. Their lifecycle rules stay in
-[`agent-execution.md`](agent-execution.md).
+[Session inputs and Turns](../specs/session/input-and-turns/design.md).
 
 ### Canonical Effect Fence
 
@@ -228,7 +230,7 @@ compare-and-swap procedure.
 Durable Session operations, including compact, reset, recovery, force-reset,
 handoff, rebind, stop, and steer, share one read shape keyed by the
 caller-supplied `operationId`. Server never creates an unqueryable operation key.
-[`subagents.md#cascade-stop`](subagents.md#cascade-stop) is the sole authority
+[`subagents.md#cascade-stop`](../specs/session/subagents/design.md#cascade-stop) is the sole authority
 for cascade membership.
 
 Launch identities are separate. The caller provides `launchRequestId`; Server
@@ -269,7 +271,7 @@ old affiliation back.
 Runtime context, Workflow Variables, Project Prompts, and Project Repository
 resources have different owners and lifecycles. Do not merge them into one
 configuration or Variables document. See
-[`workflow/task-dispatch.md`](workflow/task-dispatch.md) for resolution timing.
+[`workflow/task-dispatch.md`](../specs/workflow/execution/design.md) for resolution timing.
 
 ## Non-Goals
 

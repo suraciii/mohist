@@ -4,7 +4,7 @@ using Mohist.Server.Auth.Domain;
 namespace Mohist.Server.Auth.Identity;
 
 /// <summary>
-/// The route-scope satisfaction rule (docs/auth.md scope table): a
+/// The route-scope satisfaction rule (specs/platform/identity-and-access/spec.md scope table): a
 /// credential satisfies a route when it satisfies any of the route's
 /// declared scopes, and <c>operator</c> satisfies everything. Only
 /// <c>readonly</c> is method-bound — it never satisfies a non-GET route.

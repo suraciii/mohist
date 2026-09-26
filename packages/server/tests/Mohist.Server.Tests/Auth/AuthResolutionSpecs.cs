@@ -19,7 +19,7 @@ namespace Mohist.Server.Tests.Auth;
 /// The unified auth-resolution surface: every non-exempt request on
 /// /api, /hubs and /otel/api requires a credential presented as Bearer
 /// header or session cookie, and every rejection is an indistinguishable
-/// 401 with an RFC 6750 invalid_token challenge (docs/auth.md).
+/// 401 with an RFC 6750 invalid_token challenge (specs/platform/identity-and-access/spec.md).
 /// </summary>
 [Trait("level", "L1")]
 public sealed class AuthResolutionSpecs(DefaultMohistIntegrationFixture fixture) : IClassFixture<DefaultMohistIntegrationFixture>

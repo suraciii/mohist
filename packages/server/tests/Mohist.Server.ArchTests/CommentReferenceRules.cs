@@ -20,7 +20,7 @@ public sealed class CommentReferenceRules
     private const string ServerSourcesPrefix = "ServerSources/";
 
     private static readonly Regex CommentReferencePattern = new(
-        "issue-\\d+|T-\\d{3}|design/[^*\\s]+\\.md",
+        "issue-\\d+|T-\\d{3}|design/[^*\\s]+\\.md|specs/[^*\\s]+/design\\.md",
         RegexOptions.ExplicitCapture);
     private static readonly Lazy<IReadOnlyDictionary<string, int>> CurrentCounts = new(
         ReadCommentReferenceCounts,
@@ -141,6 +141,15 @@ public sealed class CommentReferenceRules
         var message = Assert.Single(violations);
         Assert.Contains("shrunk from baseline 4 to 2", message, StringComparison.Ordinal);
         Assert.Contains("must be updated", message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("design/runtimes/opencode.md")]
+    [InlineData("specs/interfaces/runtimes/opencode/design.md")]
+    public void CountOffenders_RecognizesDesignPathsBeforeAndAfterRelocation(string path)
+    {
+        Assert.Equal(1, CountOffenders($"// {path}\nclass Example {{ }}"));
+        Assert.Equal(0, CountOffenders($"class Example {{ string Path = \"{path}\"; }}"));
     }
 
     internal static IReadOnlyList<string> Ratchet(

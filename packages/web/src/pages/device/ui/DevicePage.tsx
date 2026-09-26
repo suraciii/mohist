@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/sha
 import { Input } from '@/shared/ui/components/input'
 
 /**
- * RFC 8628 confirmation page (docs/auth.md "远程 CLI：设备授权登录"):
+ * RFC 8628 confirmation page (specs/platform/identity-and-access/spec.md "远程 CLI：设备授权登录"):
  * the CLI shows this link; the user types the code, reviews what is
  * being authorized and approves or denies. Only reachable behind a
  * logged-in Web session (AuthGate); the server additionally requires
@@ -41,10 +41,13 @@ export function DevicePage() {
   function handleDecision(next: 'approved' | 'denied') {
     if (!flowId || decide.isPending) return
     setError(null)
-    decide.mutate({ flowId, decision: next }, {
-      onSuccess: () => setDecision(next),
-      onError: (failure) => setError(messageOf(failure)),
-    })
+    decide.mutate(
+      { flowId, decision: next },
+      {
+        onSuccess: () => setDecision(next),
+        onError: (failure) => setError(messageOf(failure)),
+      },
+    )
   }
 
   return (
@@ -53,8 +56,8 @@ export function DevicePage() {
         <CardHeader>
           <CardTitle>Authorize a device</CardTitle>
           <CardDescription>
-            A command-line client is waiting for confirmation. Enter the code it printed to review and
-            approve the sign-in.
+            A command-line client is waiting for confirmation. Enter the code it printed to review and approve the
+            sign-in.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -82,15 +85,20 @@ export function DevicePage() {
                   <p className="text-sm text-muted-foreground">
                     {clientName ? (
                       <>
-                        <span className="font-medium text-foreground">{clientName}</span> is requesting
-                        access to <span className="font-medium text-foreground">all Mohist operations</span>.
+                        <span className="font-medium text-foreground">{clientName}</span> is requesting access to{' '}
+                        <span className="font-medium text-foreground">all Mohist operations</span>.
                       </>
                     ) : (
                       <>A remote client is requesting access to all Mohist operations.</>
                     )}
                   </p>
                   <div className="flex gap-2">
-                    <Button variant="outline" className="flex-1" disabled={decide.isPending} onClick={() => handleDecision('denied')}>
+                    <Button
+                      variant="outline"
+                      className="flex-1"
+                      disabled={decide.isPending}
+                      onClick={() => handleDecision('denied')}
+                    >
                       Deny
                     </Button>
                     <Button className="flex-1" disabled={decide.isPending} onClick={() => handleDecision('approved')}>

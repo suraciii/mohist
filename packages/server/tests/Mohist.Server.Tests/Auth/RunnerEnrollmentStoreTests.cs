@@ -11,7 +11,7 @@ namespace Mohist.Server.Tests.Auth;
 
 /// <summary>
 /// Enrollment token issuance/consumption and runner machine credentials
-/// (docs/auth.md "Runner：安装即注册"): hash-only storage, single-use and
+/// (specs/platform/identity-and-access/spec.md "Runner：安装即注册"): hash-only storage, single-use and
 /// 15-minute expiry for enrollment tokens; runner credentials bound to
 /// their RunnerId with at most one live credential per runner.
 /// </summary>

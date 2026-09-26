@@ -8,7 +8,7 @@ namespace Mohist.Server.Auth.Identity;
 /// carries. <see cref="RunnerId"/> is the runner the credential is
 /// bound to (runner-kind credentials only); the auth layer rejects any
 /// runner-scoped request whose self-declared runner id does not match
-/// it (docs/auth.md Runner 顶替防护). <see cref="ProjectId"/> is the
+/// it (specs/platform/identity-and-access/spec.md Runner 顶替防护). <see cref="ProjectId"/> is the
 /// project an integration credential is narrowed to and is null for
 /// every other kind.
 /// </summary>

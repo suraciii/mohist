@@ -15,8 +15,8 @@ deployment bootstrap (`mo update`).
 ## Decision
 
 The CLI becomes a static Go binary in `packages/go/mohist-cli`. The
-behavioral contract in [`../cli.md`](../cli.md) and
-[`../../docs/cli-reference.md`](../../docs/cli-reference.md) does not change:
+behavioral contract in [`../cli.md`](../../specs/interfaces/cli/design.md) and
+[`../../specs/interfaces/cli/spec.md`](../../specs/interfaces/cli/spec.md) does not change:
 command tree, flags, field-selecting JSON output, exit codes, credential-file
 format, and Skill assets are preserved. Migration is phased by command group;
 the C# implementation is deleted at cutover.
@@ -44,6 +44,6 @@ untouched.
 - Managed update publishes Go artifacts per revision; the binary self-replaces
   atomically. Exact-revision deployment alignment is unchanged.
 - The first Go slice carries the new diagnostics commands
-  ([`../diagnostics.md`](../diagnostics.md)) so the new skeleton is exercised
+  ([`../diagnostics.md`](../../specs/interfaces/agent-operability/design.md)) so the new skeleton is exercised
   by production use early.
 - Skills, docs, and agent instructions that call `mo` require no change.
