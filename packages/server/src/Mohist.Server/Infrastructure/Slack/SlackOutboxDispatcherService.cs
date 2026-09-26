@@ -70,6 +70,7 @@ public sealed class SlackOutboxDispatcherService : IDisposable
     private readonly IOptions<SlackProviderOptions> _options;
     private readonly ILogger<SlackOutboxDispatcherService> _log;
     private readonly SemaphoreSlim _dispatchGate = new(1, 1);
+    private string? _noticeRecoveryAfterId;
     private bool _disposed;
 
     public const string DeadLetterOrigin = "SlackOutbox";
@@ -210,13 +211,27 @@ public sealed class SlackOutboxDispatcherService : IDisposable
     /// leaves a content row settled without a notice; this bounded sweep finds
     /// those rows and idempotently authors the missing notice, so the
     /// visibility obligation survives a restart instead of being lost.
+    /// The sweep resumes after the last row it examined and restarts from the
+    /// beginning once the batch comes back short, so a row that cannot be
+    /// authored — a payload that no longer parses, or an owner that went away
+    /// between the read and the enqueue — cannot keep the first slots busy
+    /// while other owners wait. The store already excludes owners that are no
+    /// longer live.
     /// </summary>
     private async Task RecoverMissingNoticesAsync(int batchSize, CancellationToken ct)
     {
-        var rows = await _store.ListSettledContentRowsMissingNoticeAsync(batchSize, ct).ConfigureAwait(false);
+        var rows = await _store
+            .ListSettledContentRowsMissingNoticeAsync(batchSize, _noticeRecoveryAfterId, ct)
+            .ConfigureAwait(false);
+        if (rows.Count == 0)
+        {
+            _noticeRecoveryAfterId = null;
+            return;
+        }
         foreach (var row in rows)
         {
             ct.ThrowIfCancellationRequested();
+            _noticeRecoveryAfterId = row.Id;
             await ProcessRowAsync(row, "notice-recovery", async () =>
             {
                 if (!await _notices.TryNoticeAsync(row.ProjectId, row.OwnerKind, row.ConnectionId, row.Id, ct).ConfigureAwait(false))
@@ -226,6 +241,8 @@ public sealed class SlackOutboxDispatcherService : IDisposable
                     row.Id, row.ConnectionId, row.State);
             }, ct).ConfigureAwait(false);
         }
+        if (rows.Count < batchSize)
+            _noticeRecoveryAfterId = null;
     }
 
     private async Task ProcessRowAsync(

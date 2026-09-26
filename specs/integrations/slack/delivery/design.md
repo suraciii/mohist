@@ -197,7 +197,11 @@ calls and Runner logs are not user messages.
   never create another progress or final answer.
 - **Uncertain**: timeout, connection loss, or unparseable response. Never
   resend blindly: reconcile by stable identity first, and retry the original
-  intent only after confirming no side effect occurred.
+  intent only after confirming no side effect occurred. A segmented intent
+  follows the same rule part by part: only a complete read showing that none of
+  its parts landed authorizes the sequence again, a partly present sequence
+  stays unknown, and a provider rejection that interrupts the sequence after
+  the first part settles unknown instead of re-posting the confirmed parts.
 - **Dead-letter**: definite non-retryable failure or human intervention.
   Retain the intent, reason, and actionable next step. A confirmed AgentTurn
   result is never rewritten as provider failure.
@@ -225,7 +229,13 @@ notice-recovery sweep therefore re-derives the obligation from durable row
 state — a content row settled uncertain or dead-lettered whose notice intent is
 missing — and authors it idempotently, so a crash between the two writes, or a
 single failed authoring attempt, converges on the same notice on a later tick
-instead of leaving the delivery permanently silent.
+instead of leaving the delivery permanently silent. The sweep is bounded in
+progress as well as in size: it selects only rows whose owner can currently
+receive a notice, and it resumes after the last row it examined, restarting
+from the beginning once the batch comes back short. A row that cannot be
+authored — a gone owner, a payload that no longer parses — keeps its obligation
+without holding the first slots of every tick, so one owner's failure never
+stalls another owner's notice.
 
 Server authors it only for content intents — terminal Agent reply and
 replaceable Session card — and only on the settlement transition that actually

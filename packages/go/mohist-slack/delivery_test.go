@@ -289,14 +289,17 @@ func TestSegmentDispatchReferenceRejectsSeparatorCollisionBeforePosting(t *testi
 	}
 }
 
-func TestReconcileSegmentsRequiresEverySegmentReference(t *testing.T) {
+func TestReconcileSegmentsSettlesOnCompleteEvidenceOnly(t *testing.T) {
 	payload := `{"operation":"post_message","segments":["one","two","three"],"clientMessageId":"cmid-seg-reconcile"}`
-	missing := &fakeWeb{historyFn: func(HistoryInput) ([]HistoryMessage, error) {
+	partial := &fakeWeb{historyFn: func(HistoryInput) ([]HistoryMessage, error) {
 		return []HistoryMessage{{TS: "1702.2", ClientMsgID: "cmid-seg-reconcile"}}, nil
 	}}
-	ack := reconcileNow(t, missing, testDelivery("d-17b", payload))
-	if ack.Outcome != OutcomeRetry || ack.Reason != providerMutationAbsent {
+	ack := reconcileNow(t, partial, testDelivery("d-17b", payload))
+	if ack.Outcome != OutcomeUncertain || ack.Reason != providerHistoryPartial {
 		t.Fatalf("partial segment history ack = %+v", ack)
+	}
+	if partial.postCount() != 0 {
+		t.Fatalf("partial segment history posted %d messages", partial.postCount())
 	}
 
 	complete := &fakeWeb{historyFn: func(HistoryInput) ([]HistoryMessage, error) {

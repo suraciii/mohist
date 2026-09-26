@@ -27,6 +27,10 @@ const (
 const (
 	providerMutationAbsent    = "provider_mutation_absent"
 	providerHistoryIncomplete = "provider_history_incomplete"
+	// A segmented post whose parts are only partly present is not absent:
+	// re-sending the sequence would duplicate the parts that already landed,
+	// so the outcome stays unknown until a complete read resolves it.
+	providerHistoryPartial = "provider_history_partial"
 	// Keep provider lookups bounded so a busy conversation cannot monopolize an adapter worker.
 	historyPageBudget = 8
 
@@ -482,6 +486,12 @@ func deliverSegments(ctx context.Context, web WebClient, delivery *Delivery, pay
 		ensureCurrent()
 		if err != nil {
 			if code := SlackErrorCode(err); code != "" {
+				if index > 0 {
+					// Earlier parts already reached the provider: retrying the
+					// sequence would post them a second time, so settle
+					// unknown and let reconciliation read what is visible.
+					return uncertainAck(delivery, code), nil
+				}
 				return retryAck(delivery, code), nil
 			}
 			return DeliveryAck{}, err
@@ -757,6 +767,9 @@ func Reconcile(ctx context.Context, web WebClient, delivery *Delivery, ensureCur
 		if len(found) != len(segmentRefs) {
 			if !complete {
 				return uncertainAck(delivery, providerHistoryIncomplete), nil
+			}
+			if len(found) > 0 {
+				return uncertainAck(delivery, providerHistoryPartial), nil
 			}
 			return retryAck(delivery, providerMutationAbsent), nil
 		}

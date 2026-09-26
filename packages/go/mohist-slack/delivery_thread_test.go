@@ -19,6 +19,7 @@ import (
 type threadTransport struct {
 	historyResponses []string
 	repliesResponses []string
+	postResponses    []string
 	paths            []string
 	posts            []string
 	replyQueries     []url.Values
@@ -44,7 +45,7 @@ func (transport *threadTransport) RoundTrip(request *http.Request) (*http.Respon
 			return nil, err
 		}
 		transport.posts = append(transport.posts, request.PostForm.Encode())
-		body = `{"ok":true,"ts":"1800.000009"}`
+		body = transport.next(&transport.postResponses, `{"ok":true,"ts":"1800.000009"}`)
 	default:
 		body = `{"ok":false,"error":"unexpected_method"}`
 	}
@@ -299,5 +300,167 @@ func TestDeliveryNoticePayloadSendsStatementBlocksToTransport(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("statement missing from posted blocks: %q", form.Get("blocks"))
+	}
+}
+
+func jsonString(t *testing.T, value string) string {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("encode %q as JSON: %v", value, err)
+	}
+	return string(encoded)
+}
+
+func segmentRefsFor(t *testing.T, payload string) []string {
+	t.Helper()
+	parsed, err := ParseDeliveryPayload(payload)
+	if err != nil {
+		t.Fatalf("parse segment payload: %v", err)
+	}
+	refs, err := segmentDispatchRefs(parsed)
+	if err != nil {
+		t.Fatalf("derive segment references: %v", err)
+	}
+	if len(refs) != len(parsed.Segments) {
+		t.Fatalf("references = %v for segments = %v", refs, parsed.Segments)
+	}
+	return refs
+}
+
+// A segmented post may be re-sent only when a complete thread read shows that
+// no part of it landed. Every other outcome — all parts present, some parts
+// present, or a thread that cannot be read completely — must not produce a
+// second mutation for the parts the provider already confirmed.
+func TestThreadedSegmentReconcileNeverRepostsConfirmedParts(t *testing.T) {
+	const payload = `{"operation":"post_message","text":"long answer","clientMessageId":"cmid-thread-seg","segments":["part one","part two","part three"]}`
+
+	t.Run("every part present settles delivered", func(t *testing.T) {
+		refs := segmentRefsFor(t, payload)
+		transport := &threadTransport{repliesResponses: []string{`{"ok":true,"messages":[{"ts":"1700.000001","text":"parent"},` +
+			`{"ts":"1800.000001","client_msg_id":` + jsonString(t, refs[0]) + `,"text":"part one"},` +
+			`{"ts":"1800.000002","client_msg_id":` + jsonString(t, refs[1]) + `,"text":"part two"},` +
+			`{"ts":"1800.000003","client_msg_id":` + jsonString(t, refs[2]) + `,"text":"part three"}],"has_more":false}`}}
+		web := newThreadWeb(transport)
+
+		ack, err := Reconcile(context.Background(), web, threadedDelivery(payload), func() {})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ack.Outcome != OutcomeDelivered || ack.ProviderMessageIdentity == nil || ack.ProviderMessageIdentity.MessageTs != "1800.000001" {
+			t.Fatalf("ack = %+v", ack)
+		}
+		if len(transport.posts) != 0 {
+			t.Fatalf("confirmed segments were posted again: posts=%d", len(transport.posts))
+		}
+	})
+
+	t.Run("no part present authorizes one re-post", func(t *testing.T) {
+		transport := &threadTransport{repliesResponses: []string{`{"ok":true,"messages":[{"ts":"1700.000001","text":"parent"}],"has_more":false}`}}
+		web := newThreadWeb(transport)
+		delivery := threadedDelivery(payload)
+
+		ack, err := Reconcile(context.Background(), web, delivery, func() {})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ack.Outcome != OutcomeRetry || ack.Reason != providerMutationAbsent {
+			t.Fatalf("ack = %+v", ack)
+		}
+		if len(transport.posts) != 0 {
+			t.Fatalf("reconciliation posted %d messages", len(transport.posts))
+		}
+
+		mutation, err := MutateDelivery(context.Background(), web, delivery, func() {})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mutation.Outcome != OutcomeDelivered || len(transport.posts) != 3 {
+			t.Fatalf("mutation ack = %+v posts = %d", mutation, len(transport.posts))
+		}
+		refs := segmentRefsFor(t, payload)
+		for index, encoded := range transport.posts {
+			form, err := url.ParseQuery(encoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if form.Get("client_msg_id") != refs[index] || form.Get("thread_ts") != "1700.000001" {
+				t.Fatalf("post %d form = %v", index, form)
+			}
+		}
+	})
+
+	t.Run("some parts present stays unknown and posts nothing", func(t *testing.T) {
+		refs := segmentRefsFor(t, payload)
+		transport := &threadTransport{repliesResponses: []string{`{"ok":true,"messages":[{"ts":"1700.000001","text":"parent"},` +
+			`{"ts":"1800.000001","client_msg_id":` + jsonString(t, refs[0]) + `,"text":"part one"}],"has_more":false}`}}
+		web := newThreadWeb(transport)
+
+		ack, err := Reconcile(context.Background(), web, threadedDelivery(payload), func() {})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ack.Outcome != OutcomeUncertain || ack.Reason != providerHistoryPartial {
+			t.Fatalf("partial segment ack = %+v", ack)
+		}
+		if len(transport.posts) != 0 {
+			t.Fatalf("partial segment evidence posted %d messages", len(transport.posts))
+		}
+	})
+
+	t.Run("unreadable thread stays unknown", func(t *testing.T) {
+		transport := &threadTransport{repliesResponses: []string{
+			`{"ok":true,"messages":[{"ts":"1700.000001","text":"parent"}],"has_more":true,"response_metadata":{"next_cursor":""}}`,
+		}}
+		web := newThreadWeb(transport)
+
+		ack, err := Reconcile(context.Background(), web, threadedDelivery(payload), func() {})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ack.Outcome != OutcomeUncertain || ack.Reason != providerHistoryIncomplete {
+			t.Fatalf("incomplete thread ack = %+v", ack)
+		}
+		if len(transport.posts) != 0 {
+			t.Fatalf("incomplete thread evidence posted %d messages", len(transport.posts))
+		}
+	})
+}
+
+// A failure after some parts already reached the provider must not queue a
+// re-send of the whole sequence; the settlement is unknown and the next read
+// of the thread decides what is actually visible.
+func TestSegmentFailureAfterPartialPostStaysUnknown(t *testing.T) {
+	const payload = `{"operation":"post_message","text":"long answer","clientMessageId":"cmid-seg-partial","segments":["part one","part two"]}`
+	refs := segmentRefsFor(t, payload)
+	transport := &threadTransport{postResponses: []string{
+		`{"ok":true,"ts":"1800.000001"}`,
+		`{"ok":false,"error":"ratelimited"}`,
+	}}
+	web := newThreadWeb(transport)
+	delivery := threadedDelivery(payload)
+
+	ack, err := MutateDelivery(context.Background(), web, delivery, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ack.Outcome != OutcomeUncertain || ack.Reason != "ratelimited" {
+		t.Fatalf("partial segment attempt ack = %+v", ack)
+	}
+	if len(transport.posts) != 2 {
+		t.Fatalf("posts = %d, want 2", len(transport.posts))
+	}
+
+	transport.repliesResponses = []string{`{"ok":true,"messages":[{"ts":"1700.000001","text":"parent"},` +
+		`{"ts":"1800.000001","client_msg_id":` + jsonString(t, refs[0]) + `,"text":"part one"}],"has_more":false}`}
+	reconciled, err := Reconcile(context.Background(), web, delivery, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reconciled.Outcome != OutcomeUncertain || reconciled.Reason != providerHistoryPartial {
+		t.Fatalf("reconciled ack = %+v", reconciled)
+	}
+	if len(transport.posts) != 2 {
+		t.Fatalf("confirmed part was posted again: posts=%d", len(transport.posts))
 	}
 }
