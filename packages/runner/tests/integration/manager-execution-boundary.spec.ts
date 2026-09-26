@@ -3,10 +3,11 @@ import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { existsSync, readFileSync, readdirSync, watch } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { createConnection } from 'node:net'
+import { createConnection, type Socket } from 'node:net'
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http'
 import { describe, expect, it } from 'vitest'
 import { ManagerExecutionBoundary, type ManagerExecutionGrant } from '../../src/runtime/manager-execution-boundary.js'
+import { inspectManagerPeer, scanSocketInspectorRows } from '../../src/runtime/manager-launcher-auth.js'
 import {
   isManagerUsageRequest,
   managerRequestKind,
@@ -162,24 +163,37 @@ describe.sequential('ManagerExecutionBoundary', () => {
       expect(environment.MOHIST_MANAGER_BROKER).toContain('mohist-manager-')
 
       // The old forged credential request shape (no arguments) receives no
-      // bearer and spawns nothing.
-      const managementResponse = await requestBroker(environment.MOHIST_MANAGER_BROKER!, 'management')
-      expect(managementResponse?.credential).toBeUndefined()
-      expect(managementResponse?.exitCode).toBeUndefined()
+      // bearer and spawns nothing; a non-launcher peer is refused with a
+      // category-only reason that transport loss cannot imitate.
+      const forged = await exchangeWithBroker(environment.MOHIST_MANAGER_BROKER!, 'management')
+      expect(forged.socketError).toBeNull()
+      const forgedResponse = parseBrokerBody(forged.body)
+      expect(forgedResponse.credential).toBeUndefined()
+      expect(forgedResponse.exitCode).toBe(126)
+      expect(forgedResponse.stderr).toContain('peer identity not verified')
 
       // A generic process cannot proxy an otherwise valid management request.
-      const directManagement = await requestBroker(environment.MOHIST_MANAGER_BROKER!, 'management', [
-        'slack',
-        'status',
-      ])
-      const directReply = await requestBroker(environment.MOHIST_MANAGER_BROKER!, 'reply', [
-        'slack',
-        'message',
-        'send',
-        'attacker text',
-      ])
-      expect(directManagement?.exitCode).toBeUndefined()
-      expect(directReply?.exitCode).toBeUndefined()
+      const directManagement = parseBrokerBody(
+        (await exchangeWithBroker(environment.MOHIST_MANAGER_BROKER!, 'management', ['slack', 'status'])).body,
+      )
+      const directReply = parseBrokerBody(
+        (
+          await exchangeWithBroker(environment.MOHIST_MANAGER_BROKER!, 'reply', [
+            'slack',
+            'message',
+            'send',
+            'attacker text',
+          ])
+        ).body,
+      )
+      expect(directManagement.credential).toBeUndefined()
+      expect(directManagement.exitCode).toBe(126)
+      expect(directManagement.stderr).toContain('peer identity not verified')
+      expect(directReply.credential).toBeUndefined()
+      expect(directReply.exitCode).toBe(126)
+      expect(directReply.stderr).toContain('peer identity not verified')
+      expect(JSON.stringify(directManagement)).not.toContain(grant.managementCredential)
+      expect(JSON.stringify(directReply)).not.toContain(grant.replyCredential)
       expect(stub.invocations()).toHaveLength(0)
 
       const output: Buffer[] = []
@@ -328,8 +342,16 @@ describe.sequential('ManagerExecutionBoundary', () => {
       workDir: stub.frozenWorkDir,
     })
     try {
-      const mismatch = await requestBroker(boundary.environment().MOHIST_MANAGER_BROKER!, 'reply', ['slack', 'status'])
-      expect(mismatch?.exitCode).toBeUndefined()
+      // A direct connection from a process that is not the generated launcher
+      // never reaches the request-kind gate: the peer check refuses it, and
+      // the refusal is distinguishable from a transport failure.
+      const mismatch = await exchangeWithBroker(boundary.environment().MOHIST_MANAGER_BROKER!, 'reply', [
+        'slack',
+        'status',
+      ])
+      const mismatchResponse = parseBrokerBody(mismatch.body)
+      expect(mismatchResponse.exitCode).toBe(126)
+      expect(mismatchResponse.stderr).toContain('peer identity not verified')
       expect(stub.invocations()).toHaveLength(0)
     } finally {
       await boundary.dispose()
@@ -353,6 +375,8 @@ describe.sequential('ManagerExecutionBoundary', () => {
         boundary.environment().MOHIST_MANAGER_LAUNCHER!,
       )
       expect(refused.exitCode).toBe(126)
+      expect(refused.signal).toBeNull()
+      expect(refused.stderr).toContain('outside the Manager capability catalog')
       expect(stub.invocations()).toHaveLength(0)
     } finally {
       await boundary.dispose()
@@ -377,8 +401,9 @@ describe.sequential('ManagerExecutionBoundary', () => {
       expect(usageInvocations[0].managementToken).toBe(false)
       expect(usageInvocations[0].credentialBroker).toBe(true)
 
-      const usageReplyKind = await requestBroker(broker, 'reply', ['--help'])
-      expect(usageReplyKind?.exitCode).toBeUndefined()
+      const usageReplyKind = parseBrokerBody((await exchangeWithBroker(broker, 'reply', ['--help'])).body)
+      expect(usageReplyKind.exitCode).toBe(126)
+      expect(usageReplyKind.stderr).toContain('peer identity not verified')
       expect(stub.invocations()).toHaveLength(1)
     } finally {
       await boundary.dispose()
@@ -432,6 +457,7 @@ describe.sequential('ManagerExecutionBoundary', () => {
         boundary.environment().MOHIST_MANAGER_LAUNCHER!,
       )
       expect(exhausted.exitCode).toBe(126)
+      expect(exhausted.stderr).toContain('management request budget is exhausted')
       expect(stub.invocations()).toHaveLength(2)
     } finally {
       await boundary.dispose()
@@ -463,6 +489,7 @@ describe.sequential('ManagerExecutionBoundary', () => {
         boundary.environment().MOHIST_MANAGER_LAUNCHER!,
       )
       expect(exhausted.exitCode).toBe(126)
+      expect(exhausted.stderr).toContain('reply request budget is exhausted')
       expect(stub.invocations()).toHaveLength(1)
     } finally {
       await boundary.dispose()
@@ -515,7 +542,32 @@ describe.sequential('ManagerExecutionBoundary', () => {
         ['slack', 'status'],
         boundary.environment().MOHIST_MANAGER_LAUNCHER!,
       )
-      expect(result).toMatchObject({ exitCode: 0, stdout: '***', stderr: '***' })
+      // A recurring failure of this test was undecidable because the launcher
+      // reported neither a signal nor whether the credential child ran.
+      expect(result).toMatchObject({ exitCode: 0, signal: null, stdout: '***', stderr: '***' })
+      expect(stub.invocations()).toHaveLength(1)
+      expect(JSON.stringify(result)).not.toContain(grant.managementCredential)
+      expect(JSON.stringify(result)).not.toContain(grant.replyCredential)
+    } finally {
+      await boundary.dispose()
+    }
+  })
+
+  it('answers a start failure with one diagnostic response', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mohist-manager-boundary-'))
+    // A present but non-executable Manager executable fails inside `spawn`,
+    // which emits `error` and then `close` for the same request.
+    const notExecutable = join(root, 'mo-without-execute-permission')
+    await writeFile(notExecutable, '#!/bin/sh\nexit 0\n', { encoding: 'utf8', mode: 0o600 })
+    const boundary = await ManagerExecutionBoundary.create(grant, root, { moExecutable: notExecutable })
+    try {
+      const result = await requestLauncher(
+        boundary.environment().MOHIST_MANAGER_BROKER!,
+        ['slack', 'status'],
+        boundary.environment().MOHIST_MANAGER_LAUNCHER!,
+      )
+      expect(result).toMatchObject({ exitCode: 126, signal: null, stdout: '' })
+      expect(result.stderr).toContain('the Manager command could not be started')
       expect(JSON.stringify(result)).not.toContain(grant.managementCredential)
       expect(JSON.stringify(result)).not.toContain(grant.replyCredential)
     } finally {
@@ -555,15 +607,59 @@ describe.sequential('ManagerExecutionBoundary', () => {
       await boundary.dispose()
     }
   })
+
+  it('verifies a peer through a socket table larger than the former inspector buffer', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mohist-manager-boundary-'))
+    const inspector = join(root, 'ss-stub.mjs')
+    const acceptedInode = '4242'
+    const peerInode = '4243'
+    const rows = 15_000
+    const fillerRow = `u_str ESTAB 0 0 ${'x'.repeat(240)} 1 * 2 3 users:(("node",pid=11,fd=3))`
+    const matchingRow = `u_str ESTAB 0 0 * ${peerInode} * ${acceptedInode} users:(("node",pid=77,fd=9))`
+    await writeFile(
+      inspector,
+      `#!/usr/bin/env node
+for (let index = 0; index < ${rows}; index++) process.stdout.write(${JSON.stringify(`${fillerRow}\n`)})
+process.stdout.write(${JSON.stringify(`${matchingRow}\n`)})
+setTimeout(() => process.exit(0), 20_000)
+`,
+      { encoding: 'utf8', mode: 0o700 },
+    )
+    await chmod(inspector, 0o700)
+
+    const launcherPath = join(root, 'mo')
+    const verdict = await inspectManagerPeer({ _handle: { fd: 9 } } as unknown as Socket, launcherPath, undefined, {
+      platform: 'linux',
+      socketInode: async (path) =>
+        path === `/proc/${process.pid}/fd/9` ? acceptedInode : path === '/proc/77/fd/9' ? peerInode : null,
+      scanSocketTable: async (onRow) => {
+        await scanSocketInspectorRows(inspector, onRow)
+      },
+      readCommandLine: async (pid) => (pid === 77 ? ['/usr/bin/node', launcherPath] : []),
+      samePath: async (left, right) => left === right,
+    })
+
+    // The matching row is the last row of a table larger than the fixed 4 MiB
+    // inspector buffer that used to refuse a legitimate launcher on a busy
+    // host. The stub outlives the match, so stopping early is part of the
+    // contract: waiting for its exit would hit the test deadline instead.
+    expect(verdict).toEqual({ admitted: true })
+    expect(rows * (fillerRow.length + 1)).toBeGreaterThan(4 * 1024 * 1024)
+  })
 })
 
-async function writeChunkedCredentialStubMo(root: string): Promise<{ executable: string; frozenWorkDir: string }> {
+async function writeChunkedCredentialStubMo(
+  root: string,
+): Promise<{ executable: string; frozenWorkDir: string; invocations: () => { pid: number; args: string[] }[] }> {
   const directory = join(root, 'chunked-stub-bin')
   const executable = join(directory, 'mo')
   const frozenWorkDir = join(root, 'chunked-frozen-workdir')
+  const marker = join(root, 'chunked-stub-invocations.jsonl')
   await mkdir(directory, { recursive: true })
   await mkdir(frozenWorkDir, { recursive: true })
   const script = `#!/usr/bin/env node
+const fs = require('node:fs')
+fs.appendFileSync(${JSON.stringify(marker)}, JSON.stringify({ pid: process.pid, args: process.argv.slice(2) }) + '\\n')
 const management = ${JSON.stringify(grant.managementCredential)}
 const reply = ${JSON.stringify(grant.replyCredential)}
 const split = (value) => [value.slice(0, Math.ceil(value.length / 2)), value.slice(Math.ceil(value.length / 2))]
@@ -581,7 +677,18 @@ process.stdout.write(managementFirst, () => {
 `
   await writeFile(executable, script, { encoding: 'utf8', mode: 0o700 })
   await chmod(executable, 0o700)
-  return { executable, frozenWorkDir }
+  return {
+    executable,
+    frozenWorkDir,
+    invocations: () =>
+      existsSync(marker)
+        ? readFileSync(marker, 'utf8')
+            .trim()
+            .split('\n')
+            .filter(Boolean)
+            .map((line) => JSON.parse(line) as { pid: number; args: string[] })
+        : [],
+  }
 }
 
 describe('manager capability surface mirror', () => {
@@ -626,11 +733,15 @@ describe('manager capability surface mirror', () => {
   })
 })
 
-function requestLauncher(
-  brokerPath: string,
-  args: string[],
-  launcherPath: string,
-): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+interface LauncherResult {
+  readonly exitCode: number | null
+  readonly signal: NodeJS.Signals | null
+  readonly stdout: string
+  readonly stderr: string
+}
+
+function requestLauncher(brokerPath: string, args: string[], launcherPath: string): Promise<LauncherResult> {
+  // tsconfig lib predates Promise.withResolvers, so the executor form stays.
   return new Promise((resolve, reject) => {
     const child = spawn(launcherPath, args, {
       env: { ...process.env, MOHIST_MANAGER_BROKER: brokerPath },
@@ -645,43 +756,44 @@ function requestLauncher(
       stderr += chunk.toString('utf8')
     })
     child.once('error', reject)
-    child.once('close', (exitCode) =>
-      resolve({ exitCode: typeof exitCode === 'number' ? exitCode : 126, stdout, stderr }),
+    // A signal-killed launcher must stay distinguishable from its own exit
+    // code: collapsing both into 126 is what made the recurring failure
+    // undecidable.
+    child.once('close', (exitCode, signal) =>
+      resolve({ exitCode: exitCode ?? null, signal: signal ?? null, stdout, stderr }),
     )
   })
 }
 
-function requestBroker(
+interface BrokerExchange {
+  readonly body: string
+  readonly socketError: NodeJS.ErrnoException | null
+}
+
+function exchangeWithBroker(
   path: string,
   kind: 'management' | 'reply',
   args?: string[],
   cwd?: string,
-): Promise<{ credential?: string; exitCode?: number; stdout?: string; stderr?: string } | null> {
-  return new Promise((resolve, reject) => {
+): Promise<BrokerExchange> {
+  return new Promise((resolve) => {
     const socket = createConnection(path)
     let body = ''
+    let socketError: NodeJS.ErrnoException | null = null
     socket.setEncoding('utf8')
     socket.on('data', (chunk) => {
       body += chunk
     })
-    socket.on('error', reject)
-    socket.on('end', () => {
-      try {
-        const parsed =
-          body.length === 0
-            ? null
-            : (JSON.parse(body) as { credential?: string; exitCode?: number; stdout?: string; stderr?: string })
-        resolve(parsed)
-      } catch (error) {
-        reject(error)
-      }
-    })
-    // Disposal destroys in-flight sockets instead of writing a response.
-    socket.on('close', () => {
-      if (body.length === 0) resolve(null)
+    socket.on('error', (error: NodeJS.ErrnoException) => {
+      socketError = error
     })
     socket.on('connect', () => {
       socket.end(JSON.stringify({ kind, ...(args === undefined ? {} : { args }), ...(cwd ? { cwd } : {}) }))
     })
+    socket.on('close', () => resolve({ body, socketError }))
   })
+}
+
+function parseBrokerBody(body: string): { credential?: string; exitCode?: number; stdout?: string; stderr?: string } {
+  return JSON.parse(body) as { credential?: string; exitCode?: number; stdout?: string; stderr?: string }
 }
