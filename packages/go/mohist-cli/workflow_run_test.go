@@ -171,6 +171,7 @@ func TestWorkflowAndArtifactDiscoveryPrecedeRequiredInputs(t *testing.T) {
 		{name: "workflow delete", args: []string{"workflow", "delete", "--json"}, want: workflowFields},
 		{name: "workflow validate", args: []string{"workflow", "validate", "--json"}, want: workflowValidateFields},
 		{name: "run view", args: []string{"run", "view", "--json"}, want: runFields},
+		{name: "artifact list", args: []string{"run", "artifact", "list", "--json"}, want: artifactFields},
 		{name: "artifact view", args: []string{"run", "artifact", "view", "--json"}, want: artifactFields},
 		{name: "artifact get", args: []string{"run", "artifact", "get", "--json"}, want: artifactFields},
 		{name: "feedback list", args: []string{"run", "feedback", "list", "--json"}, want: feedbackFields},
