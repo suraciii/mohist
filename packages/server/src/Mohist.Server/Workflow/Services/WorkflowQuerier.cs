@@ -327,7 +327,7 @@ public sealed record WorkflowRunBindingView(
         StartedAt: null,
         WorkflowRunBindingDefinitionView.Unavailable(
             WorkflowRunBindingDefinitionView.ReasonUnreadableRunState));
-}
+
 /// <summary>
 /// Availability and content of the definition one run actually bound at
 /// start time. When <see cref="Available"/> is true the content is the
