@@ -40,10 +40,7 @@ export function getWorkflowRunDetail(workflowRunId: string, signal?: AbortSignal
 }
 
 export function getWorkflowRunBinding(workflowRunId: string, signal?: AbortSignal) {
-  return request<WorkflowRunBinding>(
-    `/workflow-runs/${encodeURIComponent(workflowRunId)}/binding`,
-    { signal },
-  )
+  return request<WorkflowRunBinding>(`/workflow-runs/${encodeURIComponent(workflowRunId)}/binding`, { signal })
 }
 
 export function getParentIssueCandidates(projectId?: string | null, signal?: AbortSignal) {
