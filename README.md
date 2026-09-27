@@ -1,13 +1,12 @@
 # Mohist
 
-Mohist is an Agent-friendly AI software production-line control system for
-individual developers.
+Mohist is an Agent-oriented software factory built for the transition from
+workshop-style development to industrial, automated software production.
 
-It turns product ideas into executable Issues. Agents continuously plan,
-implement, check, and integrate each Issue according to its Workflow. An Agent
-acts as the owner's proxy and can occupy a pipeline position that a person can
-also occupy. Quality comes from clear inputs, automated checks, review tasks,
-Approval decisions, failure recovery, and human escalation when necessary.
+People use Agents to organize requirements and build, maintain, and control
+workflows. Those workflows use Agents and programs to implement requirements
+automatically. People evaluate delivery results and use the evidence to
+improve both the requirements and the workflows, without directing every task.
 
 Users usually stay in Slack, an IDE, or another existing workspace. A configured
 Mohist Agent is available directly from the Web UI or CLI. It can also connect
@@ -64,7 +63,7 @@ The arrows show how a work request reaches the execution environment.
 
 ## Workflow
 
-A Workflow Profile defines how an Issue enters the production line. Its stages,
+A Workflow Profile defines how an Issue is executed. Its stages,
 tasks, checks, and approval points are configurable. The default Profile is
 `mohist/local`:
 
@@ -106,11 +105,13 @@ tasks, checks, and approval points are configurable. The default Profile is
 
 Draft and Backlog belong to the Issue lifecycle rather than the Profile. This
 readiness boundary keeps incomplete requirements out of execution; the Profile
-begins at Plan only after the Issue is ready and explicitly started.
+begins only after the Issue is ready and explicitly started. `Plan` is the
+first stage of the default Profile, not a requirement for every Workflow.
 
-Multiple Issues advance concurrently and independently. Key stages, such as
-Plan and Check, stop at approval points. The Workflow continues after it
-receives an `Approve` or `Request Changes` decision. See
+Multiple Issues advance concurrently and independently. In the default
+Profile, Plan and Check stop at Approval Points. An authorized Agent can
+provide the `Approve` or `Request Changes` decision; a person does not have to
+approve each stage. Other Profiles define their own stages and decisions. See
 [Workflow Profile](specs/workflow/profiles/spec.md).
 
 ## Event Responses
@@ -124,7 +125,9 @@ the owner. See [Agent Event Routing](specs/agent/event-routing/spec.md) and
 ## Documentation
 
 Start with [Getting Started](docs/getting-started.md). See
-[Product Vision](docs/vision.md) for the product direction and the
+[Philosophy of Software Development](docs/philosophy.md) for the development
+paradigm and why Mohist exists,
+[Product Vision](docs/vision.md) for the product direction, and the
 [documentation index](docs/README.md) for the complete reading path.
 Cross-domain architecture and decisions are under [`design/`](design/README.md).
 Feature-local behavior and design contracts are under

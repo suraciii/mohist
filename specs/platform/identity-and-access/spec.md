@@ -1,9 +1,9 @@
 # Authentication and Access
 
-Mohist is self-hosted for one person, but several machines and services must
-act on that person's behalf. Each machine caller receives a separate,
-revocable identity instead of sharing the administrator's long-lived secret.
-This keeps local use simple and makes remote effects attributable.
+Machines and services need attributable access to Mohist. Each machine
+caller receives a separate, revocable identity instead of sharing the
+administrator's long-lived secret. This keeps local use simple and makes
+remote effects attributable.
 
 ## Product Commitments
 

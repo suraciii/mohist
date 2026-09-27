@@ -1,7 +1,9 @@
 # User Guides
 
-Start with the [Product Vision](vision.md) and [Core Concepts](concepts.md),
-then follow [Getting Started](getting-started.md) to deliver one real Issue.
+Start with the [Philosophy of Software Development](philosophy.md) for the
+development paradigm and why Mohist exists, then the [Product Vision](vision.md)
+and [Core Concepts](concepts.md). Follow [Getting Started](getting-started.md)
+to deliver one real Issue.
 
 For ongoing operation, use [Self-Hosting](self-host.md),
 [Runner Operations](runner-operations.md), and [Troubleshooting](troubleshooting.md).
