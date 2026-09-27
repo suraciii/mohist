@@ -76,7 +76,7 @@ with one default per Project. Each Issue binds one target Repository that its
 execution must not change after work starts.
 
 **Issue**:
-One unit of work that can enter the production line. Its identity is its
+One unit of work that can be executed through a Workflow. Its identity is its
 Project-scoped number; it has no second internal ID.
 
 **Composite Issue, parent Issue, child Issue**:
@@ -89,15 +89,16 @@ _Avoid_: sub-issue; the DSL surface is `--parent`, and the relationship terms
 are parent and child
 
 **Epic**:
-A product goal that continuously supplies linked Issues to the production
-line, advancing one ready Issue at a time. Epic membership is recorded on the
+A product goal that continuously advances linked Issues through their
+Workflows, one ready Issue at a time. Epic membership is recorded on the
 Issue, and Epic progress is a query over current Issue state, not a second
 membership store.
 
 **Workflow**:
-The production line that advances a ready Issue from Plan to Done. Draft and
-Backlog belong to the Issue lifecycle, outside the Workflow, so requirement
-readiness and execution state cannot be confused.
+The configurable process that executes a ready Issue according to its
+Workflow Definition. It has no required stage names. Draft and Backlog belong
+to the Issue lifecycle, outside the Workflow, so requirement readiness and
+execution state cannot be confused.
 
 **WorkflowRun**:
 One execution of a Workflow for one Issue. It owns orchestration state, binds
@@ -116,7 +117,7 @@ Approval Points, Feedback Tasks, recovery, and template expressions.
 **Runner**:
 The execution-plane process that registers with a Server, claims dispatched
 work, materializes Workspace directories, executes resolved Agent work, and
-reports facts. It never interprets facts or decides production-line state.
+reports facts. It never interprets facts or decides Workflow state.
 
 **Skill**:
 A reusable description of an Agent capability. An External Agent installs
@@ -181,7 +182,7 @@ whether an AgentSession can accept more input.
 
 **Approval Point**:
 A Workflow state after a Stage that waits for an Approve or Request Changes
-decision before the output can continue through the pipeline.
+decision before the output can continue through the Workflow.
 
 _Avoid_: quality gate
 
