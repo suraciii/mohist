@@ -30,9 +30,9 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AppendTerminalCloseResult> AppendTerminalCloseAsync(AppendTerminalCloseCommand command);
     Task<AgentSessionRecoveryResult> CompactAsync(CompactAgentSessionCommand command);
     Task<AgentSessionRecoveryResult> ResetAsync(ResetAgentSessionCommand command);
-    Task<AgentSessionRecoveryResult?> GetCompletedRecoveryAsync(SessionCommandKind command, string? idempotencyKey = null);
-    Task<SessionCommandRequest> PrepareSessionCommandAsync(SessionCommandKind command, string ownerProcessGeneration, string? idempotencyKey = null);
-    Task<SessionCommandRequest> BeginResetAsync(string ownerProcessGeneration, string? idempotencyKey = null);
+    Task<AgentSessionRecoveryResult?> GetCompletedRecoveryAsync(SessionCommandKind command, string idempotencyKey);
+    Task<SessionCommandRequest> PrepareSessionCommandAsync(SessionCommandKind command, string ownerProcessGeneration, string idempotencyKey);
+    Task<SessionCommandRequest> BeginResetAsync(string ownerProcessGeneration, string idempotencyKey);
     Task<SessionCommandAdmissionOutcome> AdmitSessionCommandEffectAsync(string operationId, string ownerProcessGeneration);
     Task<AgentSessionRecoveryResult> CompleteCompactAsync(CompleteCompactAgentSessionCommand command);
     Task<AgentSessionRecoveryResult> CompleteResetAsync(CompleteResetAgentSessionCommand command);

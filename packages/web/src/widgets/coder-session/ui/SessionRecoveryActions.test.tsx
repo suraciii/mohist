@@ -3,10 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { ProjectProvider } from '../../../entities/project'
-import {
-  SessionRecoveryActions,
-  type SessionRecoveryActionsClients,
-} from './SessionRecoveryActions'
+import { SessionRecoveryActions, type SessionRecoveryActionsClients } from './SessionRecoveryActions'
 import type { SessionRecoveryResult } from '../../../entities/coder-session'
 import { ApiError } from '../../../shared/api/client'
 
@@ -38,17 +35,24 @@ function createQueryClient() {
 // (completed/failed/running/...) to an `activity` field (idle/active/unknown).
 // Recovery actions are enabled only when `activity === 'idle'`. Tests below
 // drive the component via `activity` instead of the deprecated `status`.
-function renderActions(props: Partial<React.ComponentProps<typeof SessionRecoveryActions>> = {}) {
-  const queryClient = createQueryClient()
-  return render(
+function recoveryActionsTree(
+  queryClient: QueryClient,
+  props: Partial<React.ComponentProps<typeof SessionRecoveryActions>> = {},
+) {
+  return (
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-        id: 'proj-1',
-        name: 'Test',
-        createdAt: '2026-01-01T00:00:00Z',
-        updatedAt: '2026-01-01T00:00:00Z',
-        repositories: [],
-      }]}>
+      <ProjectProvider
+        initialProjectId="proj-1"
+        initialProjects={[
+          {
+            id: 'proj-1',
+            name: 'Test',
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+            repositories: [],
+          },
+        ]}
+      >
         <SessionRecoveryActions
           issueNumber={110}
           sessionName="session-abc"
@@ -59,8 +63,13 @@ function renderActions(props: Partial<React.ComponentProps<typeof SessionRecover
           {...props}
         />
       </ProjectProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
+}
+
+function renderActions(props: Partial<React.ComponentProps<typeof SessionRecoveryActions>> = {}) {
+  const queryClient = createQueryClient()
+  return { ...render(recoveryActionsTree(queryClient, props)), queryClient }
 }
 
 function makeCompactResult(overrides?: Partial<SessionRecoveryResult>): SessionRecoveryResult {
@@ -79,6 +88,7 @@ beforeEach(() => {
   _compactError = null
   _resetData = null
   _resetError = null
+  sessionStorage.clear()
 })
 
 describe('SessionRecoveryActions — visibility and enabled/disabled states', () => {
@@ -175,9 +185,7 @@ describe('SessionRecoveryActions — structured disabled-reason tooltip', () => 
 
     const tooltip = screen.getByRole('tooltip')
     expect(tooltip).toHaveTextContent('Session is running')
-    expect(tooltip).toHaveTextContent(
-      /finish or cancel the session before compacting or resetting/i,
-    )
+    expect(tooltip).toHaveTextContent(/finish or cancel the session before compacting or resetting/i)
 
     fireEvent.blur(screen.getByTestId('session-recovery-compact').parentElement as HTMLElement)
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
@@ -190,9 +198,7 @@ describe('SessionRecoveryActions — structured disabled-reason tooltip', () => 
 
     const tooltip = screen.getByRole('tooltip')
     expect(tooltip).toHaveTextContent('Session is running')
-    expect(tooltip).toHaveTextContent(
-      /finish or cancel the session before compacting or resetting/i,
-    )
+    expect(tooltip).toHaveTextContent(/finish or cancel the session before compacting or resetting/i)
   })
 
   it('does not wrap enabled buttons with a disabled-reason tooltip', () => {
@@ -218,9 +224,12 @@ describe('SessionRecoveryActions — structured disabled-reason tooltip', () => 
     let resolveCompact: (value: SessionRecoveryResult) => void = () => {}
     const clients = {
       ...recoveryClients,
-      compact: vi.fn(() => new Promise<SessionRecoveryResult>((resolve) => {
-        resolveCompact = resolve
-      })),
+      compact: vi.fn(
+        () =>
+          new Promise<SessionRecoveryResult>((resolve) => {
+            resolveCompact = resolve
+          }),
+      ),
     }
     renderActions({ clients })
 
@@ -244,9 +253,12 @@ describe('SessionRecoveryActions — structured disabled-reason tooltip', () => 
     let resolveReset: (value: SessionRecoveryResult) => void = () => {}
     const clients = {
       ...recoveryClients,
-      reset: vi.fn(() => new Promise<SessionRecoveryResult>((resolve) => {
-        resolveReset = resolve
-      })),
+      reset: vi.fn(
+        () =>
+          new Promise<SessionRecoveryResult>((resolve) => {
+            resolveReset = resolve
+          }),
+      ),
     }
     renderActions({ clients })
 
@@ -260,7 +272,9 @@ describe('SessionRecoveryActions — structured disabled-reason tooltip', () => 
 
     focusDisabledWrapper('session-recovery-compact')
     expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent('Recovery action in progress')
-    expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent(/wait for the current recovery action to finish/i)
+    expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent(
+      /wait for the current recovery action to finish/i,
+    )
 
     await act(async () => {
       resolveReset(makeCompactResult())
@@ -348,7 +362,9 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
 
     const dialog = screen.getByTestId('session-recovery-reset-dialog')
     expect(dialog).toBeInTheDocument()
-    expect(dialog).toHaveTextContent('A new runtime session will start without prior context. Transcript and audit history remain available.')
+    expect(dialog).toHaveTextContent(
+      'A new runtime session will start without prior context. Transcript and audit history remain available.',
+    )
   })
 
   it('renders Cancel and "Reset Session" buttons inside the dialog', () => {
@@ -420,6 +436,27 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
     expect(screen.getByTestId('session-recovery-reset-dialog')).toBeInTheDocument()
   })
 
+  it('starts a new reset operation after a known no-effect rejection', async () => {
+    _resetError = { status: 409, message: 'Cannot reset while session is active' }
+    const first = renderActions({ status: 'completed' })
+    fireEvent.click(screen.getByTestId('session-recovery-reset'))
+    fireEvent.click(screen.getByTestId('session-recovery-reset-confirm'))
+    await waitFor(() => {
+      expect(resetClient).toHaveBeenCalledTimes(1)
+    })
+    first.unmount()
+
+    _resetError = null
+    renderActions({ status: 'completed' })
+    fireEvent.click(screen.getByTestId('session-recovery-reset'))
+    fireEvent.click(screen.getByTestId('session-recovery-reset-confirm'))
+    await waitFor(() => {
+      expect(resetClient).toHaveBeenCalledTimes(2)
+    })
+
+    expect(String(resetClient.mock.calls[1][3])).not.toBe(String(resetClient.mock.calls[0][3]))
+  })
+
   it('shows a "Session not found" error when resetSession returns 404', async () => {
     _resetError = { status: 404, message: 'Session not found' }
     renderActions({ status: 'completed' })
@@ -436,13 +473,18 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
   it('clears the inline error when the session activity changes', async () => {
     const { rerender } = render(
       <QueryClientProvider client={createQueryClient()}>
-        <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-          id: 'proj-1',
-          name: 'Test',
-          createdAt: '2026-01-01T00:00:00Z',
-          updatedAt: '2026-01-01T00:00:00Z',
-          repositories: [],
-        }]}>
+        <ProjectProvider
+          initialProjectId="proj-1"
+          initialProjects={[
+            {
+              id: 'proj-1',
+              name: 'Test',
+              createdAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+              repositories: [],
+            },
+          ]}
+        >
           <SessionRecoveryActions
             issueNumber={110}
             sessionName="session-abc"
@@ -463,13 +505,18 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
 
     rerender(
       <QueryClientProvider client={createQueryClient()}>
-        <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-          id: 'proj-1',
-          name: 'Test',
-          createdAt: '2026-01-01T00:00:00Z',
-          updatedAt: '2026-01-01T00:00:00Z',
-          repositories: [],
-        }]}>
+        <ProjectProvider
+          initialProjectId="proj-1"
+          initialProjects={[
+            {
+              id: 'proj-1',
+              name: 'Test',
+              createdAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+              repositories: [],
+            },
+          ]}
+        >
           <SessionRecoveryActions
             issueNumber={110}
             sessionName="session-abc"
@@ -483,5 +530,170 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
     )
 
     expect(screen.queryByTestId('session-recovery-error')).not.toBeInTheDocument()
+  })
+})
+
+describe('SessionRecoveryActions — caller-owned recovery identity', () => {
+  function keyOf(call: unknown[]): string {
+    return String(call[3])
+  }
+
+  it('retries the original operation with the same key after a remount', async () => {
+    _compactError = { status: 0, message: 'Network error' }
+    const first = renderActions({ status: 'completed' })
+    fireEvent.click(screen.getByTestId('session-recovery-compact'))
+    await waitFor(() => {
+      expect(compactClient).toHaveBeenCalledTimes(1)
+    })
+    first.unmount()
+
+    // Navigating away and back rebuilds the component with no state of its own.
+    renderActions({ status: 'completed' })
+    fireEvent.click(screen.getByTestId('session-recovery-compact'))
+    await waitFor(() => {
+      expect(compactClient).toHaveBeenCalledTimes(2)
+    })
+
+    const keys = compactClient.mock.calls.map(keyOf)
+    expect(keys[1]).toBe(keys[0])
+  })
+
+  it('releases the original scope when props change before the outcome', async () => {
+    let resolveCompact: (value: SessionRecoveryResult) => void = () => {}
+    const compact = vi.fn(
+      () =>
+        new Promise<SessionRecoveryResult>((resolve) => {
+          resolveCompact = resolve
+        }),
+    )
+    const clients = { ...recoveryClients, compact }
+    const first = renderActions({ clients })
+
+    fireEvent.click(screen.getByTestId('session-recovery-compact'))
+    await waitFor(() => {
+      expect(compact).toHaveBeenCalledTimes(1)
+    })
+    const originalKey = keyOf(compact.mock.calls[0])
+
+    first.rerender(recoveryActionsTree(first.queryClient, { sessionName: 'session-def', clients }))
+    await act(async () => {
+      resolveCompact(makeCompactResult({ id: 'session-abc', wasCompacted: true }))
+    })
+    first.unmount()
+
+    renderActions({ sessionName: 'session-abc' })
+    fireEvent.click(screen.getByTestId('session-recovery-compact'))
+    await waitFor(() => {
+      expect(compactClient).toHaveBeenCalledTimes(1)
+    })
+
+    expect(keyOf(compactClient.mock.calls[0])).not.toBe(originalKey)
+  })
+
+  it('does not let a stale same-scope completion delete a newer key', async () => {
+    const resolvers: Array<(value: SessionRecoveryResult) => void> = []
+    const compact = vi.fn(
+      () =>
+        new Promise<SessionRecoveryResult>((resolve) => {
+          resolvers.push(resolve)
+        }),
+    )
+    const clients = { ...recoveryClients, compact }
+    const clickCompact = (view: { container: HTMLElement }) => {
+      const button = view.container.querySelector<HTMLElement>('[data-testid="session-recovery-compact"]')
+      if (!button) throw new Error('compact action is not rendered')
+      fireEvent.click(button)
+    }
+
+    const first = renderActions({ clients })
+    clickCompact(first)
+    const second = renderActions({ clients })
+    clickCompact(second)
+    await waitFor(() => {
+      expect(compact).toHaveBeenCalledTimes(2)
+    })
+    const firstKey = keyOf(compact.mock.calls[0])
+
+    await act(async () => {
+      resolvers[1](makeCompactResult({ id: 'session-abc', wasCompacted: true }))
+    })
+
+    const third = renderActions({ clients })
+    clickCompact(third)
+    await waitFor(() => {
+      expect(compact).toHaveBeenCalledTimes(3)
+    })
+    const replacementKey = keyOf(compact.mock.calls[2])
+    expect(replacementKey).not.toBe(firstKey)
+
+    await act(async () => {
+      resolvers[0](makeCompactResult({ id: 'session-abc', wasCompacted: true }))
+    })
+
+    const fourth = renderActions({ clients })
+    clickCompact(fourth)
+    await waitFor(() => {
+      expect(compact).toHaveBeenCalledTimes(4)
+    })
+    expect(keyOf(compact.mock.calls[3])).toBe(replacementKey)
+
+    await act(async () => {
+      resolvers[2](makeCompactResult())
+      resolvers[3](makeCompactResult())
+    })
+    first.unmount()
+    second.unmount()
+    third.unmount()
+    fourth.unmount()
+  })
+
+  it('starts a new operation with a new key after a known outcome', async () => {
+    _compactData = makeCompactResult({ id: 'session-abc', wasCompacted: true })
+    const firstSuccess = vi.fn()
+    const first = renderActions({ status: 'completed', onSuccess: firstSuccess })
+    fireEvent.click(screen.getByTestId('session-recovery-compact'))
+    await waitFor(() => {
+      expect(firstSuccess).toHaveBeenCalledTimes(1)
+    })
+    first.unmount()
+
+    renderActions({ status: 'completed' })
+    fireEvent.click(screen.getByTestId('session-recovery-compact'))
+    await waitFor(() => {
+      expect(compactClient).toHaveBeenCalledTimes(2)
+    })
+
+    const keys = compactClient.mock.calls.map(keyOf)
+    expect(keys[1]).not.toBe(keys[0])
+  })
+
+  it('does not reuse an identity across sessions or across operations', async () => {
+    _compactError = { status: 0, message: 'Network error' }
+
+    const sessionA = renderActions({ status: 'completed', sessionName: 'session-abc' })
+    fireEvent.click(screen.getByTestId('session-recovery-compact'))
+    await waitFor(() => {
+      expect(compactClient).toHaveBeenCalledTimes(1)
+    })
+    sessionA.unmount()
+
+    const sessionB = renderActions({ status: 'completed', sessionName: 'session-def' })
+    fireEvent.click(screen.getByTestId('session-recovery-compact'))
+    await waitFor(() => {
+      expect(compactClient).toHaveBeenCalledTimes(2)
+    })
+    sessionB.unmount()
+
+    const resetScope = renderActions({ status: 'completed', sessionName: 'session-abc' })
+    fireEvent.click(screen.getByTestId('session-recovery-reset'))
+    fireEvent.click(screen.getByTestId('session-recovery-reset-confirm'))
+    await waitFor(() => {
+      expect(resetClient).toHaveBeenCalledTimes(1)
+    })
+    resetScope.unmount()
+
+    const compactKeys = compactClient.mock.calls.map(keyOf)
+    expect(compactKeys[1]).not.toBe(compactKeys[0])
+    expect(keyOf(resetClient.mock.calls[0])).not.toBe(compactKeys[0])
   })
 })

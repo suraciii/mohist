@@ -16,8 +16,8 @@ public sealed partial class AgentSessionRecoveryGrainSpecs
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-before-reset");
 
-        var first = await grain.BeginResetAsync("test-generation");
-        var duplicate = await grain.BeginResetAsync("test-generation");
+        var first = await grain.BeginResetAsync("test-generation", "reset-concurrent");
+        var duplicate = await grain.BeginResetAsync("test-generation", "reset-concurrent");
 
         Assert.Equal(first.OperationId, duplicate.OperationId);
         Assert.Equal("runtime-before-reset", first.ExpectedRuntimeSessionId);
@@ -43,13 +43,13 @@ public sealed partial class AgentSessionRecoveryGrainSpecs
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-before-recovery");
 
-        var compact = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation");
-        var exception = await Assert.ThrowsAsync<RecoveryOperationInProgressException>(() => grain.BeginResetAsync("test-generation"));
+        var compact = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation", "compact-competing");
+        var exception = await Assert.ThrowsAsync<RecoveryOperationInProgressException>(() => grain.BeginResetAsync("test-generation", "reset-competing"));
 
         Assert.Equal(sessionId, exception.SessionId);
         Assert.Equal("compact", exception.Operation);
         await grain.AbandonResetAsync(compact.OperationId!);
-        var reset = await grain.BeginResetAsync("test-generation");
+        var reset = await grain.BeginResetAsync("test-generation", "reset-competing");
         Assert.Equal("runtime-before-recovery", reset.ExpectedRuntimeSessionId);
     }
 
@@ -58,8 +58,8 @@ public sealed partial class AgentSessionRecoveryGrainSpecs
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-before-compact");
 
-        var compact = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation");
-        var duplicate = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation");
+        var compact = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation", "compact-concurrent");
+        var duplicate = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation", "compact-concurrent");
 
         Assert.Equal(sessionId, compact.SessionId);
         Assert.Equal(compact.OperationId, duplicate.OperationId);
@@ -76,7 +76,7 @@ public sealed partial class AgentSessionRecoveryGrainSpecs
     public async Task CompletionWithoutEffectAdmissionIsRejected(SessionCommandKind command)
     {
         var (grain, _) = await CreateAttachedSessionAsync("runtime-without-admission");
-        var request = await grain.PrepareSessionCommandAsync(command, "test-generation");
+        var request = await grain.PrepareSessionCommandAsync(command, "test-generation", "no-admission");
         var effectsBefore = _fixture.StateStore.Events.Count(e =>
             e.Value is AgentSessionContextCompacted or AgentSessionRuntimeBound);
 
@@ -99,7 +99,7 @@ public sealed partial class AgentSessionRecoveryGrainSpecs
     public async Task CompletionWithMismatchedAdmissionGenerationIsRejected()
     {
         var (grain, _) = await CreateAttachedSessionAsync("runtime-admission-generation");
-        var request = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "generation-a");
+        var request = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "generation-a", "mismatched-generation");
         var compactionsBefore = _fixture.StateStore.Events.Count(e => e.Value is AgentSessionContextCompacted);
 
         Assert.Equal(SessionCommandAdmissionOutcome.Missing,
@@ -138,12 +138,12 @@ public sealed partial class AgentSessionRecoveryGrainSpecs
     public async Task CompletedCompact_DoesNotBlockTheNextReset()
     {
         var (grain, _) = await CreateAttachedSessionAsync("runtime-completed-compact");
-        var compact = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation");
+        var compact = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation", "compact-before-reset");
         await grain.AdmitSessionCommandEffectAsync(compact.OperationId, "test-generation");
         await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(compact.OperationId, "test-generation", Summary: "summary"));
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
 
-        var reset = await grain.BeginResetAsync("test-generation");
+        var reset = await grain.BeginResetAsync("test-generation", "reset-after-compact");
 
         Assert.NotEqual(compact.OperationId, reset.OperationId);
         Assert.Equal("runtime-completed-compact", reset.ExpectedRuntimeSessionId);

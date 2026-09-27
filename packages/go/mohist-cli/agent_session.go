@@ -1143,7 +1143,21 @@ func runSession(ctx context.Context, deps Dependencies, c *client, cmd command) 
 		return requestAndRender(ctx, deps, c, http.MethodPost, agentSessionPath(project, "/"+sid+"/followup"), body, cmd, true, argValue(cmd.args, "idempotency-key", ""))
 	}
 	if action == "compact" || action == "reset" {
-		return requestAndRender(ctx, deps, c, http.MethodPost, agentSessionPath(project, "/"+sid+"/"+action), map[string]any{}, cmd, false, argValue(cmd.args, "idempotency-key", ""))
+		// Compact and Reset are caller-keyed writes: the key is the
+		// operation's identity, so a lost response is retried with the same
+		// key instead of starting a second operation.
+		key := argValue(cmd.args, "idempotency-key", "")
+		if key == "" {
+			key = fmt.Sprintf("%d", deps.Now().UnixNano())
+			// The generated key reaches stderr before the request so a lost
+			// response is still recoverable; stdout stays the result channel.
+			fmt.Fprintln(deps.Stderr, "Idempotency-Key: "+key)
+		}
+		data, err := c.requestHeaders(ctx, http.MethodPost, agentSessionPath(project, "/"+sid+"/"+action), map[string]any{}, map[string]string{"Idempotency-Key": key}, true)
+		if err != nil {
+			return commandFailureExit(deps, ctx, cmd, keyedRetryHint(err, sessionRecoveryNextAction(project, cmd, action, key)))
+		}
+		return renderResult(deps, data, cmd)
 	}
 	if action == "stop" {
 		body := map[string]any{}
@@ -1185,11 +1199,27 @@ func runSessionSchedule(ctx context.Context, deps Dependencies, c *client, proje
 	return ExitUsage
 }
 
+// sessionRecoveryNextAction rebuilds the same Compact or Reset invocation with
+// the same key, the recovery for a keyed write whose outcome is unknown.
+func sessionRecoveryNextAction(project string, cmd command, action, key string) string {
+	parts := []string{"mo session " + action, shellWord(argValue(cmd.args, "session", ""))}
+	if project != "" {
+		parts = append(parts, "--project", shellWord(project))
+	}
+	return strings.Join(append(parts, "--idempotency-key", shellWord(key)), " ")
+}
+
 func requestAndRender(ctx context.Context, deps Dependencies, c *client, method, path string, body any, cmd command, retry bool, key string) int {
 	data, err := c.requestHeaders(ctx, method, path, body, map[string]string{"Idempotency-Key": key}, retry)
 	if err != nil {
 		return operationExit(deps, ctx, err)
 	}
+	return renderResult(deps, data, cmd)
+}
+
+// renderResult writes one successful response in the form the command asked
+// for: field names, a field projection, or the payload itself.
+func renderResult(deps Dependencies, data json.RawMessage, cmd command) int {
 	if cmd.fieldsOnly {
 		for _, f := range cmd.catalog {
 			fmt.Fprintln(deps.Stdout, f)

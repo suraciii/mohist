@@ -217,3 +217,96 @@ func TestKeyedWriteFailureWithoutFactsStaysRetryableWithTheSameKey(t *testing.T)
 		t.Fatalf("attempts=%d: a described response is not a lost one", attempts)
 	}
 }
+
+func TestSessionCompactStatesItsKeyBeforeTheRequestAndRepeatsIt(t *testing.T) {
+	attempts := 0
+	keys := []string{}
+	readableBeforeTheRequest := false
+	var stderr *strings.Builder
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		attempts++
+		key := r.Header.Get("Idempotency-Key")
+		keys = append(keys, key)
+		readableBeforeTheRequest = key != "" && stderr != nil &&
+			strings.Contains(stderr.String(), "Idempotency-Key: "+key)
+		if attempts == 1 {
+			return &http.Response{StatusCode: http.StatusOK, Body: failingBody{}, Header: make(http.Header)}, nil
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"id":"agent-session-1","status":"idle","operation":"compact","wasCompacted":true}}`), nil
+	}), map[string]string{"MOHIST_SERVER_URL": "http://server/", "MOHIST_OPERATOR_TOKEN": "token"})
+	stderr = errOut
+
+	code := Run(context.Background(), []string{"session", "compact", "agent-session-1", "--project", "p1", "--json", "id,operation,wasCompacted"}, deps)
+
+	if code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if attempts != 2 || keys[0] == "" || keys[0] != keys[1] {
+		t.Fatalf("attempts=%d keys=%q stderr=%q", attempts, keys, errOut.String())
+	}
+	// A Compact without a caller key is rejected, so the CLI states the key it
+	// will send before the request; the replayed answer then carries the
+	// operation that key names.
+	if !readableBeforeTheRequest {
+		t.Fatalf("the key was not readable before the request: stderr=%q", errOut.String())
+	}
+	if !strings.Contains(out.String(), `"id":"agent-session-1"`) ||
+		!strings.Contains(out.String(), `"operation":"compact"`) {
+		t.Fatalf("stdout=%q", out.String())
+	}
+}
+
+func TestSessionResetExplicitKeyWinsAndIsNotAnnounced(t *testing.T) {
+	attempts := 0
+	keys := []string{}
+	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		attempts++
+		keys = append(keys, r.Header.Get("Idempotency-Key"))
+		return response(http.StatusServiceUnavailable, `{"success":false,"error":"Runner is unavailable","code":"runner_unavailable","effect":"none","retrySafe":true}`), nil
+	}), map[string]string{"MOHIST_SERVER_URL": "http://server/", "MOHIST_OPERATOR_TOKEN": "token"})
+
+	code := Run(context.Background(), []string{"session", "reset", "agent-session-1", "--project", "p1", "--idempotency-key", "caller-key"}, deps)
+
+	if code != ExitOperation || attempts != 1 {
+		t.Fatalf("code=%d attempts=%d stderr=%q", code, attempts, errOut.String())
+	}
+	if keys[0] != "caller-key" {
+		t.Fatalf("keys=%q", keys)
+	}
+	if strings.Contains(errOut.String(), "Idempotency-Key: ") {
+		t.Fatalf("an explicit key is not re-announced: stderr=%q", errOut.String())
+	}
+}
+
+func TestSessionCompactUnknownOutcomeNamesItsOwnRetry(t *testing.T) {
+	attempts := 0
+	deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		attempts++
+		return &http.Response{StatusCode: http.StatusOK, Body: failingBody{}, Header: make(http.Header)}, nil
+	}), map[string]string{"MOHIST_SERVER_URL": "http://server/", "MOHIST_OPERATOR_TOKEN": "token"})
+
+	code := Run(context.Background(), []string{"session", "compact", "agent-session-1", "--project", "p1"}, deps)
+
+	if code != ExitOperation || attempts != 2 {
+		t.Fatalf("code=%d attempts=%d stderr=%q", code, attempts, errOut.String())
+	}
+	key := generatedIdempotencyKey(t, errOut.String())
+	want := "hint: mo session compact agent-session-1 --project p1 --idempotency-key " + key
+	if !strings.Contains(errOut.String(), want) {
+		t.Fatalf("stderr=%q missing %s", errOut.String(), want)
+	}
+}
+
+// generatedIdempotencyKey reads the key the CLI announced on stderr, the only
+// handle a caller has on a write whose response was lost.
+func generatedIdempotencyKey(t *testing.T, stderr string) string {
+	t.Helper()
+	const prefix = "Idempotency-Key: "
+	for _, line := range strings.Split(stderr, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+	}
+	t.Fatalf("stderr=%q announces no key", stderr)
+	return ""
+}

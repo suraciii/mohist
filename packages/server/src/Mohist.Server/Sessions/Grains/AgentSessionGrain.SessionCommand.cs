@@ -58,7 +58,10 @@ public sealed partial class AgentSessionGrain
         outcome.WasCompacted);
 
     private static string RecoveryIdempotencyKey(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? Guid.NewGuid().ToString("N") : value;
+        string.IsNullOrWhiteSpace(value)
+            ? throw new ArgumentException(
+                "a caller idempotency key is required for Compact and Reset", nameof(value))
+            : value;
 
     private static bool MatchesRecoveryIdempotencyKey(AgentSessionResetReservation reservation, string key) =>
         string.Equals(reservation.IdempotencyKey, key, StringComparison.Ordinal);

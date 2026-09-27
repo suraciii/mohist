@@ -1,4 +1,6 @@
 export { canFollowupSession, deriveSessionStatusKind } from './model/sessionActivity'
+export { beginRecoveryRequest, completeRecoveryRequest } from './model/recoveryRequestIdentity'
+export type { RecoveryOperation, RecoveryRequestScope } from './model/recoveryRequestIdentity'
 export { useWorkflowRunSessions } from './model/useWorkflowRunSessions'
 export {
   compactSession,

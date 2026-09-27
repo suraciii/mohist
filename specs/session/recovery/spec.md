@@ -17,6 +17,14 @@ reconcile, not as permission to retry with a new identity.
 - Requests that require a key are rejected before acceptance when it is missing.
 - Querying an operation never repeats its side effect.
 
+Every Compact and Reset carries a caller key. A request without one is rejected
+before acceptance; Mohist never substitutes a hidden identity. The caller owns
+that key until the outcome is known: the CLI states the key it will send before
+the request and names the exact retry command when the result is unknown, and
+the Web keeps one key per Project, Session, and operation across navigation and
+remount. After a known outcome, the next Compact or Reset is a new intent with a
+new key.
+
 The Server is the authority. `idle` permits a new Turn, Compact, or Reset;
 `active` means work is queued, executing, or awaiting confirmation; `unknown`
 blocks new work until the original operation is queried or reconciled.
@@ -97,9 +105,9 @@ These operations change Session execution, not work ownership.
   without proving that an earlier effect is absent.
 - Force-reset, Runtime rebind, and Runner handoff have no public CLI, Web, or
   API operation. Public recovery remains limited to Compact and Reset.
-- Compact and Reset currently generate hidden operation keys, so clients cannot
-  reliably retry them after a lost response. The product contract requires
-  caller-visible keys for these and other Session operations.
+- Compact and Reset require a caller key end to end, but the operations without a
+  public entry point — force-reset, Runtime rebind, and Runner handoff — still
+  need the same rule.
 
 ---
 

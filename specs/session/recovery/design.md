@@ -175,10 +175,12 @@ Current implementation gaps are:
   synchronous Session-to-AgentJob stop-unknown cycle and no deadline on recovery
   redelivery. The [Follow-up and Stop rules](../input-and-turns/design.md#follow-up-and-stop)
   are the target.
-- Every Follow-up requires a caller `requestId`. Compact, Reset, recovery,
-  handoff, rebind, and force-reset require a caller `operationId`. Some current
-  entry points still synthesize a hidden key when the caller omits one, so
-  response-loss retry cannot name the original intent.
+- Every Follow-up requires a caller `requestId`. Compact and Reset require the
+  caller-owned `Idempotency-Key` header, which is the stable identity used to
+  recover a lost response. The Server rejects either request before accepting
+  an effect when that header is missing. Recovery, handoff, rebind, and
+  force-reset have no public entry point yet and still need the same rule.
+
 ## Runtime Switch Context
 
 Mohist keeps a logical Agent Session alive even when its runtime-specific

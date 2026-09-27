@@ -335,7 +335,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     public async Task<SessionCommandRequest> PrepareSessionCommandAsync(
         SessionCommandKind command,
         string ownerProcessGeneration,
-        string? idempotencyKey = null)
+        string idempotencyKey)
     {
         if (command is not (SessionCommandKind.Compact or SessionCommandKind.Reset))
             throw new ArgumentOutOfRangeException(nameof(command), command, "Unsupported session command");
@@ -343,12 +343,13 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         return await BeginSessionCommandAsync(command, ownerProcessGeneration, idempotencyKey);
     }
 
-    public Task<SessionCommandRequest> BeginResetAsync(string ownerProcessGeneration, string? idempotencyKey = null) =>
+    public Task<SessionCommandRequest> BeginResetAsync(string ownerProcessGeneration, string idempotencyKey) =>
         BeginSessionCommandAsync(SessionCommandKind.Reset, ownerProcessGeneration, idempotencyKey);
 
-    public async Task<AgentSessionRecoveryResult?> GetCompletedRecoveryAsync(SessionCommandKind command, string? idempotencyKey = null)
+    public async Task<AgentSessionRecoveryResult?> GetCompletedRecoveryAsync(SessionCommandKind command, string idempotencyKey)
     {
-        if (string.IsNullOrWhiteSpace(idempotencyKey)) return null;
+        if (string.IsNullOrWhiteSpace(idempotencyKey))
+            throw new ArgumentException("a caller idempotency key is required", nameof(idempotencyKey));
         var session = await GetRequiredAsync();
         var commandName = CommandName(command);
         var admission = session.Status.SessionCommandAdmissionFacts?.LastOrDefault(candidate =>
@@ -360,8 +361,9 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     private async Task<SessionCommandRequest> BeginSessionCommandAsync(
         SessionCommandKind command,
         string ownerProcessGeneration,
-        string? idempotencyKey)
+        string idempotencyKey)
     {
+        var key = RecoveryIdempotencyKey(idempotencyKey);
         if (string.IsNullOrEmpty(ownerProcessGeneration))
             throw new ArgumentException("owner process generation is required", nameof(ownerProcessGeneration));
         var session = await GetRequiredAsync();
@@ -369,7 +371,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         EnsureSessionIdleForRecovery(session);
         if (command == SessionCommandKind.Reset)
             EnsureBindingChangeAllowed(session, null);
-        var key = RecoveryIdempotencyKey(idempotencyKey);
         var commandName = CommandName(command);
 
         var admittedReplay = session.Status.SessionCommandAdmissionFacts?.LastOrDefault(candidate =>
@@ -385,8 +386,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             {
                 if (string.Equals(pending.OwnerProcessGeneration, ownerProcessGeneration, StringComparison.Ordinal))
                 {
-                    if (!sameCommand
-                        || (idempotencyKey is not null && !MatchesRecoveryIdempotencyKey(pending, key)))
+                    if (!sameCommand || !MatchesRecoveryIdempotencyKey(pending, key))
                         throw new RecoveryOperationInProgressException(session.Id, pending.Command);
                     return BuildSessionCommandRequest(session, command, pending);
                 }
