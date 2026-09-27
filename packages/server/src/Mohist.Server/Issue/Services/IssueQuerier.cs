@@ -443,10 +443,7 @@ public class IssueQuerier : IScopedService
 
     public IssueInfo ToInfo(Domain.Issue issue, ProjectInfo? project, string? projectDefaultProfileId, IReadOnlySet<string>? disabledIds)
     {
-        var selection = _effectiveProfileResolver.ResolveWithSource(
-            issue.WorkflowProfileId,
-            projectDefaultProfileId,
-            disabledIds);
+        var selection = _effectiveProfileResolver.ResolveWithSource(issue.WorkflowProfileId, projectDefaultProfileId, disabledIds);
         return IssueReadModelLoader.BuildInfo(issue, project, selection.ProfileId, selection.Source);
     }
 
