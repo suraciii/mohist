@@ -249,9 +249,13 @@ public class WorkflowRunBindingApiSpecs : IClassFixture<DefaultMohistIntegration
 
         var data = await ReadDataAsync(await _client.GetAsync($"/api/workflow-runs/{wrId}"));
 
+        // Concise means the response shape: the composed status view and the
+        // profile identifier, with no definition block. Stage/task titles in
+        // the status view are the existing concise content, not the full
+        // bound definition.
         var keys = data.EnumerateObject().Select(property => property.Name).OrderBy(name => name).ToArray();
         Assert.Equal(["issueRef", "status", "workflowProfileId"], keys);
-        Assert.DoesNotContain("compile", data.GetRawText(), StringComparison.Ordinal);
+        Assert.Equal("spec/workflow", data.GetProperty("workflowProfileId").GetString());
 
         _ = projectId;
     }
@@ -349,12 +353,12 @@ public class WorkflowRunBindingApiSpecs : IClassFixture<DefaultMohistIntegration
         Assert.Equal(JsonValueKind.Object, content.ValueKind);
         return [.. content.GetProperty("stages")
             .EnumerateArray()
-            .Select(stage => stage.GetProperty("stage").GetString())];
+            .Select(stage => stage.GetProperty("stage").GetString() ?? "")];
     }
 
     private static string[] StageIdsFromSummaries(JsonElement stages)
     {
         Assert.Equal(JsonValueKind.Array, stages.ValueKind);
-        return [.. stages.EnumerateArray().Select(stage => stage.GetProperty("stage").GetString())];
+        return [.. stages.EnumerateArray().Select(stage => stage.GetProperty("stage").GetString() ?? "")];
     }
 }

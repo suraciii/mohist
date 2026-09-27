@@ -28,8 +28,9 @@ public static class MohistApiRegistration
         app.MapUnifiedSessionRoutes();
         app.MapWorkflowTaskRoutes();
         app.MapWorkflowRunControlRoutes();
-        app.MapWorkflowRunDetailRoute();
         app.MapWorkflowRunBindingRoute();
+        app.MapWorkflowRunDetailRoute();
+        app.MapWorkflowDiagnosisRoutes();
         app.MapDoctorRoutes();
         app.MapConfigRoutes();
         app.MapSystemRoutes();

@@ -216,10 +216,6 @@ Definition, and `GET /api/workflow-runs/{workflowRunId}/binding` returns the str
 projection — retained identity, selection, and timing facts, with the bound semantic definition,
 its availability, and an explicit reason when it is unavailable. Task views expose `agentJobId` and `agentSessionId` for Agent-backed Tasks.
 
-## Status
-
-Current gaps for complete Definition binding, content revisions, and Approval Feedback are
-recorded once in [Implementation Gaps](spec.md#implementation-gaps-1).
 
 ## Built-in Workflows
 

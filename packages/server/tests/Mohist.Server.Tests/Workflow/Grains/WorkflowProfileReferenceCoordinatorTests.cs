@@ -304,7 +304,7 @@ public sealed class WorkflowProfileReferenceCoordinatorTests
             DefaultWorkflowProfileId = "mohist/local",
             DefaultWorkflowProfileIdKey = null,
             Variables = "{}",
-            UpdatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero),
         });
         db.SaveChanges();
         return (coordinator, state, provider, database);

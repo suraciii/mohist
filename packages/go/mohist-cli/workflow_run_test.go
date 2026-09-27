@@ -37,6 +37,7 @@ func TestWorkflowValidateDefinitionErrorsReportPathAndReason(t *testing.T) {
 	deps.ReadFile = func(string) (string, error) {
 		return "stages:\n  - not-a-valid-stage: true\n", nil
 	}
+	deps.Input = strings.NewReader("stages:\n  - not-a-valid-stage: true\n")
 
 	if code := Run(context.Background(), []string{"workflow", "validate", "--project", "proj-1", "--file", "-"}, deps); code != ExitOperation {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())

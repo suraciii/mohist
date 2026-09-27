@@ -491,13 +491,6 @@ The built-in Profiles are:
 
 See [Workflow Profile](spec.md).
 
-## Implementation Gaps
-Current WorkflowRun source, status, and recovery reads still consult live
-Profile data in some paths. Current Profile update guards still inspect active
-Runs instead of relying on the content revision: Profile reads do not yet
-return a revision, `mo workflow edit` does not yet require an expected
-revision, and a save conflict does not yet distinguish a stale revision.
-
 ---
 
 Implementation source: See the domain decomposition in

@@ -30,7 +30,7 @@ export interface WorkflowRunDetail {
     title: string
   } | null
   workflowProfileId: string | null
-
+}
 /**
  * Availability and content of the semantic definition one Run actually
  * bound at start time (#1099). When `available` is true, `content` is the

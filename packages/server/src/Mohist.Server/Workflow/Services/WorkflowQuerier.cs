@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -96,7 +97,18 @@ public class WorkflowQuerier : IScopedService, IWorkflowStatusReader
             .FirstOrDefaultAsync(r => r.WorkflowRunId == workflowRunId);
         if (row is null) return null;
 
-        var run = _runDeserializer.Deserialize(row.State);
+        WorkflowRun? run;
+        try
+        {
+            run = _runDeserializer.Deserialize(row.State);
+        }
+        catch
+        {
+            // Schema-incompatible or truncated state deserializes no
+            // better than undecodable JSON: the row's retained identity
+            // columns are the honest answer.
+            run = null;
+        }
         if (run is null)
         {
             // The stored state cannot be decoded. The row still carries
@@ -302,13 +314,13 @@ public class WorkflowQuerier : IScopedService, IWorkflowStatusReader
 /// </summary>
 public sealed record WorkflowRunBindingView(
     string WorkflowRunId,
-    string? ProjectId,
-    int? IssueNumber,
-    string? Status,
-    string? WorkflowProfileId,
-    string? ExplicitWorkflowProfileId,
-    DateTimeOffset? CreatedAt,
-    DateTimeOffset? StartedAt,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ProjectId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? IssueNumber,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? Status,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? WorkflowProfileId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ExplicitWorkflowProfileId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] DateTimeOffset? CreatedAt,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] DateTimeOffset? StartedAt,
     WorkflowRunBindingDefinitionView Definition)
 {
     /// <summary>
@@ -327,7 +339,7 @@ public sealed record WorkflowRunBindingView(
         StartedAt: null,
         WorkflowRunBindingDefinitionView.Unavailable(
             WorkflowRunBindingDefinitionView.ReasonUnreadableRunState));
-
+}
 /// <summary>
 /// Availability and content of the definition one run actually bound at
 /// start time. When <see cref="Available"/> is true the content is the
@@ -338,9 +350,9 @@ public sealed record WorkflowRunBindingView(
 /// </summary>
 public sealed record WorkflowRunBindingDefinitionView(
     bool Available,
-    string? Source,
-    string? Reason,
-    WorkflowDefinition? Content)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? Source,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? Reason,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] WorkflowDefinition? Content)
 {
     /// <summary>The content belongs to the run's start-time snapshot.</summary>
     public const string SourceRunSnapshot = "run-snapshot";

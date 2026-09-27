@@ -94,14 +94,15 @@ public class IssueReadModelLoader : IScopedService
         var profiles = await _profileProvider.ListAsync(projectId);
 
         return IssueRowMapper.ByNumber(rows, projectId)
-            .Select(issue => ToReadModel(BuildInfo(
-                issue,
-                project,
-                ResolveProfileSelection(
+            .Select(issue =>
+            {
+                var selection = ResolveProfileSelection(
                     issue.WorkflowProfileId,
                     projectDefaultProfileId,
                     profiles,
-                    disabledIds))))
+                    disabledIds);
+                return ToReadModel(BuildInfo(issue, project, selection.ProfileId, selection.Source));
+            })
             .ToList();
     }
 
@@ -205,6 +206,8 @@ public class IssueReadModelLoader : IScopedService
             UpdatedAt = issue.UpdatedAt.ToString("o"),
             ArchivedAt = issue.ArchivedAt?.ToString("o"),
             CompletedAt = issue.CompletedAt?.ToString("o"),
+            WorkflowRunId = issue.WorkflowRunId,
+            WorkflowProfileId = resolvedProfileId,
             WorkflowProfileMode = issue.NoWorkflow ? "none" : issue.WorkflowProfileId is null ? "inherit" : "explicit",
             WorkflowProfileSource = resolvedProfileSource,
             NoWorkflow = issue.NoWorkflow,

@@ -941,6 +941,7 @@ public class IssueQuerier : IScopedService
         foreach (var row in childRows)
         {
             var domain = IssueStore.Deserialize(row.State);
+            if (domain is null) continue;
             var selection = IssueReadModelLoader.ResolveProfileSelection(
                 domain.WorkflowProfileId,
                 projectDefaultProfileId,

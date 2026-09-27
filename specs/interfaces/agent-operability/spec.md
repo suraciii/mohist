@@ -394,10 +394,10 @@ preserve live in [the design note](design.md).
   is known, whether retry is safe, and the next action; `--json` selects the
   structured form instead of the two text lines.
 - `mo workflow validate` reports its complete validation scope through the
-  Server, `run view --json binding` reads the actual Run binding on demand,
-  and Issue reads expose the next-start selection facts. Profile content
-  revisions and the edit precondition are recorded as gaps in
-  [Workflow Profile](../../workflow/profiles/spec.md#implementation-gaps-1).
+ Server, `run view --json binding` reads the actual Run binding on demand,
+ and Issue reads expose the next-start selection facts. Profile content
+ revisions and the edit precondition are enforced at the authoritative write
+ boundary.
 
 Outside this increment, and not silently treated as current requirements:
 capability metadata catalogs, cursor-based observation of a Run, a complete

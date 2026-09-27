@@ -516,6 +516,8 @@ func renderWorkflowValidation(deps Dependencies, cmd command, data json.RawMessa
 	if issues := workflowValidationIssues(report); len(issues) > 0 {
 		fmt.Fprintln(deps.Stderr, "Workflow Profile is invalid:")
 		writeValidationIssues(deps, issues)
+	} else if exit == ExitOK {
+		fmt.Fprintln(deps.Stdout, "Workflow Profile is valid.")
 	}
 	if !strings.EqualFold(report.ActionValidationStatus, "performed") {
 		fmt.Fprintf(deps.Stderr, "Validation incomplete: the Action check was skipped (%s).\n", workflowActionSkipReason(report))
@@ -560,9 +562,6 @@ func workflowSaveRequest(ctx context.Context, deps Dependencies, c *client, cmd 
 	}
 	if len(env.Validation) > 0 {
 		merged["validation"] = env.Validation
-		if report, ok := decodeWorkflowValidation(env.Validation); ok && !strings.EqualFold(report.ActionValidationStatus, "performed") {
-			fmt.Fprintf(deps.Stderr, "Saved with the Action check skipped: %s\n", workflowActionSkipReason(report))
-		}
 	}
 	encoded, err := json.Marshal(merged)
 	if err != nil {
@@ -576,6 +575,9 @@ func workflowSaveRequest(ctx context.Context, deps Dependencies, c *client, cmd 
 			return ExitOperation
 		}
 		return writeJSON(deps.Stdout, json.RawMessage(selected))
+	}
+	if report, ok := decodeWorkflowValidation(env.Validation); ok && !strings.EqualFold(report.ActionValidationStatus, "performed") {
+		fmt.Fprintf(deps.Stderr, "Saved with the Action check skipped: %s\n", workflowActionSkipReason(report))
 	}
 	return writeJSON(deps.Stdout, json.RawMessage(encoded))
 }
