@@ -21,7 +21,7 @@ var workflowFields = []string{"projectId", "profileId", "name", "description", "
 var workflowSaveFields = append(append([]string{}, workflowFields...), "validation")
 var workflowValidateFields = []string{"projectId", "definitionErrors", "actionErrors", "actionValidationStatus", "actionValidationSkipReason"}
 var runListFields = []string{"id", "status", "stage", "currentStage", "issueNumber"}
-var runFields = []string{"id", "status", "currentStage", "stages", "issueRef", "pendingWork", "failure", "availableActions", "assignedTo"}
+var runFields = []string{"id", "status", "currentStage", "stages", "issueRef", "pendingWork", "failure", "availableActions", "assignedTo", "binding"}
 var artifactFields = []string{"artifactId", "path", "kind", "contentType", "size", "actionAttemptId", "recordedAt"}
 var feedbackFields = []string{"id", "issueNumber", "workflowRunId", "stage", "status", "body", "createdAt", "resolution", "updatedAt"}
 
@@ -698,6 +698,15 @@ func runRunView(ctx context.Context, deps Dependencies, c *client, cmd command) 
 	_ = json.Unmarshal(root["status"], &status)
 	projected := projectRunStatus(status)
 	projected["issueRef"] = root["issueRef"]
+	// `binding` is the on-demand actual-binding read: only a caller that
+	// selects the field pays for it, and the ordinary status stays concise.
+	if contains(cmd.fields, "binding") {
+		binding, e := fetchRunBinding(ctx, c, run)
+		if e != nil {
+			return commandFailureExit(deps, ctx, cmd, e)
+		}
+		projected["binding"] = binding
+	}
 	enc, _ := json.Marshal(projected)
 	if cmd.fieldsOnly {
 		for _, f := range cmd.catalog {
@@ -716,6 +725,22 @@ func runRunView(ctx context.Context, deps Dependencies, c *client, cmd command) 
 		fmt.Fprintln(deps.Stderr, "Available actions: "+strings.Join(actions, ", "))
 	}
 	return writeJSON(deps.Stdout, json.RawMessage(enc))
+}
+
+// fetchRunBinding reads the on-demand Run binding projection: the
+// start-time facts and the complete semantic definition the Run actually
+// bound, never the Profile's current content. It is fetched only when a
+// caller explicitly selects the `binding` field.
+func fetchRunBinding(ctx context.Context, c *client, run string) (json.RawMessage, error) {
+	data, e := c.request(ctx, http.MethodGet, "/api/workflow-runs/"+url.PathEscape(run)+"/binding", nil)
+	if e != nil {
+		return nil, e
+	}
+	var binding map[string]json.RawMessage
+	if json.Unmarshal(data, &binding) != nil || binding == nil {
+		return nil, responseShapeError("error: invalid run binding response [invalid_response]")
+	}
+	return data, nil
 }
 
 // availableActions decodes the read model's permitted Run controls; a
@@ -775,6 +800,25 @@ func runRunControl(ctx context.Context, deps Dependencies, c *client, cmd comman
 	}
 	if len(cmd.fields) > 0 {
 		projected := projectRunControlResult(data)
+		// The Run field catalog is shared with `run view`, so a control that
+		// selects `binding` answers with the same on-demand read. When the
+		// control response carries no readable Run, the fetched binding is
+		// still reported rather than collapsing to null.
+		if contains(cmd.fields, "binding") {
+			binding, e := fetchRunBinding(ctx, c, run)
+			if e != nil {
+				return commandFailureExit(deps, ctx, cmd, e)
+			}
+			if projected == nil {
+				var root map[string]json.RawMessage
+				if json.Unmarshal(data, &root) == nil {
+					projected = root
+				}
+			}
+			if projected != nil {
+				projected["binding"] = binding
+			}
+		}
 		if projected != nil {
 			enc, _ := json.Marshal(projected)
 			s, _ := SelectFields(enc, cmd.fields, false)

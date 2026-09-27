@@ -2,6 +2,7 @@ package mohistcli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -169,7 +170,7 @@ func TestWorkflowAndArtifactDiscoveryPrecedeRequiredInputs(t *testing.T) {
 		{name: "workflow edit", args: []string{"workflow", "edit", "--json"}, want: workflowSaveFields},
 		{name: "workflow delete", args: []string{"workflow", "delete", "--json"}, want: workflowFields},
 		{name: "workflow validate", args: []string{"workflow", "validate", "--json"}, want: workflowValidateFields},
-		{name: "artifact list", args: []string{"run", "artifact", "list", "--json"}, want: artifactFields},
+		{name: "run view", args: []string{"run", "view", "--json"}, want: runFields},
 		{name: "artifact view", args: []string{"run", "artifact", "view", "--json"}, want: artifactFields},
 		{name: "artifact get", args: []string{"run", "artifact", "get", "--json"}, want: artifactFields},
 		{name: "feedback list", args: []string{"run", "feedback", "list", "--json"}, want: feedbackFields},
@@ -389,5 +390,180 @@ func TestRunArtifactGetStreamsRecordedBytes(t *testing.T) {
 	}
 	if out.String() != "artifact bytes" {
 		t.Fatalf("output=%q", out.String())
+	}
+}
+
+func TestRunViewSelectedBindingReadsActualRunBinding(t *testing.T) {
+	detail := `{"success":true,"data":{"issueRef":{"projectId":"proj-1","number":42},"status":{"workflowRunId":"wr-1","status":"running","currentStage":"build"}}}`
+	bindingData := `{"workflowRunId":"wr-1","projectId":"proj-1","issueNumber":42,"status":"running","workflowProfileId":"spec/workflow","explicitWorkflowProfileId":null,"createdAt":"2026-09-27T00:00:00Z","startedAt":"2026-09-27T00:01:00Z","definition":{"available":true,"source":"run-snapshot","reason":null,"content":{"stages":[{"stage":"build","tasks":[{"id":"build","uses":"spec/task"}],"checks":[]}]}}}`
+	binding := `{"success":true,"data":` + bindingData + `}`
+
+	t.Run("selected binding returns the structured read", func(t *testing.T) {
+		paths := []string{}
+		deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			paths = append(paths, r.Method+" "+r.URL.Path)
+			switch r.URL.Path {
+			case "/api/workflow-runs/wr-1":
+				return response(http.StatusOK, detail), nil
+			case "/api/workflow-runs/wr-1/binding":
+				return response(http.StatusOK, binding), nil
+			default:
+				t.Fatalf("unexpected path=%q", r.URL.Path)
+				return nil, nil
+			}
+		}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+		if code := Run(context.Background(), []string{"run", "view", "wr-1", "--json", "binding"}, deps); code != ExitOK {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+		}
+		if len(paths) != 2 || paths[0] != "GET /api/workflow-runs/wr-1" || paths[1] != "GET /api/workflow-runs/wr-1/binding" {
+			t.Fatalf("paths=%v", paths)
+		}
+		if want := `{"binding":` + bindingData + `}` + "\n"; out.String() != want {
+			t.Fatalf("stdout=%q want=%q", out.String(), want)
+		}
+	})
+
+	t.Run("default view stays concise without the binding", func(t *testing.T) {
+		requests := 0
+		deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			requests++
+			if r.URL.Path != "/api/workflow-runs/wr-1" {
+				t.Fatalf("path=%q", r.URL.Path)
+			}
+			return response(http.StatusOK, detail), nil
+		}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+		if code := Run(context.Background(), []string{"run", "view", "wr-1"}, deps); code != ExitOK {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+		}
+		if requests != 1 || strings.Contains(out.String(), "binding") {
+			t.Fatalf("requests=%d stdout=%q", requests, out.String())
+		}
+	})
+
+	t.Run("mixed selection keeps status facts and binding together", func(t *testing.T) {
+		deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			switch r.URL.Path {
+			case "/api/workflow-runs/wr-1":
+				return response(http.StatusOK, detail), nil
+			case "/api/workflow-runs/wr-1/binding":
+				return response(http.StatusOK, binding), nil
+			default:
+				t.Fatalf("unexpected path=%q", r.URL.Path)
+				return nil, nil
+			}
+		}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+		if code := Run(context.Background(), []string{"run", "view", "wr-1", "--json", "id,binding"}, deps); code != ExitOK {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+		}
+		var projected map[string]any
+		if err := json.Unmarshal([]byte(out.String()), &projected); err != nil {
+			t.Fatalf("stdout=%q: %v", out.String(), err)
+		}
+		if projected["id"] != "wr-1" {
+			t.Fatalf("id=%v", projected["id"])
+		}
+		bindingField, ok := projected["binding"].(map[string]any)
+		if !ok || bindingField["workflowProfileId"] != "spec/workflow" {
+			t.Fatalf("binding=%v", projected["binding"])
+		}
+		definition, ok := bindingField["definition"].(map[string]any)
+		if !ok || definition["available"] != true || definition["source"] != "run-snapshot" {
+			t.Fatalf("definition=%v", bindingField["definition"])
+		}
+	})
+
+	t.Run("binding read failure fails the command without stdout", func(t *testing.T) {
+		deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			switch r.URL.Path {
+			case "/api/workflow-runs/wr-1":
+				return response(http.StatusOK, detail), nil
+			case "/api/workflow-runs/wr-1/binding":
+				return response(http.StatusNotFound, `{"success":false,"error":"Workflow run 'wr-1' not found","code":"not_found"}`), nil
+			default:
+				t.Fatalf("unexpected path=%q", r.URL.Path)
+				return nil, nil
+			}
+		}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+		if code := Run(context.Background(), []string{"run", "view", "wr-1", "--json", "binding"}, deps); code != ExitOperation {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+		}
+		if out.Len() != 0 || !strings.Contains(errOut.String(), "not_found") {
+			t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
+		}
+	})
+}
+
+func TestRunViewBindingReportsUnavailableDefinitionWithReason(t *testing.T) {
+	detail := `{"success":true,"data":{"issueRef":{"projectId":"proj-1","number":42},"status":{"workflowRunId":"wr-1","status":"stopped","currentStage":"build"}}}`
+	bindingData := `{"workflowRunId":"wr-1","projectId":"proj-1","issueNumber":42,"status":"stopped","workflowProfileId":"spec/workflow","explicitWorkflowProfileId":null,"createdAt":"2026-09-27T00:00:00Z","startedAt":"2026-09-27T00:01:00Z","definition":{"available":false,"source":null,"reason":"no-snapshot","content":null}}`
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/api/workflow-runs/wr-1":
+			return response(http.StatusOK, detail), nil
+		case "/api/workflow-runs/wr-1/binding":
+			return response(http.StatusOK, `{"success":true,"data":`+bindingData+`}`), nil
+		default:
+			t.Fatalf("unexpected path=%q", r.URL.Path)
+			return nil, nil
+		}
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+	if code := Run(context.Background(), []string{"run", "view", "wr-1", "--json", "binding"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	var projected map[string]any
+	if err := json.Unmarshal([]byte(out.String()), &projected); err != nil {
+		t.Fatalf("stdout=%q: %v", out.String(), err)
+	}
+	binding, ok := projected["binding"].(map[string]any)
+	if !ok {
+		t.Fatalf("stdout=%q", out.String())
+	}
+	if binding["status"] != "stopped" || binding["workflowProfileId"] != "spec/workflow" {
+		t.Fatalf("binding=%v", binding)
+	}
+	definition, ok := binding["definition"].(map[string]any)
+	if !ok || definition["available"] != false || definition["reason"] != "no-snapshot" || definition["content"] != nil {
+		t.Fatalf("definition=%v", binding["definition"])
+	}
+}
+
+func TestRunControlSelectedBindingAnswersThroughSharedCatalog(t *testing.T) {
+	controlResult := `{"success":true,"data":{"issueRef":{"projectId":"proj-1","number":42},"status":{"workflowRunId":"wr-1","status":"paused","currentStage":"build"},"workflowProfileId":"spec/workflow"}}`
+	bindingData := `{"workflowRunId":"wr-1","projectId":"proj-1","issueNumber":42,"status":"paused","workflowProfileId":"spec/workflow","definition":{"available":true,"source":"run-snapshot","reason":null,"content":{"stages":[]}}}`
+	paths := []string{}
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/api/workflow-runs/wr-1/pause":
+			return response(http.StatusOK, controlResult), nil
+		case "/api/workflow-runs/wr-1/binding":
+			return response(http.StatusOK, `{"success":true,"data":`+bindingData+`}`), nil
+		default:
+			t.Fatalf("unexpected path=%q", r.URL.Path)
+			return nil, nil
+		}
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+	if code := Run(context.Background(), []string{"run", "pause", "wr-1", "--json", "status,binding"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if len(paths) != 2 || paths[0] != "POST /api/workflow-runs/wr-1/pause" || paths[1] != "GET /api/workflow-runs/wr-1/binding" {
+		t.Fatalf("paths=%v", paths)
+	}
+	var projected map[string]any
+	if err := json.Unmarshal([]byte(out.String()), &projected); err != nil {
+		t.Fatalf("stdout=%q: %v", out.String(), err)
+	}
+	if projected["status"] != "paused" {
+		t.Fatalf("status=%v", projected["status"])
+	}
+	binding, ok := projected["binding"].(map[string]any)
+	if !ok || binding["workflowRunId"] != "wr-1" {
+		t.Fatalf("binding=%v", projected["binding"])
 	}
 }

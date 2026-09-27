@@ -245,4 +245,98 @@ public class EffectiveWorkflowProfileResolverTests
 
         Assert.Null(resolved);
     }
+
+    // ===================== Selection source (#1099) =====================
+
+    [Fact]
+    public void ResolveCoreWithSource_ExplicitIssueSelection_ReportsIssueSource()
+    {
+        var (profileId, source) = EffectiveWorkflowProfileResolver.ResolveCoreWithSource(
+            issueSelection: "mohist/github-pr",
+            projectDefaultId: "mohist/local",
+            exists: _ => true);
+
+        Assert.Equal("mohist/github-pr", profileId);
+        Assert.Equal(EffectiveWorkflowProfileResolver.SourceIssue, source);
+    }
+
+    [Fact]
+    public void ResolveCoreWithSource_NoSelectionWithProjectDefault_ReportsProjectDefaultSource()
+    {
+        var (profileId, source) = EffectiveWorkflowProfileResolver.ResolveCoreWithSource(
+            issueSelection: null,
+            projectDefaultId: "mohist/github-pr",
+            exists: _ => true);
+
+        Assert.Equal("mohist/github-pr", profileId);
+        Assert.Equal(EffectiveWorkflowProfileResolver.SourceProjectDefault, source);
+    }
+
+    [Fact]
+    public void ResolveCoreWithSource_NoSelectionOrDefault_WithSystemList_ReportsSystemSource()
+    {
+        var (profileId, source) = EffectiveWorkflowProfileResolver.ResolveCoreWithSource(
+            issueSelection: null,
+            projectDefaultId: null,
+            exists: _ => true,
+            systemProfileIds: ["mohist/local", "mohist/github-pr"]);
+
+        Assert.Equal("mohist/local", profileId);
+        Assert.Equal(EffectiveWorkflowProfileResolver.SourceSystem, source);
+    }
+
+    [Fact]
+    public void ResolveCoreWithSource_NoSelectionOrDefault_WithoutSystemList_ReportsSystemDefault()
+    {
+        var (profileId, source) = EffectiveWorkflowProfileResolver.ResolveCoreWithSource(
+            issueSelection: null,
+            projectDefaultId: null,
+            exists: _ => true);
+
+        Assert.Equal(IssueWorkflowProfiles.LocalId, profileId);
+        Assert.Equal(EffectiveWorkflowProfileResolver.SourceSystem, source);
+    }
+
+    [Fact]
+    public void ResolveCoreWithSource_DisabledExplicitSelection_FallsThroughAndReportsActualSource()
+    {
+        // The mode still says "explicit", but the effective selection the
+        // next start will use comes from the Project default; the source
+        // reports where the effective id actually came from.
+        var (profileId, source) = EffectiveWorkflowProfileResolver.ResolveCoreWithSource(
+            issueSelection: "mohist/github-pr",
+            projectDefaultId: "mohist/local",
+            exists: _ => true,
+            disabledIds: new[] { "mohist/github-pr" },
+            systemProfileIds: ["mohist/local", "mohist/github-pr"]);
+
+        Assert.Equal("mohist/local", profileId);
+        Assert.Equal(EffectiveWorkflowProfileResolver.SourceProjectDefault, source);
+    }
+
+    [Fact]
+    public void ResolveCoreWithSource_NothingEnabled_ReportsNoSelection()
+    {
+        var (profileId, source) = EffectiveWorkflowProfileResolver.ResolveCoreWithSource(
+            issueSelection: null,
+            projectDefaultId: null,
+            exists: _ => true,
+            disabledIds: ["mohist/local", "mohist/github-pr"],
+            systemProfileIds: ["mohist/local", "mohist/github-pr"]);
+
+        Assert.Null(profileId);
+        Assert.Null(source);
+    }
+
+    [Fact]
+    public void ResolveWithService_ReportsSourceAlongsideProfileId()
+    {
+        var resolver = BuildResolver();
+
+        var inherited = resolver.ResolveWithSource(issueSelection: null, projectDefaultId: "mohist/github-pr");
+        Assert.Equal(("mohist/github-pr", EffectiveWorkflowProfileResolver.SourceProjectDefault), inherited);
+
+        var explicitSelection = resolver.ResolveWithSource(issueSelection: "mohist/github-pr", projectDefaultId: null);
+        Assert.Equal(("mohist/github-pr", EffectiveWorkflowProfileResolver.SourceIssue), explicitSelection);
+    }
 }

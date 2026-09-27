@@ -94,15 +94,24 @@ public class IssueReadModelLoader : IScopedService
         var profiles = await _profileProvider.ListAsync(projectId);
 
         return IssueRowMapper.ByNumber(rows, projectId)
-            .Select(issue => ToReadModel(BuildInfo(issue, project, ResolveProfileId(
-                issue.WorkflowProfileId,
-                projectDefaultProfileId,
-                profiles,
-                disabledIds))))
+            .Select(issue => ToReadModel(BuildInfo(
+                issue,
+                project,
+                ResolveProfileSelection(
+                    issue.WorkflowProfileId,
+                    projectDefaultProfileId,
+                    profiles,
+                    disabledIds))))
             .ToList();
     }
 
-    internal static string? ResolveProfileId(
+    /// <summary>
+    /// Resolves the Issue's next-start selection together with its
+    /// inheritance source ("issue", "project-default", or "system"), so a
+    /// reader can distinguish the selection a future start will use from
+    /// the binding a run already holds (#1099).
+    /// </summary>
+    internal static (string? ProfileId, string? Source) ResolveProfileSelection(
         string? issueProfileId,
         string? projectDefaultProfileId,
         IReadOnlyList<WorkflowProfileCollectionEntry> profiles,
@@ -114,7 +123,7 @@ public class IssueReadModelLoader : IScopedService
             .Select(profile => profile.ProfileId)
             .ToList();
 
-        return EffectiveWorkflowProfileResolver.ResolveCore(
+        return EffectiveWorkflowProfileResolver.ResolveCoreWithSource(
             issueProfileId,
             projectDefaultProfileId,
             profileIds.Contains,
@@ -162,10 +171,18 @@ public class IssueReadModelLoader : IScopedService
     /// <see cref="EffectiveWorkflowProfileResolver"/> so the profile id
     /// agrees with every other read surface.
     /// </summary>
-    internal static IssueInfo BuildInfo(Domain.Issue issue, ProjectInfo? project, string? resolvedProfileId)
+    internal static IssueInfo BuildInfo(
+        Domain.Issue issue,
+        ProjectInfo? project,
+        string? resolvedProfileId,
+        string? resolvedProfileSource = null)
     {
         var resolution = new IssueRepositoryResolver().Resolve(project, issue.RepositoryRef);
-        if (issue.NoWorkflow) resolvedProfileId = null;
+        if (issue.NoWorkflow)
+        {
+            resolvedProfileId = null;
+            resolvedProfileSource = null;
+        }
         return new()
         {
             Number = issue.Number,
@@ -188,9 +205,8 @@ public class IssueReadModelLoader : IScopedService
             UpdatedAt = issue.UpdatedAt.ToString("o"),
             ArchivedAt = issue.ArchivedAt?.ToString("o"),
             CompletedAt = issue.CompletedAt?.ToString("o"),
-            WorkflowRunId = issue.WorkflowRunId,
-            WorkflowProfileId = resolvedProfileId,
             WorkflowProfileMode = issue.NoWorkflow ? "none" : issue.WorkflowProfileId is null ? "inherit" : "explicit",
+            WorkflowProfileSource = resolvedProfileSource,
             NoWorkflow = issue.NoWorkflow,
             PrerequisiteNumbers = issue.PrerequisiteNumbers,
             IsDraft = issue.IsDraft,
@@ -207,7 +223,7 @@ public class IssueReadModelLoader : IScopedService
         ToInfo(new IssueRepositoryResolver(), issue, project);
 
     public static IssueInfo ToInfo(IssueRepositoryResolver resolver, Domain.Issue issue, ProjectInfo? project = null) =>
-        BuildInfo(issue, project, IssueWorkflowProfiles.LocalId);
+        BuildInfo(issue, project, IssueWorkflowProfiles.LocalId, EffectiveWorkflowProfileResolver.SourceSystem);
 
     public static IssueReadModel ToReadModel(IssueInfo issue) => new()
     {
@@ -234,6 +250,7 @@ public class IssueReadModelLoader : IScopedService
         WorkflowRunId = issue.WorkflowRunId,
         WorkflowProfileId = issue.WorkflowProfileId,
         WorkflowProfileMode = issue.WorkflowProfileMode,
+        WorkflowProfileSource = issue.WorkflowProfileSource,
         NoWorkflow = issue.NoWorkflow,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
         IsDraft = issue.IsDraft,

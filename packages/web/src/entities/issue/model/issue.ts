@@ -142,6 +142,8 @@ export interface Issue {
   workflowRunId?: string | null
   workflowProfileId?: string | null
   workflowProfileMode?: 'inherit' | 'explicit' | 'none' | null
+  /** Where the effective next-start selection came from; null when the Issue has no Workflow. Distinct from a started Run's binding. */
+  workflowProfileSource?: 'issue' | 'project-default' | 'system' | null
   noWorkflow?: boolean
   health: IssueHealth
   projectId: string

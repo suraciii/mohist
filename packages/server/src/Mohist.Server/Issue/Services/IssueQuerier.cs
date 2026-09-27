@@ -424,12 +424,12 @@ public class IssueQuerier : IScopedService
         IReadOnlySet<string> disabledIds)
     {
         var profiles = await _profileProvider.ListAsync(issue.ProjectId);
-        var resolved = IssueReadModelLoader.ResolveProfileId(
+        var selection = IssueReadModelLoader.ResolveProfileSelection(
             issue.WorkflowProfileId,
             projectDefaultProfileId,
             profiles,
             disabledIds);
-        return IssueReadModelLoader.BuildInfo(issue, project, resolved);
+        return IssueReadModelLoader.BuildInfo(issue, project, selection.ProfileId, selection.Source);
     }
 
     /// <summary>
@@ -443,8 +443,11 @@ public class IssueQuerier : IScopedService
 
     public IssueInfo ToInfo(Domain.Issue issue, ProjectInfo? project, string? projectDefaultProfileId, IReadOnlySet<string>? disabledIds)
     {
-        var resolved = _effectiveProfileResolver.Resolve(issue.WorkflowProfileId, projectDefaultProfileId, disabledIds);
-        return IssueReadModelLoader.BuildInfo(issue, project, resolved);
+        var selection = _effectiveProfileResolver.ResolveWithSource(
+            issue.WorkflowProfileId,
+            projectDefaultProfileId,
+            disabledIds);
+        return IssueReadModelLoader.BuildInfo(issue, project, selection.ProfileId, selection.Source);
     }
 
     private async Task ApplyRelationshipProjectionsAsync(MohistDbContext db, List<IssueReadModel> issues)
@@ -938,13 +941,12 @@ public class IssueQuerier : IScopedService
         foreach (var row in childRows)
         {
             var domain = IssueStore.Deserialize(row.State);
-            if (domain is null) continue;
-            var resolvedProfileId = IssueReadModelLoader.ResolveProfileId(
+            var selection = IssueReadModelLoader.ResolveProfileSelection(
                 domain.WorkflowProfileId,
                 projectDefaultProfileId,
                 profiles,
                 disabledIds);
-            var info = IssueReadModelLoader.BuildInfo(domain, project: null, resolvedProfileId);
+            var info = IssueReadModelLoader.BuildInfo(domain, project: null, selection.ProfileId, selection.Source);
             childModels.Add(IssueReadModelLoader.ToReadModel(info));
         }
 
