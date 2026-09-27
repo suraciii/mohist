@@ -62,9 +62,42 @@ Later changes affect only future Runs.
 A Profile selection must resolve within the Issue's Project. Profiles do not
 inherit from or merge with one another.
 
+Selection is a next-start fact. An Issue read states the Issue's explicit
+selection or its inherited effective selection, and where that selection came
+from: the Issue, the Project default, or the built-in fallback. A started
+WorkflowRun does not consult this selection again; it keeps its own actual
+binding, which [Read the Actual Binding](#read-the-actual-binding) exposes
+separately. A selection that changes after a Run starts affects only the next
+Run.
+
 Variables and Prompt bodies are resolved at Task dispatch. The dispatched input
 stays fixed for that attempt. See
 [Workflow Definition Reference](../definition/spec.md#template-expressions).
+
+## Read the Actual Binding
+
+A WorkflowRun's binding is the complete definition the Run bound when it
+started. It is distinct from the Project default, the Issue's next-start
+selection, and the Profile's current content.
+
+`mo run view <run-id> --json binding` reads it on demand: only a caller that
+selects the field pays for it, and the ordinary status answer stays concise.
+The read identifies the Run, its Project, its Issue when the Run still retains
+it, the bound Profile, whether that selection was explicit, the retained
+start-time scope, and the bound semantic definition.
+
+The read reports only facts the Run retained. It does not reconstruct an
+original YAML source or a historical revision, and it never falls back to the
+Profile's current content. When the Run's stored definition is missing or
+unreadable, the read states the reason — no stored snapshot, an unreadable
+snapshot, or unreadable Run state — and preserves the identity and status
+facts the Run still retains; the failure modes do not collapse into one null.
+When the definition is available, the read returns it complete without
+truncation, so a large definition has one documented complete-read path.
+
+`mo run view --yaml` remains the YAML representation of the same bound
+definition. See [CLI Reference](../../interfaces/cli/spec.md#workflowrun) for
+the read contract.
 
 Mohist provides two built-in Profiles:
 
@@ -344,10 +377,65 @@ routes to the Agents page for model configuration. The Issue details page
 selects or changes a Profile and shows the named Agents responsible for
 execution; it does not edit the Profile Definition and has no model selector.
 
-Before saving, run `mo workflow validate --file <path>` to check Definition
-structure, field types, and template expressions. Use `--file -` to read from
-stdin. The save operation then checks Action availability and Action Input
-against contracts from the current Runner.
+### Validate before saving
+
+`mo workflow validate` checks a Definition with the selected Project's Server.
+Complete validation covers Profile metadata, Definition structure, field
+types, template expressions, and Action availability and Action Input against
+the Action catalog reported for the Project. It performs no writes: it never
+creates or changes a Profile, default selection, Issue, or Run.
+
+The file or stdin input is read locally first; a local usage or input error
+stops the command before any Server request. Complete validation requires the
+selected Project and a reachable Server with the caller's normal access. When
+the Server or the Action catalog is unavailable, the result reports the
+skipped scope and its reason, and an incomplete validation is never a valid
+result. A skipped check is not a performed check: it neither passes the
+Definition nor reports an invalid Action.
+
+### Save with revalidation
+
+Validation and save share the Definition and Action rules for the same input
+and catalog context. A save revalidates the submitted input, and a changed
+catalog context can change either result.
+
+A save that policy permits can still succeed while the Action check is
+skipped. Its result then reports both the saved content and the skipped check
+with its reason. A saved result states its validation scope and never claims
+the Workflow is ready to execute; definition validity, completed Action
+checks, and execution readiness are separate facts.
+
+Save-only resource rules are distinct from Definition validity: a duplicate
+Profile ID on create, a read-only built-in Profile, and a stale content
+revision are save rejections. A rejected save leaves stored content
+unchanged.
+
+### Edit with a content revision
+
+Reading an editable Profile returns its content together with an opaque
+content revision. The revision covers all replaceable Profile content: name,
+description, and Definition source. Unrelated Project operations do not
+change it.
+
+An update must supply the revision its caller read. A missing or stale
+revision fails without a write and keeps the caller's draft; the caller reads
+the latest content to compare changes. Human and Agent access paths follow
+the same conflict rule. There is no force-overwrite flag, and a caller does
+not fetch a fresh revision silently before submitting an old draft. A
+revision cannot be reused after intervening changes or after the Profile is
+deleted and recreated.
+
+A successful save identifies the Profile, the resulting revision, the
+validation scope, and the effect scope: only future Runs bind the new
+content. It does not change a default selection, start an Issue, or alter an
+active Run's binding. When a save and a Run start overlap, the Run binds
+either the complete old content or the complete new content, never a mixture.
+
+After a lost save response, read the current content and revision. Matching
+content proves the current state, not which request produced it. When the
+outcome cannot be attributed, the caller reports that uncertainty instead of
+overwriting or retrying blindly, and a rejected stale command does not affect
+later commands.
 
 See [CLI Reference](../../interfaces/cli/spec.md#workflow-profile) for the commands. A
 Profile ID must be unique within its Project. Global uniqueness is not required.
@@ -404,10 +492,11 @@ The built-in Profiles are:
 See [Workflow Profile](spec.md).
 
 ## Implementation Gaps
-
 Current WorkflowRun source, status, and recovery reads still consult live
 Profile data in some paths. Current Profile update guards still inspect active
-Runs.
+Runs instead of relying on the content revision: Profile reads do not yet
+return a revision, `mo workflow edit` does not yet require an expected
+revision, and a save conflict does not yet distinguish a stale revision.
 
 ---
 

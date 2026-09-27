@@ -25,7 +25,7 @@ resources. See [`variables.md`](../variables/spec.md), [`../prompt-management.md
 
 ```text literal
 Project { defaultWorkflowProfileId }
-  -- owns 1..* --> WorkflowProfile { id, name, description, definition }
+  -- owns 1..* --> WorkflowProfile { id, name, description, definition, revision }
   -- default ---> WorkflowProfile
 
 Issue { workflowProfileId? }
@@ -39,13 +39,15 @@ WorkflowProfile: Project-scoped; does not own Variables or Prompts.
 WorkflowRun: Profile ID, complete Definition, and verification command bind at start.
 ```
 
-The minimal Profile model has four fields:
+The minimal Profile model has five fields:
 
 - `id`: a stable identifier within the Project.
 - `name`: a user-facing name.
 - `description`: the applicable scenario in short form.
 - `definition`: validated rules for Stages, Tasks, Checks, Approval Feedback, recovery, and related
   behavior.
+- `revision`: an opaque content revision returned by every Profile read and required by every
+  update. It changes only when replaceable Profile content changes.
 
 WorkflowRun stores the selected Profile ID and the complete validated Definition effective at
 binding. That Definition is immutable for the Run. The Run also stores the Project's
@@ -101,7 +103,8 @@ The binding rules are:
 - A later Issue selection, Project default, or Profile Definition change affects only future
   WorkflowRuns.
 - The bound Definition controls every Stage, Approval Feedback behavior, and recovery selection
-  in the Run. `mo run view --yaml` reads this Definition.
+  in the Run. `mo run view --yaml` reads this Definition, and the structured binding projection
+  exposes the retained start-time facts beside it.
 - A completed or stopped WorkflowRun is an immutable terminal record. Retry, rerun,
   rerun-from-stage, and resume reject it. Starting work again creates a new WorkflowRun ID and
   binds again.
@@ -110,6 +113,39 @@ Variables and Prompt bodies are not copied into the bound Definition. At dispatc
 resolves Effective Stage Variables and loads Prompt bodies into the immutable attempt snapshot.
 A later Variable or Prompt edit can affect only a Task that has not dispatched. It cannot change
 a dispatched attempt. [`task-dispatch.md`](../execution/design.md) owns the evaluation timing.
+
+### Content Revision and Update Boundary
+
+A Profile read returns content, derived structure, and revision from one
+coherent state. The revision covers every replaceable field — name,
+description, and Definition source — so any content change produces a new
+revision. Unrelated Project operations never change it. A stored revision is
+never reissued after later changes or after delete-and-recreate, so an old
+token cannot succeed against new content.
+
+An update carries the revision its caller read. The authoritative write
+boundary inside the Profile store rejects a missing or stale revision before
+any write, so validation, conflict detection, and persistence cannot interleave
+into a partial write. The API handler and the CLI transport the precondition;
+they are not its enforcement point.
+
+The coordinator's existing numeric fence parameter is an infrastructure
+sequence for redelivery, not the Profile content revision. The content
+revision keeps its own token space and semantics; neither is repurposed as the
+other.
+
+Coordinator replay of an update preserves the original precondition. A replay
+whose stored outcome matches the original inputs reports the already-applied
+result instead of executing again; a replay that arrives after a different
+change has landed fails the stale precondition instead of overwriting the newer
+edit. Recovery of a pending update cannot erase a newer revision or leave
+later valid updates permanently blocked.
+
+A save and a Run start that overlap linearize at the existing coordinator
+order: the Run binds either the complete old content or the complete new
+content. The update path does not inspect active Runs to decide this. An edit
+that removes or renames a Stage cannot fail an active Run that still bound
+that Stage; the Run executes its own snapshot.
 
 ### Ownership
 
@@ -158,7 +194,11 @@ Issue resources modify those references. Profile deletion protects a Profile ref
 default, an Issue, or an active WorkflowRun.
 
 Updating a Definition with the same ID is allowed. Server validates the new Definition and its
-Action contracts before writing it. The update does not inspect or change active WorkflowRuns.
+Action contracts before writing it, and the request carries the content revision the caller
+read. A missing or stale revision is a conflict that changes nothing. A successful update
+returns the saved Profile with its resulting revision and the validation scope, and a
+delete-and-recreate never revives an older token. The update does not inspect or change active
+WorkflowRuns.
 
 `profileId` is a terminal catch-all, so it can address IDs such as `mohist/local` without loss.
 Variables and Prompts use separate APIs. They are not children of `/workflow-profiles/{*profileId}`.
@@ -167,16 +207,20 @@ Variables and Prompts use separate APIs. They are not children of `/workflow-pro
 rejects a `mohist/*` ID. `PUT` and `DELETE` on a built-in Profile return a domain error.
 There is no Profile Agent Action override mutation.
 
-Collection read models expose Profile identity and structure. Project settings read the
-effective default through `/workflow-profile/default`. The default mutation uses `PUT /workflow-profile/default` with `{ "profileId": "..." }`.
+Collection read models expose Profile identity, structure, and revision. Project settings read
+the effective default through `/workflow-profile/default`. The default mutation uses
+`PUT /workflow-profile/default` with `{ "profileId": "..." }`.
 
 `GET /api/workflow-runs/{workflowRunId}` exposes `workflowProfileId` beside Run status. The Run YAML read returns the complete bound
-Definition. Task views expose `agentJobId` and `agentSessionId` for Agent-backed Tasks.
+Definition, and `GET /api/workflow-runs/{workflowRunId}/binding` returns the structured actual-binding
+projection — retained identity, selection, and timing facts, with the bound semantic definition,
+its availability, and an explicit reason when it is unavailable. Task views expose `agentJobId` and `agentSessionId` for Agent-backed Tasks.
 
 ## Status
 
-Current gaps for complete Definition binding and Approval Feedback are recorded once in
-[Core Concepts: Approval Point](spec.md#implementation-gaps-1).
+Current gaps for complete Definition binding, content revisions, and Approval Feedback are
+recorded once in [Implementation Gaps](spec.md#implementation-gaps-1).
+
 ## Built-in Workflows
 
 The built-in Profiles are authoritative in [`mohist-local.workflow.yaml`](../../../packages/server/src/Mohist.Server/Workflow/Services/Profiles/mohist-local.workflow.yaml) and [`mohist-github-pr.workflow.yaml`](../../../packages/server/src/Mohist.Server/Workflow/Services/Profiles/mohist-github-pr.workflow.yaml). Mohist exposes each

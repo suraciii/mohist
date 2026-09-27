@@ -254,18 +254,27 @@ Evaluation follows this boundary:
 
 When a Profile is saved, Mohist validates Definition structure, field types,
 template expressions, and concrete Action contracts. It returns all problems
-in one response. You can validate Profile composition and Definition syntax
-locally without a running Server:
+in one response. Validation and save share these rules: the same input and the
+same Action catalog context produce the same judgment, a save revalidates the
+submitted input, and a changed catalog context can change the result.
+
+`mo workflow validate` checks a Definition with the selected Project's Server
+and performs no writes:
 
 ```bash
 mo workflow validate --file workflow.yaml
 mo workflow validate --file -
 ```
 
-The local command cannot check current Action availability. The save operation
-uses Action contracts from the current Runner to determine whether each
-concrete `uses` is available and whether `with` satisfies the selected Action's
-input contract.
+The Action check uses the Action catalog reported for the Project to determine
+whether each concrete `uses` is available and whether `with` satisfies the
+selected Action's input contract. When the Server or the catalog is
+unavailable, the result reports the skipped Action check and its reason
+instead of passing the Definition.
+
+[Workflow Profile](../profiles/spec.md#validate-before-saving) owns the
+validation and save operation contract, including exit codes and skipped-scope
+reporting.
 
 ## Complete Example
 

@@ -77,9 +77,10 @@ name first and fall back to ID when no name matches.
 - Pi thinking-level values previously saved as `variant` are not migrated or
   reinterpreted. Re-enter the value as `reasoningEffort` in the Agent profile;
   until then, the saved configuration is rejected explicitly.
-- Profile save and `mo workflow validate` check only the input shape and require
-  `name` and `prompt`. They do not check whether the Agent exists, so Agent
-  creation and removal do not block the Profile lifecycle.
+- Profile save and `mo workflow validate` check input shape and the Action
+  catalog contract, and require `name` and `prompt`. They do not check whether
+  the Agent exists, so Agent creation and removal do not block the Profile
+  lifecycle.
 
 ## Failure Semantics
 
