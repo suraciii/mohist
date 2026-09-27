@@ -35,9 +35,11 @@ function createQueryClient() {
 // (completed/failed/running/...) to an `activity` field (idle/active/unknown).
 // Recovery actions are enabled only when `activity === 'idle'`. Tests below
 // drive the component via `activity` instead of the deprecated `status`.
-function renderActions(props: Partial<React.ComponentProps<typeof SessionRecoveryActions>> = {}) {
-  const queryClient = createQueryClient()
-  return render(
+function recoveryActionsTree(
+  queryClient: QueryClient,
+  props: Partial<React.ComponentProps<typeof SessionRecoveryActions>> = {},
+) {
+  return (
     <QueryClientProvider client={queryClient}>
       <ProjectProvider
         initialProjectId="proj-1"
@@ -61,8 +63,13 @@ function renderActions(props: Partial<React.ComponentProps<typeof SessionRecover
           {...props}
         />
       </ProjectProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
+}
+
+function renderActions(props: Partial<React.ComponentProps<typeof SessionRecoveryActions>> = {}) {
+  const queryClient = createQueryClient()
+  return { ...render(recoveryActionsTree(queryClient, props)), queryClient }
 }
 
 function makeCompactResult(overrides?: Partial<SessionRecoveryResult>): SessionRecoveryResult {
@@ -549,6 +556,38 @@ describe('SessionRecoveryActions — caller-owned recovery identity', () => {
 
     const keys = compactClient.mock.calls.map(keyOf)
     expect(keys[1]).toBe(keys[0])
+  })
+
+  it('releases the original scope when props change before the outcome', async () => {
+    let resolveCompact: (value: SessionRecoveryResult) => void = () => {}
+    const compact = vi.fn(
+      () =>
+        new Promise<SessionRecoveryResult>((resolve) => {
+          resolveCompact = resolve
+        }),
+    )
+    const clients = { ...recoveryClients, compact }
+    const first = renderActions({ clients })
+
+    fireEvent.click(screen.getByTestId('session-recovery-compact'))
+    await waitFor(() => {
+      expect(compact).toHaveBeenCalledTimes(1)
+    })
+    const originalKey = keyOf(compact.mock.calls[0])
+
+    first.rerender(recoveryActionsTree(first.queryClient, { sessionName: 'session-def', clients }))
+    await act(async () => {
+      resolveCompact(makeCompactResult({ id: 'session-abc', wasCompacted: true }))
+    })
+    first.unmount()
+
+    renderActions({ sessionName: 'session-abc' })
+    fireEvent.click(screen.getByTestId('session-recovery-compact'))
+    await waitFor(() => {
+      expect(compactClient).toHaveBeenCalledTimes(1)
+    })
+
+    expect(keyOf(compactClient.mock.calls[0])).not.toBe(originalKey)
   })
 
   it('starts a new operation with a new key after a known outcome', async () => {

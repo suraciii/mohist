@@ -20,7 +20,7 @@ import {
   resetGenericSession,
   resetSession,
 } from '../../../entities/coder-session'
-import type { AgentSessionActivity, RecoveryOperation } from '../../../entities/coder-session'
+import type { AgentSessionActivity, RecoveryOperation, RecoveryRequestScope } from '../../../entities/coder-session'
 import { createIdempotencyKey } from '../../../shared/lib/idempotency-key'
 import { useProject } from '../../../entities/project'
 
@@ -68,6 +68,10 @@ function hasKnownNoEffect(err: unknown): boolean {
   if (!(err instanceof ApiError)) return false
   if (err.effect) return err.effect === 'none'
   return err.status === 400 || err.status === 404 || err.status === 409
+}
+type RecoveryRequest = {
+  scope: RecoveryRequestScope
+  key: string
 }
 
 export interface SessionRecoveryActionsProps {
@@ -143,14 +147,17 @@ export function SessionRecoveryActions({
   // kept until the outcome is known, so a lost response — including one that
   // outlives this component — is retried as the same operation instead of
   // starting a second one.
-  function recoveryRequestKey(operation: RecoveryOperation): string {
-    if (!projectId) return createIdempotencyKey()
-    return beginRecoveryRequest({ projectId, sessionKey, operation })
+  function recoveryRequest(operation: RecoveryOperation): RecoveryRequest {
+    const scope = { projectId: projectId ?? '', sessionKey, operation }
+    return {
+      scope,
+      key: projectId ? beginRecoveryRequest(scope) : createIdempotencyKey(),
+    }
   }
 
-  function releaseRecoveryRequest(operation: RecoveryOperation) {
-    if (!projectId) return
-    completeRecoveryRequest({ projectId, sessionKey, operation })
+  function releaseRecoveryRequest(scope: RecoveryRequestScope) {
+    if (!scope.projectId) return
+    completeRecoveryRequest(scope)
   }
 
   useEffect(() => {
@@ -158,43 +165,43 @@ export function SessionRecoveryActions({
   }, [activity])
 
   const compactMutation = useMutation({
-    mutationFn: (idempotencyKey: string) => {
-      if (!projectId) {
+    mutationFn: ({ scope, key }: RecoveryRequest) => {
+      if (!scope.projectId) {
         return Promise.reject(new ApiError('Project is required', 400))
       }
       return genericSessionId
-        ? genericClients.compact(genericSessionId, projectId, idempotencyKey)
-        : clients.compact(issueNumber, sessionName, projectId, idempotencyKey)
+        ? genericClients.compact(genericSessionId, scope.projectId, key)
+        : clients.compact(issueNumber, sessionName, scope.projectId, key)
     },
-    onSuccess: () => {
-      releaseRecoveryRequest('compact')
+    onSuccess: (_data, variables) => {
+      releaseRecoveryRequest(variables.scope)
       setInlineError(null)
       onSuccess?.()
     },
-    onError: (err) => {
-      if (hasKnownNoEffect(err)) releaseRecoveryRequest('compact')
+    onError: (err, variables) => {
+      if (variables && hasKnownNoEffect(err)) releaseRecoveryRequest(variables.scope)
       setInlineError(resolveErrorMessage(err))
     },
     onSettled,
   })
 
   const resetMutation = useMutation({
-    mutationFn: (idempotencyKey: string) => {
-      if (!projectId) {
+    mutationFn: ({ scope, key }: RecoveryRequest) => {
+      if (!scope.projectId) {
         return Promise.reject(new ApiError('Project is required', 400))
       }
       return genericSessionId
-        ? genericClients.reset(genericSessionId, projectId, idempotencyKey)
-        : clients.reset(issueNumber, sessionName, projectId, idempotencyKey)
+        ? genericClients.reset(genericSessionId, scope.projectId, key)
+        : clients.reset(issueNumber, sessionName, scope.projectId, key)
     },
-    onSuccess: () => {
-      releaseRecoveryRequest('reset')
+    onSuccess: (_data, variables) => {
+      releaseRecoveryRequest(variables.scope)
       setResetDialogOpen(false)
       setInlineError(null)
       onSuccess?.()
     },
-    onError: (err) => {
-      if (hasKnownNoEffect(err)) releaseRecoveryRequest('reset')
+    onError: (err, variables) => {
+      if (variables && hasKnownNoEffect(err)) releaseRecoveryRequest(variables.scope)
       setInlineError(resolveErrorMessage(err))
     },
     onSettled,
@@ -221,7 +228,7 @@ export function SessionRecoveryActions({
 
   function handleCompact() {
     if (active || !hasRuntimeBinding || anyPending) return
-    compactMutation.mutate(recoveryRequestKey('compact'))
+    compactMutation.mutate(recoveryRequest('compact'))
   }
 
   function openResetDialog() {
@@ -243,7 +250,7 @@ export function SessionRecoveryActions({
 
   function handleResetConfirm() {
     if (resetMutation.isPending) return
-    resetMutation.mutate(recoveryRequestKey('reset'))
+    resetMutation.mutate(recoveryRequest('reset'))
   }
 
   const compactButton = (
