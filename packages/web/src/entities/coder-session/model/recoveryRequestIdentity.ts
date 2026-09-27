@@ -67,11 +67,13 @@ export function beginRecoveryRequest(scope: RecoveryRequestScope): string {
  * Releases the operation's identity once its outcome is known, so the next
  * Compact or Reset is a new intent rather than a replay.
  */
-export function completeRecoveryRequest(scope: RecoveryRequestScope): void {
+export function completeRecoveryRequest(scope: RecoveryRequestScope, completedKey: string): void {
   const key = storageKey(scope)
-  memory.delete(key)
+  if (memory.get(key) === completedKey) memory.delete(key)
   withSessionStorage<void>(
-    (storage) => storage.removeItem(key),
+    (storage) => {
+      if (storage.getItem(key) === completedKey) storage.removeItem(key)
+    },
     () => undefined,
   )
 }

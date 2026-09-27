@@ -16,10 +16,21 @@ describe('recovery request identity', () => {
     expect(beginRecoveryRequest(scope)).toBe(key)
     expect(sessionStorage.length).toBe(1)
 
-    completeRecoveryRequest(scope)
+    completeRecoveryRequest(scope, key)
 
     expect(sessionStorage.length).toBe(0)
     expect(beginRecoveryRequest(scope)).not.toBe(key)
+  })
+
+  it('does not delete a replacement identity after a stale completion', () => {
+    const first = beginRecoveryRequest(scope)
+    completeRecoveryRequest(scope, first)
+    const replacement = beginRecoveryRequest(scope)
+
+    completeRecoveryRequest(scope, first)
+
+    expect(beginRecoveryRequest(scope)).toBe(replacement)
+    completeRecoveryRequest(scope, replacement)
   })
 
   it('isolates identity by project, session, and operation', () => {
@@ -43,5 +54,24 @@ describe('recovery request identity', () => {
 
     expect(key.length).toBeGreaterThan(0)
     expect(beginRecoveryRequest({ ...scope, sessionKey: 'issue-session:7:blocked' })).toBe(key)
+  })
+
+  it('keeps the replacement identity in memory after a stale completion', () => {
+    const blockedScope = { ...scope, sessionKey: 'issue-session:7:memory' }
+    setScopedProperty(window, 'sessionStorage', {
+      configurable: true,
+      get() {
+        throw new Error('storage blocked')
+      },
+    })
+
+    const first = beginRecoveryRequest(blockedScope)
+    completeRecoveryRequest(blockedScope, first)
+    const replacement = beginRecoveryRequest(blockedScope)
+
+    completeRecoveryRequest(blockedScope, first)
+
+    expect(beginRecoveryRequest(blockedScope)).toBe(replacement)
+    completeRecoveryRequest(blockedScope, replacement)
   })
 })

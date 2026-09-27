@@ -590,6 +590,63 @@ describe('SessionRecoveryActions — caller-owned recovery identity', () => {
     expect(keyOf(compactClient.mock.calls[0])).not.toBe(originalKey)
   })
 
+  it('does not let a stale same-scope completion delete a newer key', async () => {
+    const resolvers: Array<(value: SessionRecoveryResult) => void> = []
+    const compact = vi.fn(
+      () =>
+        new Promise<SessionRecoveryResult>((resolve) => {
+          resolvers.push(resolve)
+        }),
+    )
+    const clients = { ...recoveryClients, compact }
+    const clickCompact = (view: { container: HTMLElement }) => {
+      const button = view.container.querySelector<HTMLElement>('[data-testid="session-recovery-compact"]')
+      if (!button) throw new Error('compact action is not rendered')
+      fireEvent.click(button)
+    }
+
+    const first = renderActions({ clients })
+    clickCompact(first)
+    const second = renderActions({ clients })
+    clickCompact(second)
+    await waitFor(() => {
+      expect(compact).toHaveBeenCalledTimes(2)
+    })
+    const firstKey = keyOf(compact.mock.calls[0])
+
+    await act(async () => {
+      resolvers[1](makeCompactResult({ id: 'session-abc', wasCompacted: true }))
+    })
+
+    const third = renderActions({ clients })
+    clickCompact(third)
+    await waitFor(() => {
+      expect(compact).toHaveBeenCalledTimes(3)
+    })
+    const replacementKey = keyOf(compact.mock.calls[2])
+    expect(replacementKey).not.toBe(firstKey)
+
+    await act(async () => {
+      resolvers[0](makeCompactResult({ id: 'session-abc', wasCompacted: true }))
+    })
+
+    const fourth = renderActions({ clients })
+    clickCompact(fourth)
+    await waitFor(() => {
+      expect(compact).toHaveBeenCalledTimes(4)
+    })
+    expect(keyOf(compact.mock.calls[3])).toBe(replacementKey)
+
+    await act(async () => {
+      resolvers[2](makeCompactResult())
+      resolvers[3](makeCompactResult())
+    })
+    first.unmount()
+    second.unmount()
+    third.unmount()
+    fourth.unmount()
+  })
+
   it('starts a new operation with a new key after a known outcome', async () => {
     _compactData = makeCompactResult({ id: 'session-abc', wasCompacted: true })
     const firstSuccess = vi.fn()

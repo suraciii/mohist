@@ -23,24 +23,27 @@ public sealed partial class AgentSessionRecoveryOrchestratorSpecs
         _fixture.Reset();
     }
 
-    [Fact]
-    public async Task Reset_NewIdempotencyKeyStartsNewOperationAfterFailedOperationSettles()
+    [Theory]
+    [InlineData(SessionCommandKind.Compact)]
+    [InlineData(SessionCommandKind.Reset)]
+    public async Task RecoveryCommand_TransportUnavailableKeepsAdmissionForSameKey(SessionCommandKind command)
     {
-        var (_, sessionId) = await CreateIdleSessionAsync("runtime-reset-retry");
+        var (_, sessionId) = await CreateIdleSessionAsync($"runtime-transport-unknown-{command.ToString().ToLowerInvariant()}");
         var dispatcher = new RecordingSessionCommandDispatcher();
         dispatcher.Enqueue(new SessionCommandResult(Ok: false, Error: SessionCommandError.Unavailable));
-        dispatcher.EnqueueSuccess();
 
-        var first = await ExecuteRecoveryAsync(SessionCommandKind.Reset, sessionId, "reset-1", dispatcher);
-        var replay = await ExecuteRecoveryAsync(SessionCommandKind.Reset, sessionId, "reset-1", dispatcher);
-        var retry = await ExecuteRecoveryAsync(SessionCommandKind.Reset, sessionId, "reset-2", dispatcher);
+        var first = await ExecuteRecoveryAsync(command, sessionId, "transport-unknown", dispatcher);
+        var replay = await ExecuteRecoveryAsync(command, sessionId, "transport-unknown", dispatcher);
+        var replacement = await ExecuteRecoveryAsync(command, sessionId, "new-operation", dispatcher);
 
         Assert.Equal(503, first.Status);
+        Assert.Equal("unknown", first.Body.GetProperty("effect").GetString());
         Assert.Equal(503, replay.Status);
-        Assert.Equal(200, retry.Status);
-        Assert.Equal(2, dispatcher.Requests.Count);
-        Assert.NotEqual(dispatcher.Requests[0].OperationId, dispatcher.Requests[1].OperationId);
-        Assert.Equal("runtime-reset-retry-replacement", (await LoadAsync(sessionId))!.Status.AgentRuntimeSessionId);
+        Assert.Equal("unknown", replay.Body.GetProperty("effect").GetString());
+        Assert.Equal(409, replacement.Status);
+        Assert.Equal("recovery_in_progress", replacement.Body.GetProperty("code").GetString());
+        Assert.Single(dispatcher.Requests);
+        Assert.NotNull((await LoadAsync(sessionId))!.Status.PendingReset);
     }
 
     [Fact]

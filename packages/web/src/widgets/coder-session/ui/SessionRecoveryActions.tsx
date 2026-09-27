@@ -155,9 +155,9 @@ export function SessionRecoveryActions({
     }
   }
 
-  function releaseRecoveryRequest(scope: RecoveryRequestScope) {
-    if (!scope.projectId) return
-    completeRecoveryRequest(scope)
+  function releaseRecoveryRequest(request: RecoveryRequest) {
+    if (!request.scope.projectId) return
+    completeRecoveryRequest(request.scope, request.key)
   }
 
   useEffect(() => {
@@ -174,12 +174,12 @@ export function SessionRecoveryActions({
         : clients.compact(issueNumber, sessionName, scope.projectId, key)
     },
     onSuccess: (_data, variables) => {
-      releaseRecoveryRequest(variables.scope)
+      releaseRecoveryRequest(variables)
       setInlineError(null)
       onSuccess?.()
     },
     onError: (err, variables) => {
-      if (variables && hasKnownNoEffect(err)) releaseRecoveryRequest(variables.scope)
+      if (variables && hasKnownNoEffect(err)) releaseRecoveryRequest(variables)
       setInlineError(resolveErrorMessage(err))
     },
     onSettled,
@@ -195,13 +195,13 @@ export function SessionRecoveryActions({
         : clients.reset(issueNumber, sessionName, scope.projectId, key)
     },
     onSuccess: (_data, variables) => {
-      releaseRecoveryRequest(variables.scope)
+      releaseRecoveryRequest(variables)
       setResetDialogOpen(false)
       setInlineError(null)
       onSuccess?.()
     },
     onError: (err, variables) => {
-      if (variables && hasKnownNoEffect(err)) releaseRecoveryRequest(variables.scope)
+      if (variables && hasKnownNoEffect(err)) releaseRecoveryRequest(variables)
       setInlineError(resolveErrorMessage(err))
     },
     onSettled,

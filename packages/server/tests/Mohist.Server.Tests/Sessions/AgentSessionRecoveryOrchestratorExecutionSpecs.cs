@@ -26,24 +26,20 @@ public sealed partial class AgentSessionRecoveryOrchestratorSpecs
     [Theory]
     [InlineData(SessionCommandKind.Compact)]
     [InlineData(SessionCommandKind.Reset)]
-    public async Task RecoveryCommand_SimulatedRunnerRestart_AppliesOperationIdAtMostOnceAndAllowsNewOperation(SessionCommandKind command)
+    public async Task RecoveryCommand_TransportUnavailableDoesNotRedeliverSameAdmission(SessionCommandKind command)
     {
         var (_, sessionId) = await CreateIdleSessionAsync($"runtime-unavailable-{command.ToString().ToLowerInvariant()}");
         var dispatcher = new RecordingSessionCommandDispatcher();
         dispatcher.Enqueue(new SessionCommandResult(Ok: false, Error: SessionCommandError.Unavailable));
-        dispatcher.EnqueueSuccess();
 
-        var first = await ExecuteRecoveryAsync(command, sessionId, "restart-operation", dispatcher);
-        var replay = await ExecuteRecoveryAsync(command, sessionId, "restart-operation", dispatcher);
-        var replacement = await ExecuteRecoveryAsync(command, sessionId, "new-operation", dispatcher);
+        var first = await ExecuteRecoveryAsync(command, sessionId, "transport-unknown", dispatcher);
+        var replay = await ExecuteRecoveryAsync(command, sessionId, "transport-unknown", dispatcher);
 
         Assert.Equal(503, first.Status);
+        Assert.Equal("unknown", first.Body.GetProperty("effect").GetString());
         Assert.Equal(503, replay.Status);
-        Assert.Equal("runner_unavailable", replay.Body.GetProperty("code").GetString());
-        Assert.Equal(200, replacement.Status);
-        Assert.Equal(2, dispatcher.Requests.Count);
-        Assert.NotEqual(dispatcher.Requests[0].OperationId, dispatcher.Requests[1].OperationId);
-        await AssertRuntimeBindingAsync(sessionId, command, dispatcher.Requests[1]);
+        Assert.Equal("unknown", replay.Body.GetProperty("effect").GetString());
+        Assert.Single(dispatcher.Requests);
     }
 
     [Theory]
@@ -70,7 +66,7 @@ public sealed partial class AgentSessionRecoveryOrchestratorSpecs
         var session = Assert.IsType<AgentSession>(await _fixture.StateStore.LoadAsync(sessionId));
         var admission = Assert.Single(session.Status.SessionCommandAdmissionFacts!);
         Assert.Null(admission.Outcome);
-        Assert.Null(session.Status.PendingReset);
+        Assert.NotNull(session.Status.PendingReset);
     }
 
     [Theory]

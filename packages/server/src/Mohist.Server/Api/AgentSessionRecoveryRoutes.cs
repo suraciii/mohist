@@ -100,7 +100,8 @@ public static class AgentSessionRecoveryRoutes
             }
             if (MapCommandResult(request, commandResult) is { } commandFailure)
             {
-                await grain.AbandonResetAsync(request.OperationId);
+                if (CommandEffectIsKnownAbsent(commandResult))
+                    await grain.AbandonResetAsync(request.OperationId);
                 return commandFailure;
             }
 
@@ -161,7 +162,8 @@ public static class AgentSessionRecoveryRoutes
             }
             if (MapCommandResult(request, commandResult) is { } commandFailure)
             {
-                await grain.AbandonResetAsync(request.OperationId);
+                if (CommandEffectIsKnownAbsent(commandResult))
+                    await grain.AbandonResetAsync(request.OperationId);
                 return commandFailure;
             }
 
@@ -209,6 +211,15 @@ public static class AgentSessionRecoveryRoutes
             throw;
         }
     }
+
+    // Only these Runner results prove that the command had no effect. A
+    // transport-unavailable result may arrive after the Runner accepted it, so
+    // its admission must remain pending for same-key reconciliation.
+    private static bool CommandEffectIsKnownAbsent(SessionCommandResult result) =>
+        result.Error is SessionCommandError.Conflict
+            or SessionCommandError.Missing
+            or SessionCommandError.NotStarted
+            or SessionCommandError.RuntimeUnavailable;
 
     private static IResult CommandEffectAlreadyAdmitted(SessionCommandRequest request) =>
         ApiResults.Fail(
@@ -266,11 +277,11 @@ public static class AgentSessionRecoveryRoutes
                 effect: ApiEffect.None,
                 retrySafe: true),
             SessionCommandError.Unavailable => ApiResults.Fail(
-                "Runner is unavailable",
+                "Runner command outcome is unavailable after its effect may have been admitted",
                 503,
                 "runner_unavailable",
                 new { sessionId = request.SessionId, runnerId = request.RunnerId },
-                effect: ApiEffect.None,
+                effect: ApiEffect.Unknown,
                 retrySafe: true),
             _ => InvalidRunnerResult(request.SessionId),
         };
