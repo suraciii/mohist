@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-var workflowListFields = []string{"profileId", "name", "description", "sourceProvenance", "isBuiltIn"}
+var workflowListFields = []string{"profileId", "revision", "name", "description", "sourceProvenance", "isBuiltIn"}
 var workflowFields = []string{"projectId", "profileId", "revision", "name", "description", "sourceProvenance", "isBuiltIn", "definitionSource", "stages"}
 
 // workflowSaveFields answers a create or edit with the saved Profile plus
@@ -742,7 +742,29 @@ func runRunView(ctx context.Context, deps Dependencies, c *client, cmd command) 
 	}
 	data, e := c.request(ctx, http.MethodGet, "/api/workflow-runs/"+url.PathEscape(run), nil)
 	if e != nil {
-		return commandFailureExit(deps, ctx, cmd, e)
+		if !contains(cmd.fields, "binding") {
+			return commandFailureExit(deps, ctx, cmd, e)
+		}
+		// A binding read is authoritative even when historical Run state is
+		// no longer decodable and the ordinary detail route answers 404.
+		binding, bindingErr := fetchRunBinding(ctx, c, run)
+		if bindingErr != nil {
+			return commandFailureExit(deps, ctx, cmd, bindingErr)
+		}
+		var bindingFields map[string]json.RawMessage
+		_ = json.Unmarshal(binding, &bindingFields)
+		fallback := map[string]json.RawMessage{
+			"id":       json.RawMessage(strconv.Quote(run)),
+			"issueRef": json.RawMessage("null"),
+			"binding":  binding,
+			"status":   bindingFields["status"],
+		}
+		encoded, _ := json.Marshal(fallback)
+		selected, selectErr := SelectFields(encoded, cmd.fields, false)
+		if selectErr != nil {
+			return commandFailureExit(deps, ctx, cmd, selectErr)
+		}
+		return writeJSON(deps.Stdout, json.RawMessage(selected))
 	}
 	var root map[string]json.RawMessage
 	if json.Unmarshal(data, &root) != nil {

@@ -54,6 +54,7 @@ export {
   getIssueWorkflowTaskLog,
   getIssueWorkflowArtifacts,
   getIssueWorkflowArtifactContent,
+  getParentIssueCandidates,
   getWorkflowRunBinding,
   getWorkflowRunDetail,
   issueAttachmentContentPath,

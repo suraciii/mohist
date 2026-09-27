@@ -534,6 +534,41 @@ func TestRunViewBindingReportsUnavailableDefinitionWithReason(t *testing.T) {
 	}
 }
 
+func TestRunViewBindingSurvivesUnreadableRunState(t *testing.T) {
+	bindingData := `{"workflowRunId":"wr-1","projectId":"proj-1","issueNumber":42,"status":"stopped","workflowProfileId":"spec/workflow","explicitWorkflowProfileId":null,"createdAt":"2026-09-27T00:00:00Z","startedAt":null,"definition":{"available":false,"source":null,"reason":"unreadable-run-state","content":null}}`
+	paths := []string{}
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/api/workflow-runs/wr-1":
+			return response(http.StatusNotFound, `{"success":false,"error":"Workflow run 'wr-1' not found","code":"not_found"}`), nil
+		case "/api/workflow-runs/wr-1/binding":
+			return response(http.StatusOK, `{"success":true,"data":`+bindingData+`}`), nil
+		default:
+			t.Fatalf("unexpected path=%q", r.URL.Path)
+			return nil, nil
+		}
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+	if code := Run(context.Background(), []string{"run", "view", "wr-1", "--json", "binding"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if len(paths) != 2 || paths[0] != "GET /api/workflow-runs/wr-1" || paths[1] != "GET /api/workflow-runs/wr-1/binding" {
+		t.Fatalf("paths=%v", paths)
+	}
+	var projected map[string]any
+	if err := json.Unmarshal([]byte(out.String()), &projected); err != nil {
+		t.Fatalf("stdout=%q: %v", out.String(), err)
+	}
+	binding, ok := projected["binding"].(map[string]any)
+	if !ok || binding["workflowRunId"] != "wr-1" || binding["definition"].(map[string]any)["reason"] != "unreadable-run-state" {
+		t.Fatalf("binding=%v", projected["binding"])
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("stderr=%q", errOut.String())
+	}
+}
+
 func TestRunControlSelectedBindingAnswersThroughSharedCatalog(t *testing.T) {
 	controlResult := `{"success":true,"data":{"issueRef":{"projectId":"proj-1","number":42},"status":{"workflowRunId":"wr-1","status":"paused","currentStage":"build"},"workflowProfileId":"spec/workflow"}}`
 	bindingData := `{"workflowRunId":"wr-1","projectId":"proj-1","issueNumber":42,"status":"paused","workflowProfileId":"spec/workflow","definition":{"available":true,"source":"run-snapshot","reason":null,"content":{"stages":[]}}}`
