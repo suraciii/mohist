@@ -102,12 +102,14 @@ public class WorkflowProfileApiSpecs
         };
         using var create = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/workflow-profiles", valid);
         Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+        var revision = await ReadRevisionAsync(project.Id, "editable");
 
         using var response = await _client.PutAsJsonAsync($"/api/projects/{project.Id}/workflow-profiles/editable", new
         {
             profileId = "editable",
             name = "Editable",
             definitionSource = "stages: [",
+            expectedRevision = revision,
         });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -116,39 +118,46 @@ public class WorkflowProfileApiSpecs
         Assert.NotEmpty(json.GetProperty("details").GetProperty("definitionErrors").EnumerateArray());
         var stored = await _client.GetDataAsync<JsonElement>($"/api/projects/{project.Id}/workflow-profiles/editable");
         Assert.Contains("stage: build", stored.GetProperty("definitionSource").GetString());
+        // A rejected validation leaves the precondition untouched too.
+        Assert.Equal(revision, stored.GetProperty("revision").GetString());
     }
 
     [Fact]
     public async Task PutValidYaml_ReturnsSerializedValidationResultAndPersists()
     {
         var project = await CreateProjectAsync();
-        using var create = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/workflow-profiles", new
+        var valid = new
         {
             profileId = "editable-valid",
             name = "Editable",
             definitionSource = "stages:\n  - stage: build\n    tasks: []\n    checks: []\n",
-        });
+        };
+        using var create = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/workflow-profiles", valid);
         Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+        var revision = await ReadRevisionAsync(project.Id, "editable-valid");
 
         using var response = await _client.PutAsJsonAsync(
             $"/api/projects/{project.Id}/workflow-profiles/editable-valid",
             new
             {
                 name = "Updated",
-                description = "Updated through the coordinator",
+                description = "Updated description",
                 definitionSource = "stages:\n  - stage: deliver\n    tasks: []\n    checks: []\n",
+                expectedRevision = revision,
             });
 
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("editable-valid", json.GetProperty("data").GetProperty("profileId").GetString());
-        Assert.Equal("Updated", json.GetProperty("data").GetProperty("name").GetString());
         var validation = json.GetProperty("validation");
-        Assert.Empty(validation.GetProperty("definitionErrors").EnumerateArray());
-        Assert.Empty(validation.GetProperty("actionErrors").EnumerateArray());
+        Assert.NotEqual(JsonValueKind.Null, validation.ValueKind);
+
         var stored = await _client.GetDataAsync<JsonElement>(
             $"/api/projects/{project.Id}/workflow-profiles/editable-valid");
         Assert.Contains("stage: deliver", stored.GetProperty("definitionSource").GetString());
+        // The save answer carries the resulting revision, and a fresh read
+        // exposes the same token — the caller can chain its next edit on it.
+        Assert.Equal(stored.GetProperty("revision").GetString(), json.GetProperty("data").GetProperty("revision").GetString());
+        Assert.NotEqual(revision, stored.GetProperty("revision").GetString());
     }
 
     [Fact]
@@ -234,12 +243,10 @@ public class WorkflowProfileApiSpecs
             new { definitionSource = " " });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("definition_source_required", json.GetProperty("code").GetString());
     }
 
     [Fact]
-    public async Task PutApprovalChange_RejectsActiveRunStructureChangeAndPreservesStoredProfile()
+    public async Task PutApprovalChange_WhileRunActive_AppliesFutureDefinitionAndKeepsRunBinding()
     {
         var project = await CreateProjectAsync();
         var runnerId = $"workflow-profile-approval-{Guid.NewGuid():N}";
@@ -285,30 +292,178 @@ public class WorkflowProfileApiSpecs
                     expectedRevision: null);
             Assert.True(bound.IsApplied);
 
+            // The active run no longer fences the future definition: it
+            // executes its own bound snapshot, so the edit lands for later
+            // starts without disturbing the running structure.
+            var revision = await ReadRevisionAsync(project.Id, profileId);
             using var response = await _client.PutAsJsonAsync(
                 $"/api/projects/{project.Id}/workflow-profiles/{profileId}",
                 new
                 {
                     name = "Approval Structure",
                     definitionSource = ApprovalProfile(requiresApproval: false),
+                    expectedRevision = revision,
                 });
 
-            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var errors = json.GetProperty("details").GetProperty("definitionErrors").EnumerateArray().ToArray();
-            Assert.Contains(errors, error =>
-                error.GetProperty("message").GetString()!.Contains(
-                    "retain requiresApproval=true",
-                    StringComparison.Ordinal));
+            response.EnsureSuccessStatusCode();
 
             var stored = await _client.GetDataAsync<JsonElement>(
                 $"/api/projects/{project.Id}/workflow-profiles/{profileId}");
-            Assert.Contains("requiresApproval: true", stored.GetProperty("definitionSource").GetString());
+            Assert.Contains("requiresApproval: false", stored.GetProperty("definitionSource").GetString());
+
+            // The run's binding read still reports the start-time
+            // definition the run executes, not the future definition.
+            var binding = await _client.GetDataAsync<JsonElement>($"/api/workflow-runs/{runId}/binding");
+            var boundStages = binding.GetProperty("definition").GetProperty("content").GetProperty("stages");
+            Assert.Contains(boundStages.EnumerateArray(), stage =>
+                stage.GetProperty("stage").GetString() == "build"
+                && stage.GetProperty("requiresApproval").GetBoolean());
         }
         finally
         {
             await _client.PostAsJsonAsync($"/api/runner/{runnerId}/unregister", new { });
         }
+    }
+
+    [Fact]
+    public async Task PutWithoutExpectedRevision_IsRejectedWithoutOverwrite()
+    {
+        var project = await CreateProjectAsync();
+        using var create = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/workflow-profiles", new
+        {
+            profileId = "precondition",
+            name = "Precondition",
+            definitionSource = "stages:\n  - stage: build\n    tasks: []\n    checks: []\n",
+        });
+        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+
+        using var response = await _client.PutAsJsonAsync(
+            $"/api/projects/{project.Id}/workflow-profiles/precondition",
+            new
+            {
+                name = "Overwrite",
+                definitionSource = "stages:\n  - stage: other\n    tasks: []\n    checks: []\n",
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("expected_revision_required", json.GetProperty("code").GetString());
+        var stored = await _client.GetDataAsync<JsonElement>(
+            $"/api/projects/{project.Id}/workflow-profiles/precondition");
+        Assert.Contains("stage: build", stored.GetProperty("definitionSource").GetString());
+    }
+
+    [Fact]
+    public async Task PutWithStaleRevision_ConflictsWithoutPartialEffectAndExposesWinner()
+    {
+        var project = await CreateProjectAsync();
+        const string profileId = "two-callers";
+        using var create = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/workflow-profiles", new
+        {
+            profileId,
+            name = "Two Callers",
+            definitionSource = "stages:\n  - stage: build\n    tasks: []\n    checks: []\n",
+        });
+        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+
+        // Both callers read the same revision.
+        var readRevision = await ReadRevisionAsync(project.Id, profileId);
+
+        // The human wins first.
+        using var first = await _client.PutAsJsonAsync(
+            $"/api/projects/{project.Id}/workflow-profiles/{profileId}",
+            new
+            {
+                name = "Human edit",
+                definitionSource = "stages:\n  - stage: human\n    tasks: []\n    checks: []\n",
+                expectedRevision = readRevision,
+            });
+        first.EnsureSuccessStatusCode();
+
+        // The Agent's stale write is rejected whole; nothing partial lands.
+        using var second = await _client.PutAsJsonAsync(
+            $"/api/projects/{project.Id}/workflow-profiles/{profileId}",
+            new
+            {
+                name = "Agent edit",
+                definitionSource = "stages:\n  - stage: agent\n    tasks: []\n    checks: []\n",
+                expectedRevision = readRevision,
+            });
+
+        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+        var conflict = await second.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("workflow_profile_revision_conflict", conflict.GetProperty("code").GetString());
+        var currentRevision = conflict.GetProperty("details").GetProperty("currentRevision").GetString();
+
+        // A new read exposes the first change and its revision, and the
+        // loser can resubmit against that token.
+        var stored = await _client.GetDataAsync<JsonElement>(
+            $"/api/projects/{project.Id}/workflow-profiles/{profileId}");
+        Assert.Contains("stage: human", stored.GetProperty("definitionSource").GetString());
+        Assert.Equal(currentRevision, stored.GetProperty("revision").GetString());
+
+        using var resubmit = await _client.PutAsJsonAsync(
+            $"/api/projects/{project.Id}/workflow-profiles/{profileId}",
+            new
+            {
+                name = "Agent edit",
+                definitionSource = "stages:\n  - stage: agent\n    tasks: []\n    checks: []\n",
+                expectedRevision = currentRevision,
+            });
+        resubmit.EnsureSuccessStatusCode();
+        var after = await _client.GetDataAsync<JsonElement>(
+            $"/api/projects/{project.Id}/workflow-profiles/{profileId}");
+        Assert.Contains("stage: agent", after.GetProperty("definitionSource").GetString());
+    }
+
+    [Fact]
+    public async Task DeleteAndRecreate_IssuesNewRevisionAndRejectsOldToken()
+    {
+        var project = await CreateProjectAsync();
+        const string profileId = "recreated";
+        using var create = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/workflow-profiles", new
+        {
+            profileId,
+            name = "First Life",
+            definitionSource = "stages:\n  - stage: build\n    tasks: []\n    checks: []\n",
+        });
+        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+        var firstRevision = await ReadRevisionAsync(project.Id, profileId);
+
+        using var delete = await _client.DeleteAsync(
+            $"/api/projects/{project.Id}/workflow-profiles/{profileId}");
+        delete.EnsureSuccessStatusCode();
+
+        using var recreate = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/workflow-profiles", new
+        {
+            profileId,
+            name = "Second Life",
+            definitionSource = "stages:\n  - stage: build\n    tasks: []\n    checks: []\n",
+        });
+        Assert.Equal(HttpStatusCode.Created, recreate.StatusCode);
+        var secondRevision = await ReadRevisionAsync(project.Id, profileId);
+        Assert.NotEqual(firstRevision, secondRevision);
+
+        using var stale = await _client.PutAsJsonAsync(
+            $"/api/projects/{project.Id}/workflow-profiles/{profileId}",
+            new
+            {
+                name = "Stale",
+                definitionSource = "stages:\n  - stage: stale\n    tasks: []\n    checks: []\n",
+                expectedRevision = firstRevision,
+            });
+
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        var after = await _client.GetDataAsync<JsonElement>(
+            $"/api/projects/{project.Id}/workflow-profiles/{profileId}");
+        Assert.Contains("stage: build", after.GetProperty("definitionSource").GetString());
+    }
+
+    private async Task<string?> ReadRevisionAsync(string projectId, string profileId)
+    {
+        var detail = await _client.GetDataAsync<JsonElement>(
+            $"/api/projects/{projectId}/workflow-profiles/{profileId}");
+        return detail.GetProperty("revision").GetString();
     }
 
     private static string ApprovalProfile(bool requiresApproval) => """

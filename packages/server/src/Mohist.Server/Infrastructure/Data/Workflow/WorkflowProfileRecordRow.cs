@@ -29,6 +29,16 @@ public class WorkflowProfileRecordRow
     public string DefinitionSource { get; set; } = string.Empty;
 
     /// <summary>
+    /// Opaque content revision. Issued fresh on every stored write; the
+    /// update path compares the caller-read token as its write
+    /// precondition. Random per write, so a token from an older version
+    /// never validates again, including after deletion and recreation of
+    /// the same identity. Null only on rows written outside the provider;
+    /// such rows expose no revision and cannot be updated without one.
+    /// </summary>
+    public string? Revision { get; set; }
+
+    /// <summary>
     /// Either <c>Verbatim</c> or <c>CanonicalLegacy</c>. The two
     /// values are stable; the read API maps them to the
     /// public <c>SourceProvenance</c> enum.
@@ -48,4 +58,17 @@ public static class WorkflowProfileBindingKey
     private static bool IsBuiltIn(string? profileId) =>
         string.Equals(profileId, "mohist/local", StringComparison.OrdinalIgnoreCase)
         || string.Equals(profileId, "mohist/github-pr", StringComparison.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// Opaque content-revision tokens for <see cref="WorkflowProfileRecordRow"/>.
+/// Random per issue so a superseded token — including one read before the
+/// content changed away and back, or before deletion and recreation of the
+/// same identity — never validates again.
+/// </summary>
+public static class WorkflowProfileRevisionSeed
+{
+    public static string Next() =>
+        Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16))
+            .ToLowerInvariant();
 }

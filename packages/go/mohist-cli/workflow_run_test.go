@@ -568,3 +568,123 @@ func TestRunControlSelectedBindingAnswersThroughSharedCatalog(t *testing.T) {
 		t.Fatalf("binding=%v", projected["binding"])
 	}
 }
+
+func TestWorkflowEditRequiresExpectedRevisionBeforeAnyRequest(t *testing.T) {
+	calls := 0
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("must not call")
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+	deps.ReadFile = func(string) (string, error) {
+		return "stages:\n  - stage: build\n    tasks: []\n    checks: []\n", nil
+	}
+
+	if code := Run(context.Background(), []string{"workflow", "edit", "ship", "--project", "proj-1", "--file", "workflow.yaml"}, deps); code != ExitUsage {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if calls != 0 || out.Len() != 0 || !strings.Contains(errOut.String(), "--expected-revision is required") {
+		t.Fatalf("calls=%d stdout=%q stderr=%q", calls, out.String(), errOut.String())
+	}
+}
+
+func TestWorkflowEditSendsExpectedRevisionWithSavedContent(t *testing.T) {
+	var body map[string]any
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/projects/proj-1/workflow-profiles/ship" {
+			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
+		}
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatalf("body=%q: %v", raw, err)
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"projectId":"proj-1","profileId":"ship","revision":"rev-2","definitionSource":"stages:\n  - stage: build\n"},"validation":`+workflowSaveSkippedValidation+`}`), nil
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+	deps.ReadFile = func(string) (string, error) {
+		return "stages:\n  - stage: build\n", nil
+	}
+
+	if code := Run(context.Background(), []string{"workflow", "edit", "ship", "--project", "proj-1", "--file", "workflow.yaml", "--expected-revision", "rev-1"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if body["expectedRevision"] != "rev-1" || body["definitionSource"] != "stages:\n  - stage: build\n" {
+		t.Fatalf("body=%v", body)
+	}
+	if !strings.Contains(out.String(), `"revision":"rev-2"`) {
+		t.Fatalf("stdout=%q", out.String())
+	}
+}
+
+func TestWorkflowEditRevisionConflictKeepsDraftAndExplainsRecovery(t *testing.T) {
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusConflict, `{"success":false,"error":"WorkflowProfile 'ship' in project 'proj-1' was changed since revision 'rev-1' was read; current revision is 'rev-9'.","code":"workflow_profile_revision_conflict","details":{"currentRevision":"rev-9"}}`), nil
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+	deps.ReadFile = func(string) (string, error) {
+		return "stages:\n  - stage: build\n", nil
+	}
+
+	if code := Run(context.Background(), []string{"workflow", "edit", "ship", "--project", "proj-1", "--file", "workflow.yaml", "--expected-revision", "rev-1"}, deps); code != ExitOperation {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout=%q", out.String())
+	}
+	for _, want := range []string{"workflow_profile_revision_conflict", "Draft kept", "mo workflow view ship"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("stderr=%q want %q", errOut.String(), want)
+		}
+	}
+}
+
+func TestWorkflowCreateRejectsExpectedRevisionFlag(t *testing.T) {
+	calls := 0
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("must not call")
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+	deps.ReadFile = func(string) (string, error) {
+		return "stages:\n  - stage: build\n", nil
+	}
+
+	if code := Run(context.Background(), []string{"workflow", "create", "ship", "--project", "proj-1", "--file", "workflow.yaml", "--expected-revision", "rev-1"}, deps); code != ExitUsage {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if calls != 0 || !strings.Contains(errOut.String(), "--expected-revision is only valid with mo workflow edit") {
+		t.Fatalf("calls=%d stderr=%q", calls, errOut.String())
+	}
+}
+
+func TestWorkflowEditHelpAndFieldDiscoveryStayOffline(t *testing.T) {
+	tests := []struct {
+		args []string
+		want []string
+	}{
+		{args: []string{"workflow", "edit", "ship", "--json"}, want: []string{strings.Join(workflowSaveFields, "\n")}},
+		{args: []string{"workflow", "edit", "--help"}, want: []string{"USAGE", "--expected-revision", strings.Join(workflowSaveFields, "\n")}},
+		{args: []string{"workflow", "edit", "ship", "-h"}, want: []string{"USAGE", "--expected-revision", strings.Join(workflowSaveFields, "\n")}},
+	}
+	for _, test := range tests {
+		t.Run(strings.Join(test.args, " "), func(t *testing.T) {
+			calls := 0
+			deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				return nil, errors.New("must not call")
+			}), map[string]string{})
+			deps.ReadFile = func(string) (string, error) {
+				t.Fatal("file must not be read")
+				return "", nil
+			}
+			code := Run(context.Background(), test.args, deps)
+			if code != ExitOK || calls != 0 || errOut.Len() != 0 {
+				t.Fatalf("code=%d calls=%d stderr=%q", code, calls, errOut.String())
+			}
+			for _, want := range test.want {
+				if !strings.Contains(out.String(), want) {
+					t.Fatalf("stdout=%q want %q", out.String(), want)
+				}
+			}
+		})
+	}
+}

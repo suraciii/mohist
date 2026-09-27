@@ -6,7 +6,6 @@ using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Domain;
-using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Workflow.Definition;
 
 namespace Mohist.Server.Workflow.Services;
@@ -134,7 +133,7 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
     {
         if (request is null)
             throw new ArgumentNullException(nameof(request));
-        return CreateOrUpdateAsync(projectId, request, isUpdate: false, ct);
+        return CreateOrUpdateAsync(projectId, request, isUpdate: false, expectedRevision: null, ct);
     }
 
     /// <summary>
@@ -157,11 +156,45 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
     public Task<WorkflowProfileSaveResult> UpdateAsync(
         string projectId,
         WorkflowProfileCollectionEntry request,
+        string expectedRevision,
         CancellationToken ct = default)
     {
         if (request is null)
             throw new ArgumentNullException(nameof(request));
-        return CreateOrUpdateAsync(projectId, request, isUpdate: true, ct);
+        if (string.IsNullOrWhiteSpace(expectedRevision))
+            throw new ArgumentException(
+                "An update requires the revision read with the content it replaces", nameof(expectedRevision));
+        return CreateOrUpdateAsync(projectId, request, isUpdate: true, expectedRevision, ct);
+    }
+
+    /// <summary>
+    /// Coherent single-version read behind the detail API: one row query
+    /// supplies content, revision, and the source the definition is parsed
+    /// from, so no save can interleave between the facts.
+    /// </summary>
+    public async Task<WorkflowProfileDetail?> GetDetailAsync(
+        string projectId, string profileId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(profileId))
+            return null;
+
+        if (WorkflowProfileCatalog.IsSystemProfile(profileId))
+        {
+            var source = WorkflowProfileCatalog.GetProfile(profileId);
+            if (source is null) return null;
+            var entry = WorkflowProfileCollectionEntry.BuiltIn(profileId, projectId);
+            return new WorkflowProfileDetail(entry, source.Definition);
+        }
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.WorkflowProfileRecords.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.ProjectId == projectId && r.ProfileId == profileId, ct);
+        if (row is null)
+            return null;
+
+        return new WorkflowProfileDetail(
+            ToEntry(row),
+            WorkflowProfileYamlParser.Parse(row.DefinitionSource, profileId).Definition);
     }
 
     public async Task<bool> DeleteAsync(
@@ -296,6 +329,7 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
         string projectId,
         WorkflowProfileCollectionEntry request,
         bool isUpdate,
+        string? expectedRevision,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(projectId))
@@ -311,99 +345,75 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
         // same input and catalog context produce the same judgment. A
         // definition that fails them is rejected without any database work.
         var catalog = await _catalogSource.GetCatalogAsync();
-        var (profile, validation) = EvaluateDefinition(request.DefinitionSource, request.ProfileId, catalog);
+        var (_, validation) = EvaluateDefinition(request.DefinitionSource, request.ProfileId, catalog);
         if (!validation.IsValid)
             return SaveResult(projectId, request, validation);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var existing = await db.WorkflowProfileRecords
-            .FirstOrDefaultAsync(r => r.ProjectId == projectId && r.ProfileId == request.ProfileId, ct);
-        if (isUpdate && existing is null)
-            throw new WorkflowProfileNotFoundException(projectId, request.ProfileId);
-        if (!isUpdate && existing is not null)
-            throw new WorkflowProfileAlreadyExistsException(projectId, request.ProfileId);
-
-        // Save-only rule: an active WorkflowRun's bound structure must
-        // survive the edit. These errors belong to the save, not to the
-        // definition, so they extend the same definition-error list the
-        // no-write validation reports.
-        var activeRuns = isUpdate
-            ? await db.WorkflowRuns.AsNoTracking()
-                .Where(row => row.MetadataProjectId == projectId
-                    && row.WorkflowProfileIdKey == request.ProfileId
-                    && row.Status != "completed"
-                    && row.Status != "stopped")
-                .Select(row => row.State)
-                .ToListAsync(ct)
-            : [];
-        var runBindings = activeRuns
-            .Select(state => System.Text.Json.JsonSerializer.Deserialize<WorkflowRun>(state, JSON.Options))
-            .Where(run => run is not null)
-            .Cast<WorkflowRun>()
-            .ToList();
-
-        if (runBindings.Count > 0)
-        {
-            var updatedStages = profile!.Definition.Stages
-                .ToDictionary(stage => stage.Stage, StringComparer.Ordinal);
-            var activeRunErrors = new List<WorkflowProfileValidationError>();
-            foreach (var run in runBindings)
-            {
-                foreach (var stage in run.Stages)
-                {
-                    if (!updatedStages.TryGetValue(stage.Id, out var updatedStage))
-                    {
-                        activeRunErrors.Add(WorkflowProfileValidationError.From(new ValidationError(
-                            "stages",
-                            $"Active WorkflowRun '{run.Id}' requires stage '{stage.Id}'")));
-                        continue;
-                    }
-
-                    if (updatedStage.RequiresApproval != stage.RequiresApproval)
-                    {
-                        activeRunErrors.Add(WorkflowProfileValidationError.From(new ValidationError(
-                            "stages",
-                            $"Active WorkflowRun '{run.Id}' requires stage '{stage.Id}' to retain requiresApproval={stage.RequiresApproval.ToString().ToLowerInvariant()}")));
-                    }
-                }
-            }
-
-            if (activeRunErrors.Count > 0)
-                return SaveResult(
-                    projectId,
-                    request,
-                    validation with { DefinitionErrors = [.. validation.DefinitionErrors, .. activeRunErrors] });
-        }
-
         var now = _timeProvider.GetUtcNow();
         if (isUpdate)
         {
-            existing!.Name = request.Name;
-            existing.Description = request.Description;
-            existing.DefinitionSource = request.DefinitionSource;
-            existing.SourceProvenance = nameof(WorkflowProfileSourceProvenance.Verbatim);
-            existing.UpdatedAt = now;
-            await db.SaveChangesAsync(ct);
-        }
-        else
-        {
-            var row = new WorkflowProfileRecordRow
+            // Authoritative compare-and-set: the caller-read revision gates
+            // the single UPDATE statement, so a stale or missing
+            // precondition fails without any partial effect, whatever the
+            // API or coordinator checked earlier. Active runs are
+            // unaffected by design — they execute their own binding
+            // snapshot, never this row.
+            var newRevision = NewRevision();
+            var affected = await db.WorkflowProfileRecords
+                .Where(r => r.ProjectId == projectId
+                    && r.ProfileId == request.ProfileId
+                    && r.Revision == expectedRevision)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(r => r.Name, request.Name)
+                    .SetProperty(r => r.Description, request.Description)
+                    .SetProperty(r => r.DefinitionSource, request.DefinitionSource)
+                    .SetProperty(r => r.SourceProvenance, nameof(WorkflowProfileSourceProvenance.Verbatim))
+                    .SetProperty(r => r.Revision, newRevision)
+                    .SetProperty(r => r.UpdatedAt, now), ct);
+            if (affected == 0)
             {
-                ProjectId = projectId,
-                ProfileId = request.ProfileId,
-                Name = request.Name,
-                Description = request.Description,
-                DefinitionSource = request.DefinitionSource,
-                SourceProvenance = nameof(WorkflowProfileSourceProvenance.Verbatim),
-                CreatedAt = now,
-                UpdatedAt = now,
-            };
-            db.WorkflowProfileRecords.Add(row);
-            await db.SaveChangesAsync(ct);
+                var current = await db.WorkflowProfileRecords.AsNoTracking()
+                    .Where(r => r.ProjectId == projectId && r.ProfileId == request.ProfileId)
+                    .Select(r => new { r.Revision })
+                    .FirstOrDefaultAsync(ct);
+                if (current is null)
+                    throw new WorkflowProfileNotFoundException(projectId, request.ProfileId);
+                throw new WorkflowProfileRevisionConflictException(
+                    projectId, request.ProfileId, expectedRevision!, current.Revision);
+            }
+
+            return SaveResult(projectId, request, validation, newRevision);
         }
 
-        return SaveResult(projectId, request, validation);
+        var exists = await db.WorkflowProfileRecords.AsNoTracking()
+            .AnyAsync(r => r.ProjectId == projectId && r.ProfileId == request.ProfileId, ct);
+        if (exists)
+            throw new WorkflowProfileAlreadyExistsException(projectId, request.ProfileId);
+
+        var createdRevision = NewRevision();
+        db.WorkflowProfileRecords.Add(new WorkflowProfileRecordRow
+        {
+            ProjectId = projectId,
+            ProfileId = request.ProfileId,
+            Name = request.Name,
+            Description = request.Description,
+            DefinitionSource = request.DefinitionSource,
+            SourceProvenance = nameof(WorkflowProfileSourceProvenance.Verbatim),
+            Revision = createdRevision,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync(ct);
+        return SaveResult(projectId, request, validation, createdRevision);
     }
+
+    /// <summary>
+    /// Fresh opaque revision token. Random rather than derived: a token
+    /// must never validate again once superseded, including when content
+    /// changes away and back or the identity is deleted and recreated.
+    /// </summary>
+    private static string NewRevision() => WorkflowProfileRevisionSeed.Next();
 
     /// <summary>
     /// The one definition/Action evaluation shared by validation and save:
@@ -440,7 +450,8 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
     private static WorkflowProfileSaveResult SaveResult(
         string projectId,
         WorkflowProfileCollectionEntry request,
-        WorkflowDefinitionValidationResult validation) => new(
+        WorkflowDefinitionValidationResult validation,
+        string? revision = null) => new(
         new WorkflowProfileCollectionEntry(
             ProjectId: projectId,
             ProfileId: request.ProfileId,
@@ -448,7 +459,8 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
             Description: request.Description,
             SourceProvenance: WorkflowProfileSourceProvenance.Verbatim,
             IsBuiltIn: false,
-            DefinitionSource: request.DefinitionSource),
+            DefinitionSource: request.DefinitionSource,
+            Revision: revision),
         validation);
 
     private static WorkflowProfileCollectionEntry ToEntry(WorkflowProfileRecordRow row) => new(
@@ -458,7 +470,8 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
         Description: row.Description,
         SourceProvenance: ParseProvenance(row.SourceProvenance),
         IsBuiltIn: false,
-        DefinitionSource: row.DefinitionSource);
+        DefinitionSource: row.DefinitionSource,
+        Revision: row.Revision);
 
     private static WorkflowProfileSourceProvenance ParseProvenance(string value) =>
         Enum.TryParse<WorkflowProfileSourceProvenance>(value, ignoreCase: false, out var parsed)

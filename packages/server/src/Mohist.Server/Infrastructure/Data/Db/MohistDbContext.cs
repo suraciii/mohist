@@ -1375,7 +1375,7 @@ protected override void OnModelCreating(ModelBuilder modelBuilder)
             entity.Property(e => e.Name).HasMaxLength(512).IsRequired();
             entity.Property(e => e.Description).IsRequired();
             entity.Property(e => e.DefinitionSource).IsRequired();
-            entity.Property(e => e.SourceProvenance).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.Revision).HasMaxLength(64);
             entity.HasIndex(e => e.ProjectId);
         });
 

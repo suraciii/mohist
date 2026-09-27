@@ -126,7 +126,7 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         var (projectId, _, _) = await SeedProjectAsync();
 
         await Assert.ThrowsAsync<WorkflowProfileReadOnlyException>(() =>
-            _provider.UpdateAsync(projectId, BuildCustom("mohist/github-pr")));
+            _provider.UpdateAsync(projectId, BuildCustom("mohist/github-pr"), expectedRevision: "unused"));
     }
 
     [Fact]
@@ -332,7 +332,8 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
                     with: {}
                 checks: []
             """;
-        await _provider.CreateAsync(projectId, BuildCustom("upd", yaml: original));
+        var created = await _provider.CreateAsync(projectId, BuildCustom("upd", yaml: original));
+        var revision = created.Profile.Revision;
 
         var updated = """
             id: upd
@@ -344,7 +345,7 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
                     with: {}
                 checks: []
             """;
-        var result = await _provider.UpdateAsync(projectId, BuildCustom("upd", yaml: updated));
+        var result = await _provider.UpdateAsync(projectId, BuildCustom("upd", yaml: updated), revision!);
 
         Assert.Equal(WorkflowProfileSourceProvenance.Verbatim, result.Profile.SourceProvenance);
         Assert.Equal(updated, result.Profile.DefinitionSource);

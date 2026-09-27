@@ -168,23 +168,24 @@ public static class ProjectRoutes
         {
             var project = context.GetResolvedProject();
             var id = Uri.UnescapeDataString(profileId);
-            var profile = await provider.GetAsync(project.Id, id);
-            if (profile is null)
+            // One provider read: content, derived structure, and revision
+            // describe the same stored version, so an edit cannot
+            // interleave between the facts the caller will use as its
+            // next edit precondition.
+            var detail = await provider.GetDetailAsync(project.Id, id);
+            if (detail is null)
                 return ApiResults.NotFound($"WorkflowProfile '{id}' was not found");
 
-            var definition = await provider.GetDefinitionAsync(project.Id, id);
-            if (definition is null)
-                return ApiResults.NotFound($"WorkflowProfile '{id}' has no readable definition");
-
             return ApiResults.Ok(new WorkflowProfileDetailResponse(
-                profile.ProjectId,
-                profile.ProfileId,
-                profile.Name,
-                profile.Description,
-                profile.SourceProvenance,
-                profile.IsBuiltIn,
-                profile.DefinitionSource,
-                definition.Stages
+                detail.Profile.ProjectId,
+                detail.Profile.ProfileId,
+                detail.Profile.Name,
+                detail.Profile.Description,
+                detail.Profile.SourceProvenance,
+                detail.Profile.IsBuiltIn,
+                detail.Profile.Revision,
+                detail.Profile.DefinitionSource,
+                detail.Definition.Stages
                     .Select(stage => new WorkflowProfileStageSummary(
                         stage.Stage,
                         stage.RequiresApproval,
@@ -201,6 +202,13 @@ public static class ProjectRoutes
         {
             var project = context.GetResolvedProject();
             var id = Uri.UnescapeDataString(profileId);
+            if (string.IsNullOrWhiteSpace(request.ExpectedRevision))
+            {
+                return ApiResults.BadRequest(
+                    "expectedRevision is required: read the Profile, then submit the revision that read returned",
+                    "expected_revision_required");
+            }
+
             try
             {
                 var result = await grains.GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(project.Id)
@@ -210,7 +218,8 @@ public static class ProjectRoutes
                             id,
                             request.Name ?? id,
                             request.Description ?? string.Empty,
-                            request.DefinitionSource),
+                            request.DefinitionSource,
+                            ExpectedContentRevision: request.ExpectedRevision),
                         $"api-profile-update:{Guid.NewGuid():N}",
                         expectedRevision: null);
                 return result.ValidationResult.IsValid
@@ -224,6 +233,15 @@ public static class ProjectRoutes
             catch (WorkflowProfileNotFoundException ex)
             {
                 return ApiResults.NotFound(ex.Message);
+            }
+            catch (WorkflowProfileRevisionConflictException ex)
+            {
+                return ApiResults.Conflict(
+                    $"{ex.Message} Read the current content and revision, compare it with your draft, then reapply your changes.",
+                    "workflow_profile_revision_conflict",
+                    ex.CurrentRevision is null
+                        ? null
+                        : new { currentRevision = ex.CurrentRevision });
             }
         });
 
@@ -717,6 +735,7 @@ public sealed record WorkflowProfileDetailResponse(
     string Description,
     WorkflowProfileSourceProvenance SourceProvenance,
     bool IsBuiltIn,
+    string? Revision,
     string? DefinitionSource,
     IReadOnlyList<WorkflowProfileStageSummary> Stages);
 
@@ -725,7 +744,6 @@ public sealed record WorkflowProfileStageSummary(
     bool RequiresApproval,
     IReadOnlyList<string> Tasks,
     IReadOnlyList<string> Checks);
-
 public sealed record PromptUpsertRequest(string? Body);
 
 public sealed record ProjectPromptOverrideRequest(
@@ -812,11 +830,18 @@ public sealed record ProjectVerificationCommandBody(
     }
 }
 
+/// <summary>
+/// Body of the create and update Profile writes. The update route
+/// requires <see cref="ExpectedRevision"/>: the opaque revision the
+/// caller read with the content it is replacing. Create ignores the
+/// field; identity is its own uniqueness rule.
+/// </summary>
 public sealed record WorkflowProfileSaveRequest(
     string ProfileId,
     string? Name,
     string? Description,
-    string DefinitionSource)
+    string DefinitionSource,
+    string? ExpectedRevision = null)
 {
     public WorkflowProfileCollectionEntry ToEntry(string projectId, string? profileId = null) =>
         new(

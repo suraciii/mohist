@@ -14,7 +14,7 @@ import (
 )
 
 var workflowListFields = []string{"profileId", "name", "description", "sourceProvenance", "isBuiltIn"}
-var workflowFields = []string{"projectId", "profileId", "name", "description", "sourceProvenance", "isBuiltIn", "definitionSource", "stages"}
+var workflowFields = []string{"projectId", "profileId", "revision", "name", "description", "sourceProvenance", "isBuiltIn", "definitionSource", "stages"}
 
 // workflowSaveFields answers a create or edit with the saved Profile plus
 // the validation scope that admitted it, including a skipped Action check.
@@ -47,7 +47,11 @@ func parseWorkflow(args []string) (command, error) {
 	if action == "create" || action == "edit" {
 		c.catalog = workflowSaveFields
 	}
-	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+	if action == "edit" {
+		if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, workflowEditHelp()); ok {
+			return discovered, err
+		}
+	} else if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
 		return discovered, err
 	}
 	start := 1
@@ -64,10 +68,27 @@ func parseWorkflow(args []string) (command, error) {
 	return parseWorkflowInput(c, args[start:], action == "create" || action == "edit", action == "view")
 }
 
+// workflowEditHelp documents the edit contract offline: the edit
+// precondition, where the revision comes from, and what a conflict means
+// for the caller's draft.
+func workflowEditHelp() string {
+	return "USAGE\n" +
+		"    mo workflow edit <profile-id> --file <path|-> --expected-revision <token>\n" +
+		"        [--project <name-or-id>] [--name <name>] [--description <text>] [flags]\n\n" +
+		"Replaces a custom Workflow Profile's content for future runs. The revision\n" +
+		"comes from the read that returned the content being edited (mo workflow\n" +
+		"view <profile-id>); it is compared at the storage boundary. A missing or\n" +
+		"stale revision fails without writing: another caller changed the Profile\n" +
+		"since it was read. The --file draft is kept; re-read the Profile, compare\n" +
+		"the changes, and resubmit with the new revision. The edit changes no\n" +
+		"active run binding, default selection, or Issue.\n\n" +
+		"JSON FIELDS\n" + strings.Join(workflowSaveFields, "\n")
+}
+
 func parseWorkflowInput(c command, args []string, needsFile, view bool) (command, error) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--project", "--file", "--id", "--name", "--description":
+		case "--project", "--file", "--id", "--name", "--description", "--expected-revision":
 			if i+1 >= len(args) {
 				return command{}, usage(args[i] + " requires a value")
 			}
@@ -82,10 +103,16 @@ func parseWorkflowInput(c command, args []string, needsFile, view bool) (command
 				return command{}, err
 			}
 		case "--help", "-h":
+			if c.kind == "workflow-edit" {
+				return command{help: true, helpText: workflowEditHelp()}, nil
+			}
 			return command{help: true, helpText: leafHelp(c.kind, c.catalog)}, nil
 		default:
 			return command{}, usage("unknown option " + args[i])
 		}
+	}
+	if c.kind != "workflow-edit" && hasArg(c.args, "expected-revision") {
+		return command{}, usage("--expected-revision is only valid with mo workflow edit")
 	}
 	if needsFile && !hasArg(c.args, "file") {
 		return command{}, usage("--file is required")
@@ -330,6 +357,13 @@ func runWorkflowProfile(ctx context.Context, deps Dependencies, c *client, cmd c
 		}
 		cmd.preflightedInput = source
 	}
+	// The edit precondition: the revision that came with the content being
+	// replaced. It is never fetched silently and never defaulted; a missing
+	// token is a usage error made before any HTTP request.
+	if cmd.kind == "workflow-edit" && strings.TrimSpace(argValue(cmd.args, "expected-revision", "")) == "" {
+		writeError(deps.Stderr, errors.New("--expected-revision is required; read it from 'mo workflow view <profile-id>'"))
+		return ExitUsage
+	}
 	project, ok := resolveProject(deps, argValue(cmd.args, "project", ""))
 	if !ok {
 		writeError(deps.Stderr, errors.New("Run 'mo project use <name-or-id>' or pass --project <name-or-id>"))
@@ -392,6 +426,9 @@ func runWorkflowProfile(ctx context.Context, deps Dependencies, c *client, cmd c
 
 func workflowBody(cmd command) map[string]any {
 	result := map[string]any{"profileId": argValue(cmd.args, "profile", argValue(cmd.args, "id", "")), "name": argValue(cmd.args, "name", ""), "description": argValue(cmd.args, "description", ""), "definitionSource": cmd.preflightedInput}
+	if revision := argValue(cmd.args, "expected-revision", ""); revision != "" {
+		result["expectedRevision"] = revision
+	}
 	return result
 }
 
@@ -510,6 +547,7 @@ func workflowSaveRequest(ctx context.Context, deps Dependencies, c *client, cmd 
 		code := operationExit(deps, ctx, err)
 		if code == ExitOperation {
 			writeSaveValidationErrors(deps, err)
+			writeSaveConflictRecovery(deps, cmd, err)
 		}
 		return code
 	}
@@ -555,6 +593,20 @@ func writeSaveValidationErrors(deps Dependencies, err error) {
 		return
 	}
 	writeValidationIssues(deps, workflowValidationIssues(report))
+}
+
+// writeSaveConflictRecovery explains a rejected edit precondition. The
+// draft file is untouched on disk; the only recovery is to read the
+// current Profile and revision, compare it with the draft, and resubmit —
+// never a silent refetch-and-overwrite.
+func writeSaveConflictRecovery(deps Dependencies, cmd command, err error) {
+	var operation *operationError
+	if !errors.As(err, &operation) || !strings.EqualFold(operation.code, "workflow_profile_revision_conflict") {
+		return
+	}
+	fmt.Fprintf(deps.Stderr,
+		"Draft kept: your --file was not changed. Re-read 'mo workflow view %s', compare it with your draft, then resubmit with the new revision.\n",
+		argValue(cmd.args, "profile", argValue(cmd.args, "id", "")))
 }
 
 func runList(ctx context.Context, deps Dependencies, c *client, cmd command) int {

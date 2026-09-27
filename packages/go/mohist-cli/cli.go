@@ -760,7 +760,8 @@ func leafValueOption(kind, arg string) bool {
 		"--stage-models-file", "--stage-model-variants", "--stage-model-variants-file",
 		"--runtime", "--variant", "--reasoning-effort", "--purpose", "--instructions", "--instructions-file", "--avatar-file",
 		"--skills", "--permissions", "--max-concurrent-runs", "--allowed-subagent", "--parent-session", "--prompt", "--prompt-file",
-		"--workspace", "--epic", "--idempotency-key", "--at", "--text", "--text-file", "--run", "--continuation", "--attach", "--turn-id":
+		"--workspace", "--epic", "--idempotency-key", "--at", "--text", "--text-file", "--run", "--continuation", "--attach", "--turn-id",
+		"--expected-revision":
 		return true
 	default:
 		return false
