@@ -865,6 +865,9 @@ type envelope struct {
 	Effect     string          `json:"effect"`
 	RetrySafe  *bool           `json:"retrySafe"`
 	NextAction string          `json:"nextAction"`
+	// Validation carries the workflow validation facts a save returns
+	// beside the saved resource, so they survive the response reader.
+	Validation json.RawMessage `json:"validation"`
 }
 
 func (c *client) get(ctx context.Context, path string) (json.RawMessage, error) {

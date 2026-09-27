@@ -137,6 +137,23 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
         return CreateOrUpdateAsync(projectId, request, isUpdate: false, ct);
     }
 
+    /// <summary>
+    /// No-write twin of the save validation: the same parse, runtime-Action,
+    /// and catalog rules over the same input. It never touches Profile,
+    /// selection, Issue, or Run state.
+    /// </summary>
+    public async Task<WorkflowDefinitionValidationResult> ValidateAsync(
+        string definitionSource,
+        string? profileId = null,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(definitionSource))
+            throw new ArgumentException("Definition source is required", nameof(definitionSource));
+
+        var catalog = await _catalogSource.GetCatalogAsync();
+        return EvaluateDefinition(definitionSource, profileId ?? string.Empty, catalog).Validation;
+    }
+
     public Task<WorkflowProfileSaveResult> UpdateAsync(
         string projectId,
         WorkflowProfileCollectionEntry request,
@@ -290,9 +307,13 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
         if (WorkflowProfileCatalog.IsSystemProfile(request.ProfileId))
             throw new WorkflowProfileReadOnlyException(request.ProfileId);
 
-        var sourceProfile = WorkflowProfileYamlParser.Parse(
-            request.DefinitionSource,
-            request.ProfileId);
+        // Definition and Action rules are shared with ValidateAsync so the
+        // same input and catalog context produce the same judgment. A
+        // definition that fails them is rejected without any database work.
+        var catalog = await _catalogSource.GetCatalogAsync();
+        var (profile, validation) = EvaluateDefinition(request.DefinitionSource, request.ProfileId, catalog);
+        if (!validation.IsValid)
+            return SaveResult(projectId, request, validation);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var existing = await db.WorkflowProfileRecords
@@ -302,8 +323,10 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
         if (!isUpdate && existing is not null)
             throw new WorkflowProfileAlreadyExistsException(projectId, request.ProfileId);
 
-        var profile = sourceProfile;
-
+        // Save-only rule: an active WorkflowRun's bound structure must
+        // survive the edit. These errors belong to the save, not to the
+        // definition, so they extend the same definition-error list the
+        // no-write validation reports.
         var activeRuns = isUpdate
             ? await db.WorkflowRuns.AsNoTracking()
                 .Where(row => row.MetadataProjectId == projectId
@@ -319,63 +342,37 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
             .Cast<WorkflowRun>()
             .ToList();
 
-        var definitionErrors = new List<ValidationError>();
-        foreach (var run in runBindings)
+        if (runBindings.Count > 0)
         {
-            var updated = WorkflowProfileYamlParser.Parse(request.DefinitionSource, request.ProfileId);
-            var updatedStages = updated.Definition.Stages
+            var updatedStages = profile!.Definition.Stages
                 .ToDictionary(stage => stage.Stage, StringComparer.Ordinal);
-            foreach (var stage in run.Stages)
+            var activeRunErrors = new List<WorkflowProfileValidationError>();
+            foreach (var run in runBindings)
             {
-                if (!updatedStages.TryGetValue(stage.Id, out var updatedStage))
+                foreach (var stage in run.Stages)
                 {
-                    definitionErrors.Add(new ValidationError(
-                        "stages",
-                        $"Active WorkflowRun '{run.Id}' requires stage '{stage.Id}'"));
-                    continue;
-                }
+                    if (!updatedStages.TryGetValue(stage.Id, out var updatedStage))
+                    {
+                        activeRunErrors.Add(WorkflowProfileValidationError.From(new ValidationError(
+                            "stages",
+                            $"Active WorkflowRun '{run.Id}' requires stage '{stage.Id}'")));
+                        continue;
+                    }
 
-                if (updatedStage.RequiresApproval != stage.RequiresApproval)
-                {
-                    definitionErrors.Add(new ValidationError(
-                        "stages",
-                        $"Active WorkflowRun '{run.Id}' requires stage '{stage.Id}' to retain requiresApproval={stage.RequiresApproval.ToString().ToLowerInvariant()}"));
+                    if (updatedStage.RequiresApproval != stage.RequiresApproval)
+                    {
+                        activeRunErrors.Add(WorkflowProfileValidationError.From(new ValidationError(
+                            "stages",
+                            $"Active WorkflowRun '{run.Id}' requires stage '{stage.Id}' to retain requiresApproval={stage.RequiresApproval.ToString().ToLowerInvariant()}")));
+                    }
                 }
             }
-        }
 
-        var catalog = await _catalogSource.GetCatalogAsync();
-        var materializedProfiles = new[] { profile }
-            .Concat(runBindings.Select(_ => WorkflowProfileYamlParser.Parse(request.DefinitionSource, request.ProfileId)))
-            .ToList();
-        var actionErrors = catalog is null
-            ? Array.Empty<ValidationError>()
-            : materializedProfiles
-                .SelectMany(item => ActionContractValidator.Validate(item.Definition, catalog))
-                .Distinct()
-                .OrderBy(error => error.Path, StringComparer.Ordinal)
-                .ThenBy(error => error.Message, StringComparer.Ordinal)
-                .ToArray();
-
-        var validation = new WorkflowDefinitionValidationResult(
-            DefinitionErrors: definitionErrors.Select(WorkflowProfileValidationError.From).ToArray(),
-            ActionErrors: actionErrors.Select(WorkflowProfileValidationError.From).ToArray(),
-            ActionValidationStatus: catalog is null
-                ? ActionValidationStatus.Skipped
-                : ActionValidationStatus.Performed);
-
-        if (validation.HasDefinitionErrors || validation.HasActionErrors)
-        {
-            return new WorkflowProfileSaveResult(
-                new WorkflowProfileCollectionEntry(
-                    ProjectId: projectId,
-                    ProfileId: request.ProfileId,
-                    Name: request.Name,
-                    Description: request.Description,
-                    SourceProvenance: WorkflowProfileSourceProvenance.Verbatim,
-                    IsBuiltIn: false,
-                    DefinitionSource: request.DefinitionSource),
-                validation);
+            if (activeRunErrors.Count > 0)
+                return SaveResult(
+                    projectId,
+                    request,
+                    validation with { DefinitionErrors = [.. validation.DefinitionErrors, .. activeRunErrors] });
         }
 
         var now = _timeProvider.GetUtcNow();
@@ -405,17 +402,54 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
             await db.SaveChangesAsync(ct);
         }
 
-        return new WorkflowProfileSaveResult(
-            new WorkflowProfileCollectionEntry(
-                ProjectId: projectId,
-                ProfileId: request.ProfileId,
-                Name: request.Name,
-                Description: request.Description,
-                SourceProvenance: WorkflowProfileSourceProvenance.Verbatim,
-                IsBuiltIn: false,
-                DefinitionSource: request.DefinitionSource),
-            validation);
+        return SaveResult(projectId, request, validation);
     }
+
+    /// <summary>
+    /// The one definition/Action evaluation shared by validation and save:
+    /// parse (reported, never thrown here), removed-runtime-Action
+    /// rejections, and Action-contract checks against the current catalog.
+    /// The Action check is Skipped, with its reason, when no Runner has
+    /// reported a catalog; a skipped check is not an error, so an otherwise
+    /// valid definition may still be saved under existing policy.
+    /// </summary>
+    private static (WorkflowProfile? Profile, WorkflowDefinitionValidationResult Validation) EvaluateDefinition(
+        string definitionSource,
+        string profileId,
+        ActionCatalog? catalog)
+    {
+        var (profile, parseErrors) = WorkflowProfileYamlParser.TryParse(definitionSource, profileId);
+        var definitionErrors = Sort(parseErrors);
+        var actionErrors = profile is null || catalog is null
+            ? Array.Empty<WorkflowProfileValidationError>()
+            : Sort(ActionContractValidator.Validate(profile.Definition, catalog).Distinct());
+        var skipped = catalog is null;
+        return (profile, new WorkflowDefinitionValidationResult(
+            definitionErrors,
+            actionErrors,
+            skipped ? ActionValidationStatus.Skipped : ActionValidationStatus.Performed,
+            skipped ? WorkflowDefinitionValidationResult.CatalogUnavailableSkipReason : null));
+
+        static WorkflowProfileValidationError[] Sort(IEnumerable<ValidationError> errors) => errors
+            .Select(WorkflowProfileValidationError.From)
+            .OrderBy(error => error.Path, StringComparer.Ordinal)
+            .ThenBy(error => error.Message, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static WorkflowProfileSaveResult SaveResult(
+        string projectId,
+        WorkflowProfileCollectionEntry request,
+        WorkflowDefinitionValidationResult validation) => new(
+        new WorkflowProfileCollectionEntry(
+            ProjectId: projectId,
+            ProfileId: request.ProfileId,
+            Name: request.Name,
+            Description: request.Description,
+            SourceProvenance: WorkflowProfileSourceProvenance.Verbatim,
+            IsBuiltIn: false,
+            DefinitionSource: request.DefinitionSource),
+        validation);
 
     private static WorkflowProfileCollectionEntry ToEntry(WorkflowProfileRecordRow row) => new(
         ProjectId: row.ProjectId,

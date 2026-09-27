@@ -51,6 +51,21 @@ public interface IWorkflowProfileProvider
     Task<WorkflowProfileSourceProvenance?> GetSourceProvenanceAsync(string projectId, string profileId, CancellationToken ct = default);
 
     /// <summary>
+    /// Validates a Definition source with the same definition and Action
+    /// rules as a save, without writing anything. Parse failures,
+    /// removed-runtime-Action rejections, and catalog-backed Action-contract
+    /// checks are reported through the returned result; the Action check is
+    /// reported as <see cref="ActionValidationStatus.Skipped"/> with its
+    /// reason when no Runner Action catalog is available. Save-only resource
+    /// rules (identity conflicts, read-only targets, active-Run structure)
+    /// are not part of this operation.
+    /// </summary>
+    Task<WorkflowDefinitionValidationResult> ValidateAsync(
+        string definitionSource,
+        string? profileId = null,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Validates a custom Profile against the authoritative Definition
     /// validator and the Runner-reported Action catalog, then persists
     /// it verbatim. Throws <see cref="WorkflowProfileReadOnlyException"/>
@@ -161,11 +176,20 @@ public sealed record WorkflowProfileSaveResult(
 public sealed record WorkflowDefinitionValidationResult(
     [property: Id(0)] IReadOnlyList<WorkflowProfileValidationError> DefinitionErrors,
     [property: Id(1)] IReadOnlyList<WorkflowProfileValidationError> ActionErrors,
-    [property: Id(2)] ActionValidationStatus ActionValidationStatus)
+    [property: Id(2)] ActionValidationStatus ActionValidationStatus,
+    [property: Id(3)] string? ActionValidationSkipReason = null)
 {
+    /// <summary>
+    /// Reported reason whenever the Action check is skipped because no
+    /// Runner has reported an Action catalog yet.
+    /// </summary>
+    public const string CatalogUnavailableSkipReason =
+        "no Runner has reported an Action catalog yet";
+
     public bool HasDefinitionErrors => DefinitionErrors.Count > 0;
     public bool HasActionErrors => ActionErrors.Count > 0;
     public bool IsValid => DefinitionErrors.Count == 0 && ActionErrors.Count == 0;
+    public bool IsComplete => ActionValidationStatus == ActionValidationStatus.Performed;
 }
 
 [GenerateSerializer]

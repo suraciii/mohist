@@ -27,7 +27,7 @@ public class WorkflowProfileApiSpecs
     }
 
     [Fact]
-    public async Task PostMalformedYaml_ReturnsDefinitionValidationAndDoesNotPersist()
+    public async Task PostMalformedYaml_ReturnsUnifiedValidationAndDoesNotPersist()
     {
         var project = await CreateProjectAsync();
         using var response = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/workflow-profiles", new
@@ -39,10 +39,14 @@ public class WorkflowProfileApiSpecs
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("workflow_profile_definition_validation", json.GetProperty("code").GetString());
-        Assert.Contains(
-            json.GetProperty("details").EnumerateArray(),
-            error => string.Equals(error.GetProperty("source").GetString(), "definition", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("workflow_profile_validation", json.GetProperty("code").GetString());
+        var details = json.GetProperty("details");
+        var definitionErrors = details.GetProperty("definitionErrors").EnumerateArray().ToList();
+        Assert.NotEmpty(definitionErrors);
+        Assert.Contains(definitionErrors, error =>
+            error.GetProperty("source").GetString() == "definition"
+            && !string.IsNullOrEmpty(error.GetProperty("message").GetString()));
+        Assert.Empty(details.GetProperty("actionErrors").EnumerateArray());
 
         var profiles = await _client.GetDataAsync<JsonElement>($"/api/projects/{project.Id}/workflow-profiles");
         Assert.DoesNotContain(profiles.EnumerateArray(), profile => profile.GetProperty("profileId").GetString() == "broken");
@@ -108,7 +112,8 @@ public class WorkflowProfileApiSpecs
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("workflow_profile_definition_validation", json.GetProperty("code").GetString());
+        Assert.Equal("workflow_profile_validation", json.GetProperty("code").GetString());
+        Assert.NotEmpty(json.GetProperty("details").GetProperty("definitionErrors").EnumerateArray());
         var stored = await _client.GetDataAsync<JsonElement>($"/api/projects/{project.Id}/workflow-profiles/editable");
         Assert.Contains("stage: build", stored.GetProperty("definitionSource").GetString());
     }
@@ -144,6 +149,93 @@ public class WorkflowProfileApiSpecs
         var stored = await _client.GetDataAsync<JsonElement>(
             $"/api/projects/{project.Id}/workflow-profiles/editable-valid");
         Assert.Contains("stage: deliver", stored.GetProperty("definitionSource").GetString());
+    }
+
+    [Fact]
+    public async Task PostValidate_ReproductionInput_ReportsPathLocatedErrorsWithoutWriting()
+    {
+        var project = await CreateProjectAsync();
+        var before = await _client.GetDataAsync<JsonElement>($"/api/projects/{project.Id}/workflow-profiles");
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/workflow-profiles/validate",
+            new { definitionSource = "stages:\n  - not-a-valid-stage: true\n" });
+
+        response.EnsureSuccessStatusCode();
+        var validation = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Equal(project.Id, validation.GetProperty("projectId").GetString());
+        var errors = validation.GetProperty("definitionErrors").EnumerateArray().ToList();
+        Assert.NotEmpty(errors);
+        Assert.Contains(errors, error =>
+            error.GetProperty("path").GetString() == "stages[0].not-a-valid-stage"
+            && error.GetProperty("message").GetString()!.Contains("not-a-valid-stage"));
+    }
+
+    [Fact]
+    public async Task PostValidate_MissingActionInAvailableCatalog_ReportsPerformedActionErrorAndMatchesSave()
+    {
+        var project = await CreateProjectAsync();
+        var runnerId = $"workflow-profile-validate-{Guid.NewGuid():N}";
+        var catalog = new ActionCatalog(
+            [new ActionCatalogEntry("mohist/pi", [], [], [], "Run a Pi agent turn", ["agent-turn"])],
+            []);
+
+        try
+        {
+            using var register = await _client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
+            {
+                processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
+                capabilities = new[] { "spec/*" },
+                hostname = "workflow-profile-validate-spec",
+                actionCatalog = catalog,
+            });
+            register.EnsureSuccessStatusCode();
+
+            const string definition = "stages:\n  - stage: build\n    tasks:\n      - id: t\n        uses: mohist/ghost\n        with: {}\n    checks: []\n";
+            using var validate = await _client.PostAsJsonAsync(
+                $"/api/projects/{project.Id}/workflow-profiles/validate",
+                new { definitionSource = definition });
+            validate.EnsureSuccessStatusCode();
+            var validation = (await validate.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            Assert.Equal("performed", validation.GetProperty("actionValidationStatus").GetString(), ignoreCase: true);
+            Assert.Empty(validation.GetProperty("definitionErrors").EnumerateArray());
+            var actionErrors = validation.GetProperty("actionErrors").EnumerateArray().ToList();
+            Assert.Contains(actionErrors, error => error.GetProperty("message").GetString()!.Contains("mohist/ghost"));
+
+            // The save judges the same input and catalog context the same way
+            // and writes nothing.
+            using var save = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/workflow-profiles", new
+            {
+                profileId = "ghost-profile",
+                name = "Ghost",
+                definitionSource = definition,
+            });
+            Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
+            var saveJson = await save.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("workflow_profile_validation", saveJson.GetProperty("code").GetString());
+            var savedActionErrors = saveJson.GetProperty("details").GetProperty("actionErrors").EnumerateArray().ToList();
+            Assert.Equal(actionErrors.Count, savedActionErrors.Count);
+
+            var profiles = await _client.GetDataAsync<JsonElement>($"/api/projects/{project.Id}/workflow-profiles");
+            Assert.DoesNotContain(profiles.EnumerateArray(), profile => profile.GetProperty("profileId").GetString() == "ghost-profile");
+        }
+        finally
+        {
+            await _client.PostAsJsonAsync($"/api/runner/{runnerId}/unregister", new { });
+        }
+    }
+
+    [Fact]
+    public async Task PostValidate_BlankDefinitionSource_IsABadRequest()
+    {
+        var project = await CreateProjectAsync();
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/workflow-profiles/validate",
+            new { definitionSource = " " });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("definition_source_required", json.GetProperty("code").GetString());
     }
 
     [Fact]

@@ -229,6 +229,12 @@ public sealed class WorkflowGrainProductionContractSpecs
             CancellationToken ct = default) =>
             throw new NotSupportedException();
 
+        public Task<WorkflowDefinitionValidationResult> ValidateAsync(
+            string definitionSource,
+            string? profileId = null,
+            CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
         public Task<bool> DeleteAsync(string projectId, string profileId, CancellationToken ct = default) =>
             throw new NotSupportedException();
 

@@ -124,6 +124,24 @@ public static class ProjectRoutes
             return ApiResults.Ok(await provider.ListAsync(project.Id));
         });
 
+        byRef.MapPost("/workflow-profiles/validate", async (
+            HttpContext context,
+            WorkflowProfileValidationRequest request,
+            IWorkflowProfileProvider provider) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.DefinitionSource))
+                return ApiResults.BadRequest("definitionSource is required", "definition_source_required");
+
+            var project = context.GetResolvedProject();
+            var validation = await provider.ValidateAsync(request.DefinitionSource, request.ProfileId);
+            return ApiResults.Ok(new WorkflowProfileValidationResponse(
+                project.Id,
+                validation.DefinitionErrors,
+                validation.ActionErrors,
+                validation.ActionValidationStatus,
+                validation.ActionValidationSkipReason));
+        });
+
         byRef.MapPost("/workflow-profiles", async (
             HttpContext context,
             WorkflowProfileSaveRequest request,
@@ -140,10 +158,6 @@ public static class ProjectRoutes
             catch (WorkflowProfileReadOnlyException ex)
             {
                 return ApiResults.Conflict(ex.Message, "workflow_profile_read_only");
-            }
-            catch (WorkflowDefinitionValidationException ex)
-            {
-                return ApiResults.BadRequest(ex.Message, "workflow_profile_definition_validation", ex.Errors);
             }
         });
 
@@ -210,10 +224,6 @@ public static class ProjectRoutes
             catch (WorkflowProfileNotFoundException ex)
             {
                 return ApiResults.NotFound(ex.Message);
-            }
-            catch (WorkflowDefinitionValidationException ex)
-            {
-                return ApiResults.BadRequest(ex.Message, "workflow_profile_definition_validation", ex.Errors);
             }
         });
 
@@ -649,17 +659,6 @@ public static class ProjectRoutes
             ? prompt with { Source = "project-override" }
             : prompt;
 
-    internal static object ToActionValidationNotice(ActionValidationStatus status) => status switch
-    {
-        ActionValidationStatus.Performed => new { performed = true },
-        ActionValidationStatus.Skipped => new
-        {
-            performed = false,
-            reason = "Action-contract validation was not performed: no Runner has reported an Action catalog yet.",
-        },
-        _ => new { performed = false },
-    };
-
     private static bool TryGetRepositoryNameError(
         ArgumentException exception,
         string requestedName,
@@ -829,3 +828,25 @@ public sealed record WorkflowProfileSaveRequest(
             false,
             DefinitionSource);
 }
+
+/// <summary>
+/// Body of <c>POST /api/projects/{projectRef}/workflow-profiles/validate</c>.
+/// The optional <c>profileId</c> only names the parse fallback for a source
+/// without an <c>id</c>; validation never writes or reserves the identity.
+/// </summary>
+public sealed record WorkflowProfileValidationRequest(
+    string? ProfileId,
+    string DefinitionSource);
+
+/// <summary>
+/// Answer of the no-write Profile validation: every definition and Action
+/// error the performed checks found, plus the scope of the Action check.
+/// <c>ActionValidationStatus</c> "skipped" with its reason means the check
+/// did not run — it is neither a pass nor a found error.
+/// </summary>
+public sealed record WorkflowProfileValidationResponse(
+    string ProjectId,
+    IReadOnlyList<WorkflowProfileValidationError> DefinitionErrors,
+    IReadOnlyList<WorkflowProfileValidationError> ActionErrors,
+    ActionValidationStatus ActionValidationStatus,
+    string? ActionValidationSkipReason);

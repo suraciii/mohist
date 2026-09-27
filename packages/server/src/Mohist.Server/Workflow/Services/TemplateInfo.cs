@@ -26,6 +26,7 @@ public sealed record ProjectTemplateInfo(
 /// catalog check. Skipped: no Runner has reported a catalog yet and the
 /// save proceeded with Definition-only validation.
 /// </summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
 public enum ActionValidationStatus
 {
     Performed,

@@ -15,6 +15,11 @@ import (
 
 var workflowListFields = []string{"profileId", "name", "description", "sourceProvenance", "isBuiltIn"}
 var workflowFields = []string{"projectId", "profileId", "name", "description", "sourceProvenance", "isBuiltIn", "definitionSource", "stages"}
+
+// workflowSaveFields answers a create or edit with the saved Profile plus
+// the validation scope that admitted it, including a skipped Action check.
+var workflowSaveFields = append(append([]string{}, workflowFields...), "validation")
+var workflowValidateFields = []string{"projectId", "definitionErrors", "actionErrors", "actionValidationStatus", "actionValidationSkipReason"}
 var runListFields = []string{"id", "status", "stage", "currentStage", "issueNumber"}
 var runFields = []string{"id", "status", "currentStage", "stages", "issueRef", "pendingWork", "failure", "availableActions", "assignedTo"}
 var artifactFields = []string{"artifactId", "path", "kind", "contentType", "size", "actionAttemptId", "recordedAt"}
@@ -29,8 +34,8 @@ func parseWorkflow(args []string) (command, error) {
 		return command{}, usage("unknown workflow command")
 	}
 	if action == "validate" {
-		c := command{kind: "workflow-validate"}
-		if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+		c := command{kind: "workflow-validate", catalog: workflowValidateFields}
+		if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, workflowValidateHelp()); ok {
 			return discovered, err
 		}
 		return parseWorkflowInput(c, args[1:], false, false)
@@ -38,6 +43,9 @@ func parseWorkflow(args []string) (command, error) {
 	c := command{kind: "workflow-" + action, catalog: workflowFields}
 	if action == "list" {
 		c.catalog = workflowListFields
+	}
+	if action == "create" || action == "edit" {
+		c.catalog = workflowSaveFields
 	}
 	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
 		return discovered, err
@@ -92,6 +100,22 @@ func parseWorkflowInput(c command, args []string, needsFile, view bool) (command
 		return c, nil
 	}
 	return c, nil
+}
+
+// workflowValidateHelp documents the validate contract offline: what the
+// command needs, what it writes, and what each exit code means.
+func workflowValidateHelp() string {
+	return "USAGE\n" +
+		"    mo workflow validate --file <path|-> [--project <name-or-id>] [--id <profile-id>] [flags]\n\n" +
+		"Validates a Workflow Profile Definition with the selected Project's Mohist\n" +
+		"Server. It reads the file locally first, then performs no writes: it never\n" +
+		"creates or changes a Profile, default selection, Issue, or Run. Complete\n" +
+		"validation requires a reachable Server and the caller's normal Project\n" +
+		"access; when the Server or the Action catalog is unavailable, the result\n" +
+		"reports the skipped scope instead of passing the Definition.\n\n" +
+		"Exit codes: 0 every promised check ran and passed; 1 invalid or incomplete\n" +
+		"validation; 2 local usage or file errors; 130 cancelled.\n\n" +
+		"JSON FIELDS\n" + strings.Join(workflowValidateFields, "\n")
 }
 
 func parseRun(args []string) (command, error) {
@@ -290,26 +314,11 @@ func runWorkflow(ctx context.Context, deps Dependencies, c *client, cmd command)
 }
 
 func runWorkflowProfile(ctx context.Context, deps Dependencies, c *client, cmd command) int {
-	// Workflow validate is local: resolve its text carrier before the
-	// Project-state lookup so a missing, permission, or arbitrary read
-	// failure stops the command locally without consulting cli-state.json
-	// or issuing any HTTP request.
-	if cmd.kind == "workflow-validate" {
-		source, err := resolveTextInput(deps, cmd, "", "file")
-		if err != nil {
-			writeError(deps.Stderr, err)
-			return ExitUsage
-		}
-		if strings.TrimSpace(source) == "" {
-			writeError(deps.Stderr, errors.New("--file must not be blank"))
-			return ExitUsage
-		}
-		cmd.preflightedInput = source
-		return validateWorkflowFile(deps, cmd, source)
-	}
-	// Create and edit also preflight their complete-document --file input
-	// before Project-state lookup so a failed read fails closed locally.
-	if cmd.kind == "workflow-create" || cmd.kind == "workflow-edit" {
+	// Validate, create, and edit preflight their complete-document --file
+	// input before the Project-state lookup so a missing, permission, or
+	// partial-read failure stops the command locally with ExitUsage=2,
+	// without consulting cli-state.json or issuing any HTTP request.
+	if cmd.kind == "workflow-validate" || cmd.kind == "workflow-create" || cmd.kind == "workflow-edit" {
 		source, err := resolveTextInput(deps, cmd, "", "file")
 		if err != nil {
 			writeError(deps.Stderr, err)
@@ -327,6 +336,24 @@ func runWorkflowProfile(ctx context.Context, deps Dependencies, c *client, cmd c
 		return ExitOperation
 	}
 	base := "/api/projects/" + url.PathEscape(project) + "/workflow-profiles"
+	if cmd.kind == "workflow-validate" {
+		body := map[string]any{"definitionSource": cmd.preflightedInput}
+		if id := argValue(cmd.args, "id", ""); id != "" {
+			body["profileId"] = id
+		}
+		data, err := c.request(ctx, http.MethodPost, base+"/validate", body)
+		if err != nil {
+			// Cancellation keeps its existing behavior; every other
+			// failure means the promised checks did not all run, which is
+			// an incomplete validation, never a valid result.
+			code := operationExit(deps, ctx, err)
+			if code == ExitOperation {
+				fmt.Fprintln(deps.Stderr, "Validation incomplete: complete validation requires the selected Project's Mohist Server.")
+			}
+			return code
+		}
+		return renderWorkflowValidation(deps, cmd, data)
+	}
 	var method, path string
 	var body any
 	collection := false
@@ -357,6 +384,9 @@ func runWorkflowProfile(ctx context.Context, deps Dependencies, c *client, cmd c
 		fmt.Fprint(deps.Stdout, stringValueAny(v["definitionSource"]))
 		return ExitOK
 	}
+	if cmd.kind == "workflow-create" || cmd.kind == "workflow-edit" {
+		return workflowSaveRequest(ctx, deps, c, cmd, method, path, body)
+	}
 	return resourceRequest(ctx, deps, c, method, path, body, cmd, collection)
 }
 
@@ -365,23 +395,166 @@ func workflowBody(cmd command) map[string]any {
 	return result
 }
 
-func validateWorkflowFile(deps Dependencies, cmd command, source string) int {
-	if strings.Contains(source, "\t") {
-		writeError(deps.Stderr, errors.New("workflow definition uses tabs, which are not valid YAML indentation"))
+// workflowValidationIssue is one reported validation fact: where the error
+// sits (a field path, possibly empty for whole-document YAML errors), what
+// is wrong, and which check found it.
+type workflowValidationIssue struct {
+	Path    string `json:"path"`
+	Message string `json:"message"`
+	Source  string `json:"source"`
+}
+
+// workflowValidationReport is the Server's no-write validation answer. A
+// skipped Action check is neither a pass nor a found error; the skip reason
+// explains why the check did not run.
+type workflowValidationReport struct {
+	ProjectId                  string                    `json:"projectId"`
+	DefinitionErrors           []workflowValidationIssue `json:"definitionErrors"`
+	ActionErrors               []workflowValidationIssue `json:"actionErrors"`
+	ActionValidationStatus     string                    `json:"actionValidationStatus"`
+	ActionValidationSkipReason string                    `json:"actionValidationSkipReason"`
+}
+
+func decodeWorkflowValidation(raw json.RawMessage) (workflowValidationReport, bool) {
+	var report workflowValidationReport
+	if len(raw) == 0 || json.Unmarshal(raw, &report) != nil {
+		return report, false
+	}
+	return report, true
+}
+
+// workflowValidationIssues lists every found error, definition checks
+// first, without reusing either slice's backing array.
+func workflowValidationIssues(report workflowValidationReport) []workflowValidationIssue {
+	issues := make([]workflowValidationIssue, 0, len(report.DefinitionErrors)+len(report.ActionErrors))
+	issues = append(issues, report.DefinitionErrors...)
+	issues = append(issues, report.ActionErrors...)
+	return issues
+}
+
+// workflowActionSkipReason explains a check that did not run; the Server
+// supplies the reason, and the fallback keeps the fact non-empty even for
+// an older or partial response.
+func workflowActionSkipReason(report workflowValidationReport) string {
+	if reason := strings.TrimSpace(report.ActionValidationSkipReason); reason != "" {
+		return reason
+	}
+	return "the Action check did not run"
+}
+
+// writeValidationIssues prints each error with its field path so a
+// rejection is actionable instead of a bare sentence.
+func writeValidationIssues(deps Dependencies, issues []workflowValidationIssue) {
+	for _, issue := range issues {
+		if issue.Path == "" {
+			fmt.Fprintf(deps.Stderr, "  %s\n", issue.Message)
+			continue
+		}
+		fmt.Fprintf(deps.Stderr, "  %s: %s\n", issue.Path, issue.Message)
+	}
+}
+
+// renderWorkflowValidation reports what was and was not checked. Exit 0 —
+// in normal and selected JSON output alike — only when every promised
+// check ran and found no error; invalid and incomplete results exit 1 with
+// the per-error path and reason.
+func renderWorkflowValidation(deps Dependencies, cmd command, data json.RawMessage) int {
+	report, ok := decodeWorkflowValidation(data)
+	if !ok {
+		writeError(deps.Stderr, errors.New("error: invalid workflow validation response [invalid_response]"))
 		return ExitOperation
 	}
-	hasStages := false
-	for _, line := range strings.Split(source, "\n") {
-		if strings.TrimSpace(line) == "stages:" {
-			hasStages = true
+	exit := workflowValidationExitCode(report)
+	if len(cmd.fields) > 0 {
+		selected, err := SelectFields(data, cmd.fields, false)
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitOperation
+		}
+		if code := writeJSON(deps.Stdout, json.RawMessage(selected)); code != ExitOK {
+			return code
+		}
+		return exit
+	}
+	if issues := workflowValidationIssues(report); len(issues) > 0 {
+		fmt.Fprintln(deps.Stderr, "Workflow Profile is invalid:")
+		writeValidationIssues(deps, issues)
+	}
+	if !strings.EqualFold(report.ActionValidationStatus, "performed") {
+		fmt.Fprintf(deps.Stderr, "Validation incomplete: the Action check was skipped (%s).\n", workflowActionSkipReason(report))
+	}
+	return exit
+}
+
+// workflowValidationExitCode keeps the promised exit contract in one
+// place: a skipped check is an unperformed promise, so it cannot exit 0.
+func workflowValidationExitCode(report workflowValidationReport) int {
+	if len(report.DefinitionErrors) > 0 || len(report.ActionErrors) > 0 {
+		return ExitOperation
+	}
+	if !strings.EqualFold(report.ActionValidationStatus, "performed") {
+		return ExitOperation
+	}
+	return ExitOK
+}
+
+// workflowSaveRequest answers a create or edit with both facts the caller
+// needs: the saved content and the validation scope that admitted it. The
+// Server returns validation beside the saved resource; merging them into
+// one object keeps definition errors, the Action check status, and a
+// skipped check's reason visible in normal and selected JSON output. The
+// result never claims execution readiness.
+func workflowSaveRequest(ctx context.Context, deps Dependencies, c *client, cmd command, method, path string, body any) int {
+	env, err := c.requestEnvelope(ctx, method, path, body)
+	if err != nil {
+		code := operationExit(deps, ctx, err)
+		if code == ExitOperation {
+			writeSaveValidationErrors(deps, err)
+		}
+		return code
+	}
+	merged := map[string]json.RawMessage{}
+	var profile map[string]json.RawMessage
+	if len(env.Data) > 0 && json.Unmarshal(env.Data, &profile) == nil {
+		for field, value := range profile {
+			merged[field] = value
 		}
 	}
-	if !hasStages {
-		writeError(deps.Stderr, errors.New("stages: is required"))
+	if len(env.Validation) > 0 {
+		merged["validation"] = env.Validation
+		if report, ok := decodeWorkflowValidation(env.Validation); ok && !strings.EqualFold(report.ActionValidationStatus, "performed") {
+			fmt.Fprintf(deps.Stderr, "Saved with the Action check skipped: %s\n", workflowActionSkipReason(report))
+		}
+	}
+	encoded, err := json.Marshal(merged)
+	if err != nil {
+		writeError(deps.Stderr, errors.New("error: invalid workflow response [invalid_response]"))
 		return ExitOperation
 	}
-	fmt.Fprintln(deps.Stdout, "Workflow Profile is valid.")
-	return ExitOK
+	if len(cmd.fields) > 0 {
+		selected, err := SelectFields(encoded, cmd.fields, false)
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitOperation
+		}
+		return writeJSON(deps.Stdout, json.RawMessage(selected))
+	}
+	return writeJSON(deps.Stdout, json.RawMessage(encoded))
+}
+
+// writeSaveValidationErrors surfaces the path and reason of each error a
+// save's performed checks found. The Server sends them as the rejected
+// save's structured details.
+func writeSaveValidationErrors(deps Dependencies, err error) {
+	var operation *operationError
+	if !errors.As(err, &operation) || !strings.EqualFold(operation.code, "workflow_profile_validation") {
+		return
+	}
+	report, ok := decodeWorkflowValidation(operation.details)
+	if !ok {
+		return
+	}
+	writeValidationIssues(deps, workflowValidationIssues(report))
 }
 
 func runList(ctx context.Context, deps Dependencies, c *client, cmd command) int {

@@ -220,11 +220,6 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
             await ClearFenceAsync(commandId);
             return result;
         }
-        catch (WorkflowDefinitionValidationException)
-        {
-            await ClearFenceAsync(commandId);
-            throw;
-        }
         catch (WorkflowProfileNotFoundException)
         {
             await ClearFenceAsync(commandId);
