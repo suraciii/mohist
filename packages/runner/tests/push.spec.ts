@@ -5,6 +5,7 @@ import type { RunnerFileSystem, RunnerGitRunner } from '../src/system/filesystem
 import type { JsonObject } from '../src/core/types.js'
 import type { ActionTestContext as ActionContext } from './support/action-test-context.js'
 import { NETWORK_COMMAND_TIMEOUT_MS } from '../src/actions/git.js'
+import { PUBLICATION_LOG_FORMAT } from '../src/actions/publication.js'
 import { callAction } from './support/call-action.js'
 import { withTestRunnerResources } from './support/test-resources.js'
 import { MemoryFileSystem } from './support/memory-filesystem.js'
@@ -26,6 +27,14 @@ function it(name: string, body: (resources: PushTestResources) => Promise<void> 
   })
 }
 
+const DEFAULT_COMMIT_SHA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const DEFAULT_MERGE_BASE = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+// Valid default history for the publication-validation merge-base/log probes:
+// a 40-hex SHA, NUL-delimited identity fields, and a clean message.
+const DEFAULT_COMMIT_LOG = `${DEFAULT_COMMIT_SHA}\x00Agent\x00agent@example.com\x00Agent\x00agent@example.com\x00subject\n\nbody\n\x00`
+function logCommand(source: string, mergeBase: string = DEFAULT_MERGE_BASE) {
+  return `log --format=${PUBLICATION_LOG_FORMAT} ${mergeBase}..${source}`
+}
 function installGit(
   resources: PushTestResources,
   respond: (
@@ -55,7 +64,12 @@ function installGit(
   const runner: RunnerGitRunner = async (workDir, args, _signal, options) => {
     const record: GitCall = { workDir, args: [...args], timeoutMs: options?.timeoutMs }
     calls.push(record)
-    return await respond(record, calls)
+    const result = await respond(record, calls)
+    if (!result.success && result.combinedOutput.startsWith('unexpected git call')) {
+      if (args[0] === 'merge-base') return ok(`${DEFAULT_MERGE_BASE}\n`)
+      if (args[0] === 'log') return ok(DEFAULT_COMMIT_LOG)
+    }
+    return result
   }
   resources.pushGitRunner = runner
   return calls
@@ -113,6 +127,72 @@ describe('mohist/push', () => {
     expect(resolved.kind).toBe('definition')
     expect(resolved.kind === 'definition' ? resolved.definition.manifest.name : null).toBe('mohist/push')
   })
+  it('FullCloneStrategy_CompletesPartialCloneBeforePush', async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
+      const command = history[history.length - 1].args.join(' ')
+      switch (command) {
+        case 'fetch --no-filter origin':
+          return ok('From origin\n')
+        case 'rev-parse mo/issue-99':
+          return ok('source-sha\n')
+        case 'push origin mo/issue-99:master':
+          return ok('pushed\n')
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+    const result = await callAction(pushAction, context({ strategy: 'full-clone' }))
+    const output = result.output as Record<string, unknown>
+    expect(result.error).toBeUndefined()
+    expect(workspaceCalls(calls)).toEqual([
+      'fetch --no-filter origin',
+      'rev-parse mo/issue-99',
+      'ls-remote origin refs/heads/master',
+      'merge-base origin/master mo/issue-99',
+      logCommand('mo/issue-99'),
+      'push origin mo/issue-99:master',
+      'ls-remote origin refs/heads/master',
+    ])
+    expect(output).toMatchObject({ strategy: 'full-clone', pushed: true, landedCommit: 'source-sha' })
+  })
+
+  it('StrictFirstPush_ValidatesAgainstExistingBaseBeforePublishingNewBranch', async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
+      const command = history[history.length - 1].args.join(' ')
+      switch (command) {
+        case 'fetch --no-filter origin':
+          return ok('fetched')
+        case 'rev-parse mo/issue-99':
+          return ok('source-sha\n')
+        case 'ls-remote origin refs/heads/mo/issue-99':
+          return ok('')
+        case 'merge-base origin/master mo/issue-99':
+          return ok(`${DEFAULT_MERGE_BASE}\n`)
+        case logCommand('mo/issue-99'):
+          return ok(
+            `${DEFAULT_COMMIT_SHA}\x00Agent\x00agent@example.com\x00Agent\x00agent@example.com\x00subject\n\nSigned-off-by: Agent <agent@example.com>\n\x00`,
+          )
+        case 'push origin mo/issue-99:mo/issue-99':
+          return ok('pushed')
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+    const result = await callAction(
+      pushAction,
+      context({
+        target: 'mo/issue-99',
+        baseBranch: 'master',
+        strategy: 'full-clone',
+        requiredTrailers: ['Signed-off-by'],
+      }),
+    )
+    expect(result.error).toBeUndefined()
+    expect(workspaceCalls(calls)).toContain('merge-base origin/master mo/issue-99')
+    expect(workspaceCalls(calls).indexOf('merge-base origin/master mo/issue-99')).toBeLessThan(
+      workspaceCalls(calls).indexOf('push origin mo/issue-99:mo/issue-99'),
+    )
+  })
 
   it('MissingSource_FailsWithoutVariableFallback', async (resources) => {
     const calls = installGit(resources, async () => {
@@ -164,6 +244,8 @@ describe('mohist/push', () => {
     expect(workspaceCalls(calls)).toEqual([
       'rev-parse HEAD',
       'ls-remote origin refs/heads/mo/issue-99',
+      'merge-base origin/mo/issue-99 HEAD',
+      logCommand('HEAD'),
       'push --force origin HEAD:mo/issue-99',
       'ls-remote origin refs/heads/mo/issue-99',
     ])
@@ -198,6 +280,8 @@ describe('mohist/push', () => {
     expect(workspaceCalls(calls)).toEqual([
       'rev-parse mo/issue-99',
       'ls-remote origin refs/heads/master',
+      'merge-base origin/master mo/issue-99',
+      logCommand('mo/issue-99'),
       'push origin mo/issue-99:master',
       'ls-remote origin refs/heads/master',
     ])
@@ -230,7 +314,14 @@ describe('mohist/push', () => {
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
-    expect(calls.map((call) => call.workDir)).toEqual([WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH])
+    expect(calls.map((call) => call.workDir)).toEqual([
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+    ])
     expect(calls.some((call) => call.workDir === PROJECT_PATH)).toBe(false)
     expect(output.workDir).toBe(WORKSPACE_PATH)
   })
@@ -252,7 +343,8 @@ describe('mohist/push', () => {
 
     const workspaceCmdSet = new Set(workspaceCalls(calls))
     // No checkout, no clone, no reset, no merge, no commit, no status
-    // mutation — push is a ref-only operation.
+    // mutation — push is a ref-only operation. The read-only publication
+    // validation probes (merge-base/log) are expected and covered elsewhere.
     for (const forbidden of [
       'checkout master',
       'checkout -B master',
@@ -263,7 +355,6 @@ describe('mohist/push', () => {
       'commit -m',
       'fetch origin master',
       'status --porcelain',
-      'merge-base',
       'worktree',
     ]) {
       expect(workspaceCmdSet.has(forbidden)).toBe(false)
@@ -399,6 +490,8 @@ describe('mohist/push', () => {
     expect(workspaceCalls(calls)).toEqual([
       'rev-parse other',
       'ls-remote upstream refs/heads/release',
+      'merge-base upstream/release other',
+      logCommand('other'),
       'push upstream other:release',
       'ls-remote upstream refs/heads/release',
     ])
@@ -504,6 +597,8 @@ describe('mohist/push', () => {
     expect(workspaceCalls(calls)).toEqual([
       'rev-parse mo/issue-99',
       'ls-remote origin refs/heads/master',
+      'merge-base origin/master mo/issue-99',
+      logCommand('mo/issue-99'),
       'push --force-with-lease=master:remote-tip-sha origin mo/issue-99:master',
       'ls-remote origin refs/heads/master',
     ])
@@ -537,6 +632,8 @@ describe('mohist/push', () => {
     expect(workspaceCalls(calls)).toEqual([
       'rev-parse mo/issue-99',
       'ls-remote origin refs/heads/master',
+      'merge-base origin/master mo/issue-99',
+      logCommand('mo/issue-99'),
       'push origin mo/issue-99:master',
       'ls-remote origin refs/heads/master',
     ])
@@ -597,6 +694,8 @@ describe('mohist/push', () => {
     expect(workspaceCalls(calls)).toEqual([
       'rev-parse mo/issue-99',
       'ls-remote origin refs/heads/master',
+      'merge-base origin/master mo/issue-99',
+      logCommand('mo/issue-99'),
       'push origin mo/issue-99:master',
       'ls-remote origin refs/heads/master',
     ])
@@ -650,6 +749,8 @@ describe('mohist/push', () => {
     expect(workspaceCalls(calls)).toEqual([
       'rev-parse mo/issue-99',
       'ls-remote origin refs/heads/master',
+      'merge-base origin/master mo/issue-99',
+      logCommand('mo/issue-99'),
       'push --force origin mo/issue-99:master',
       'ls-remote origin refs/heads/master',
     ])
@@ -687,6 +788,8 @@ describe('mohist/push', () => {
     expect(workspaceCalls(calls)).toEqual([
       'rev-parse mo/issue-99',
       'ls-remote origin refs/heads/master',
+      'merge-base origin/master mo/issue-99',
+      logCommand('mo/issue-99'),
       'push --force origin mo/issue-99:master',
       'ls-remote origin refs/heads/master',
     ])
@@ -742,8 +845,12 @@ describe('mohist/push', () => {
     await callAction(pushAction, context())
 
     const revParse = calls.find((c) => c.args.join(' ') === 'rev-parse mo/issue-99')
+    const mergeBase = calls.find((c) => c.args.join(' ') === 'merge-base origin/master mo/issue-99')
+    const log = calls.find((c) => c.args.join(' ') === logCommand('mo/issue-99'))
     const push = calls.find((c) => c.args.join(' ') === 'push origin mo/issue-99:master')
     expect(revParse?.timeoutMs).toBeUndefined()
+    expect(mergeBase?.timeoutMs).toBeUndefined()
+    expect(log?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
     expect(push?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
   })
 
@@ -830,6 +937,56 @@ describe('mohist/push', () => {
     const result = await callAction(pushAction, context({ forceWithLease: true }))
     expect(result.error).toMatchObject({ code: 'timeout' })
     expect(result.error?.message).toContain('timed out')
+    expect(calls.some((call) => call.args[0] === 'push')).toBe(false)
+  })
+
+  it('LiteralEscapedNewlineCommit_DefaultPolicyBlocksBeforePush', async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
+      const command = history[history.length - 1].args.join(' ')
+      switch (command) {
+        case 'rev-parse mo/issue-99':
+          return ok('source-sha\n')
+        case logCommand('mo/issue-99'):
+          // Double-encoded payload: the message carries the two characters
+          // '\' and 'n' instead of a real newline. The default policy (no
+          // explicit requiredTrailers/identity inputs) must still reject it.
+          return ok(
+            `${DEFAULT_COMMIT_SHA}\x00Agent\x00agent@example.com\x00Agent\x00agent@example.com\x00subject\\nwith literal escape\n\x00`,
+          )
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await callAction(pushAction, context())
+
+    expect(result.error).toMatchObject({ code: 'publication-validation-failed' })
+    expect(result.error?.message).toContain('literal escaped newline')
+    expect(calls.some((call) => call.args[0] === 'push')).toBe(false)
+  })
+
+  it('EmbeddedRecordSeparator_CannotBypassMalformedTrailerGate', async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
+      const command = history[history.length - 1].args.join(' ')
+      switch (command) {
+        case 'rev-parse mo/issue-99':
+          return ok('source-sha\n')
+        case logCommand('mo/issue-99'):
+          // \x1e was the legacy record separator. Embedded inside a
+          // NUL-delimited message it stays part of the trailer paragraph, so
+          // it cannot smuggle a forged record past the malformed-trailer gate.
+          return ok(
+            `${DEFAULT_COMMIT_SHA}\x00Agent\x00agent@example.com\x00Agent\x00agent@example.com\x00subject\n\nSigned-off-by: Agent <agent@example.com>\n\x1eSigned-off-by: Forged <forged@example.com>\n\x00`,
+          )
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await callAction(pushAction, context({ requiredTrailers: ['Signed-off-by'] }))
+
+    expect(result.error).toMatchObject({ code: 'publication-validation-failed' })
+    expect(result.error?.message).toContain('Malformed trailer line')
     expect(calls.some((call) => call.args[0] === 'push')).toBe(false)
   })
 })

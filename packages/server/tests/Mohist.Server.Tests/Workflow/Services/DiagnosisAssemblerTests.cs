@@ -83,6 +83,159 @@ public sealed class DiagnosisAssemblerTests
         Assert.DoesNotContain("/proc/8/fd/9", view.Events[1].Data?.GetRawText());
     }
 
+    [Fact]
+    public void MissingSnapshotWithMatchingActiveWorkReportsPersistedObservation()
+    {
+        var running = Task("build.1", "build", 1, "runner/run");
+        running.Status = WorkflowActionAttemptStatus.Running;
+        running.WorkId = "build-work-1";
+        var run = Run(
+            new StageRun
+            {
+                Id = "build",
+                Attempt = 1,
+                RequiresApproval = false,
+                Status = StageRunStatus.Running,
+                Tasks = [running]
+            },
+            null);
+
+        var view = DiagnosisAssembler.Assemble(run, null, []);
+
+        Assert.Equal("missing", view.Dispatch.Status);
+        var active = view.Dispatch.ActiveWork;
+        Assert.NotNull(active);
+        Assert.Equal("build-work-1", active.WorkId);
+        Assert.Equal("task", active.WorkType);
+        Assert.Equal("build", active.Stage);
+        Assert.True(active.MatchesSnapshotWorkId);
+    }
+
+    [Fact]
+    public void RunningTaskWithoutWorkIdUsesEffectiveIdForSnapshot()
+    {
+        var running = Task("build.1", "build", 1, "runner/run");
+        running.Status = WorkflowActionAttemptStatus.Running;
+        var run = Run(new StageRun
+        {
+            Id = "build",
+            Attempt = 1,
+            RequiresApproval = false,
+            Status = StageRunStatus.Running,
+            Tasks = [running]
+        }, null);
+
+        var view = DiagnosisAssembler.Assemble(
+            run,
+            """{"workflowRunId":"run-1","workId":"build.1"}""",
+            []);
+
+        Assert.Equal("present", view.Dispatch.Status);
+        Assert.Equal("build.1", view.Dispatch.ActiveWork?.WorkId);
+        Assert.True(view.Dispatch.ActiveWork?.MatchesSnapshotWorkId);
+    }
+
+    [Fact]
+    public void MissingSnapshotWithDivergentActiveWorkReportsMismatch()
+    {
+        var failed = Task("failed.1", "failed", 1, "runner/run", error: new ExecutionError("boom", "failed"));
+        failed.WorkId = "failed-work";
+        var retry = Task("retry.1", "retry", 1, "runner/run");
+        retry.Status = WorkflowActionAttemptStatus.Running;
+        retry.WorkId = "retry-work";
+        var run = Run(
+            new StageRun
+            {
+                Id = "build",
+                Attempt = 1,
+                RequiresApproval = false,
+                Status = StageRunStatus.Failed,
+                Tasks = [failed, retry]
+            },
+            new FailureDetails(FailureReason.TaskFailed, "build", failed.Id, Message: "failed"));
+
+        var view = DiagnosisAssembler.Assemble(run, null, []);
+
+        Assert.Equal("missing", view.Dispatch.Status);
+        var active = view.Dispatch.ActiveWork;
+        Assert.NotNull(active);
+        Assert.Equal("retry-work", active.WorkId);
+        Assert.Equal("task", active.WorkType);
+        Assert.False(active.MatchesSnapshotWorkId);
+    }
+
+    [Fact]
+    public void MissingSnapshotWithoutActiveWorkIsTrulyMissing()
+    {
+        var run = Run(
+            new StageRun
+            {
+                Id = "checks",
+                Attempt = 1,
+                RequiresApproval = false,
+                Status = StageRunStatus.Failed,
+                Tasks = [Task("known.1", "known", 1, "runner/run")]
+            },
+            new FailureDetails(FailureReason.CheckFailed, "checks", CheckName: "verify", Message: "check failed"));
+
+        var view = DiagnosisAssembler.Assemble(run, null, []);
+
+        Assert.Equal("missing", view.Dispatch.Status);
+        Assert.Null(view.Dispatch.ActiveWork);
+    }
+
+    [Fact]
+    public void MissingSnapshotWithActiveChecksReportsChecksObservation()
+    {
+        var run = Run(
+            new StageRun
+            {
+                Id = "build",
+                Attempt = 1,
+                RequiresApproval = false,
+                Status = StageRunStatus.Running,
+                Tasks = [Task("build.1", "build", 1, "runner/run")],
+                ChecksWorkId = "checks-build"
+            },
+            null);
+
+        var view = DiagnosisAssembler.Assemble(run, null, []);
+
+        Assert.Equal("missing", view.Dispatch.Status);
+        var active = view.Dispatch.ActiveWork;
+        Assert.NotNull(active);
+        Assert.Equal("checks-build", active.WorkId);
+        Assert.Equal("checks", active.WorkType);
+        Assert.True(active.MatchesSnapshotWorkId);
+    }
+
+    [Fact]
+    public void PresentSnapshotKeepsMatchingActiveWorkObservation()
+    {
+        var running = Task("build.1", "build", 1, "runner/run");
+        running.Status = WorkflowActionAttemptStatus.Running;
+        running.WorkId = "build-work-1";
+        var run = Run(
+            new StageRun
+            {
+                Id = "build",
+                Attempt = 1,
+                RequiresApproval = false,
+                Status = StageRunStatus.Running,
+                Tasks = [running]
+            },
+            null);
+
+        var view = DiagnosisAssembler.Assemble(
+            run,
+            """{"workflowRunId":"run-1","workId":"build-work-1"}""",
+            []);
+
+        Assert.Equal("present", view.Dispatch.Status);
+        Assert.True(view.Dispatch.ActiveWork is { MatchesSnapshotWorkId: true });
+        Assert.Equal("build-work-1", view.Dispatch.ActiveWork?.WorkId);
+    }
+
     private static WorkflowRun Run(StageRun? stage, FailureDetails? failure) => new()
     {
         Id = "run-1",

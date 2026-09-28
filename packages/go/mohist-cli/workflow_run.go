@@ -20,6 +20,10 @@ var workflowFields = []string{"projectId", "profileId", "revision", "name", "des
 // the validation scope that admitted it, including a skipped Action check.
 var workflowSaveFields = append(append([]string{}, workflowFields...), "validation")
 var workflowValidateFields = []string{"projectId", "definitionErrors", "actionErrors", "actionValidationStatus", "actionValidationSkipReason"}
+
+// workflowToggleFields is the enable/disable answer: the Profile identity and
+// its resulting availability for future selections.
+var workflowToggleFields = []string{"profileId", "enabled"}
 var runListFields = []string{"id", "status", "stage", "currentStage", "issueNumber"}
 var runFields = []string{"id", "status", "currentStage", "stages", "issueRef", "pendingWork", "failure", "availableActions", "assignedTo", "binding"}
 var artifactFields = []string{"artifactId", "path", "kind", "contentType", "size", "actionAttemptId", "recordedAt"}
@@ -30,7 +34,7 @@ func parseWorkflow(args []string) (command, error) {
 		return command{help: true, helpText: groupHelp("workflow")}, nil
 	}
 	action := args[0]
-	if !contains([]string{"list", "view", "create", "edit", "delete", "validate"}, action) {
+	if !contains([]string{"list", "view", "create", "edit", "delete", "validate", "enable", "disable"}, action) {
 		return command{}, usage("unknown workflow command")
 	}
 	if action == "validate" {
@@ -47,6 +51,9 @@ func parseWorkflow(args []string) (command, error) {
 	if action == "create" || action == "edit" {
 		c.catalog = workflowSaveFields
 	}
+	if action == "enable" || action == "disable" {
+		c.catalog = workflowToggleFields
+	}
 	if action == "edit" {
 		if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, workflowEditHelp()); ok {
 			return discovered, err
@@ -55,7 +62,7 @@ func parseWorkflow(args []string) (command, error) {
 		return discovered, err
 	}
 	start := 1
-	if action == "view" || action == "delete" || action == "edit" {
+	if action == "view" || action == "delete" || action == "edit" || action == "enable" || action == "disable" {
 		if len(args) <= 1 || isControlToken(args[1]) {
 			return command{}, usage("profile id is required")
 		}
@@ -109,6 +116,13 @@ func parseWorkflowInput(c command, args []string, needsFile, view bool) (command
 			return command{help: true, helpText: leafHelp(c.kind, c.catalog)}, nil
 		default:
 			return command{}, usage("unknown option " + args[i])
+		}
+	}
+	if c.kind == "workflow-enable" || c.kind == "workflow-disable" {
+		for _, flag := range []string{"file", "id", "name", "description", "yaml"} {
+			if hasArg(c.args, flag) {
+				return command{}, usage("--" + flag + " is not valid with mo " + strings.ReplaceAll(c.kind, "-", " "))
+			}
 		}
 	}
 	if c.kind != "workflow-edit" && hasArg(c.args, "expected-revision") {
@@ -404,6 +418,10 @@ func runWorkflowProfile(ctx context.Context, deps Dependencies, c *client, cmd c
 		body = workflowBody(cmd)
 	case "workflow-delete":
 		method, path = http.MethodDelete, base+"/"+url.PathEscape(argValue(cmd.args, "profile", ""))
+	case "workflow-enable", "workflow-disable":
+		method = http.MethodPost
+		path = "/api/projects/" + url.PathEscape(project) + "/workflow-profile/" + strings.TrimPrefix(cmd.kind, "workflow-")
+		body = map[string]any{"profileId": argValue(cmd.args, "profile", "")}
 	}
 	if cmd.kind == "workflow-view" && hasArg(cmd.args, "yaml") {
 		data, err := c.request(ctx, method, path, nil)

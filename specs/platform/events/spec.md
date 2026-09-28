@@ -4,7 +4,9 @@ This document defines Mohist's event envelope and project-scoped live delivery
 protocol. Web and non-SignalR clients, including `mo`, use the same native
 WebSocket. Event-bus subscriptions, Agent routing, and live notifications use
 the same event vocabulary. See [`eventbus.md`](design.md) for persistence and
-delivery and [`event-routing.md`](../../agent/event-routing/design.md) for the Agent-facing
+delivery, including the [lease semantics parity contract](design.md#semantics-parity)
+and its [real SQLite storage behavior](design.md#real-sqlite-storage-behavior);
+see [`event-routing.md`](../../agent/event-routing/design.md) for the Agent-facing
 routing table.
 
 ## Core Decisions

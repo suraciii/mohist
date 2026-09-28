@@ -6,7 +6,8 @@
     "failure",
     "tasks",
     "dispatch",
-    "events"
+    "events",
+    "provenance"
   ],
   "helpArgs": ["run", "why", "--help"],
   "humanArgs": ["run", "why", "wr-1"],

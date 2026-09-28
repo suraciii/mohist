@@ -43,7 +43,10 @@ Inputs:
 - `body` (optional, text): explicit Pull Request body.
 - `bodyFrom` (optional, text, default `issue.body`): Issue field used as the
   Pull Request body.
-
+- `requiredTrailers` (optional, text or array): required trailers validated
+  against every commit in the source-to-target range before any PR write.
+- `author` (optional, text): expected commit author identity.
+- `committer` (optional, text): expected commit committer identity.
 Outputs:
 
 - `kind`: output type identifier.
@@ -139,8 +142,14 @@ Inputs:
   supported.
 - `prNumber` (required, numeric): Pull Request number.
 - `subject` (optional, text): explicit squash-commit subject. When omitted,
-  the Action uses the title returned by its bounded Pull Request read. It does
-  not perform a separate Issue-field lookup.
+  the Action uses the title returned by its bounded Pull Request read. It
+  does not perform a separate Issue-field lookup.
+- `requiredTrailers` (required for squash auto-merge, text or array): declared
+  trailer policy required before the squash write; the final squash message
+  (subject and body) must carry the required trailer lines.
+- `body` (optional, text): explicit squash-commit body.
+- `author` (optional, text): expected commit author identity.
+- `committer` (optional, text): expected commit committer identity.
 
 Outputs:
 

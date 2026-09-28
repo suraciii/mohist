@@ -133,7 +133,14 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
         if (_state is not null)
         {
             if (_state.Origin is WorkspaceOrigin.Issue org && org.IssueNumber == issueNumber)
+            {
+                // Retry after the issue lifecycle archived the workspace
+                // restores it in place: same name, origin and repositories,
+                // with the stale home cleared so the run re-materializes.
+                if (_state.Status == WorkspaceStatus.Archived)
+                    await RestoreByOriginAsync(_state.Origin);
                 return _state;
+            }
             throw new WorkspaceDomainException(
                 "workspace_name_taken",
                 $"Workspace '{_state.Name}' already exists with a different origin.");
@@ -234,6 +241,21 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
         await EmitArchivedAsync(state);
     }
 
+    public Task<WorkspaceState?> RestoreByIssueAsync(int issueNumber)
+        => RestoreByOriginAsync(new WorkspaceOrigin.Issue(issueNumber));
+
+    public async Task<WorkspaceState?> RestoreByOriginAsync(WorkspaceOrigin origin)
+    {
+        var state = _state;
+        if (state is null) return null;
+        if (!state.RestoreArchivedByOrigin(origin)) return state;
+
+        await _store.SaveAsync(state);
+        _log.LogInformation("Workspace {ProjectId}/{Name} restored ({OriginKind})", state.ProjectId, state.Name, WorkspaceRowJson.OriginKind(state.Origin));
+        await EmitRestoredAsync(state);
+        return state;
+    }
+
     public async Task<WorkspaceState?> CloseAsync(DateTimeOffset now)
     {
         var state = _state;
@@ -300,6 +322,13 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
     private async Task EmitArchivedAsync(WorkspaceState state)
     {
         var envelope = BuildEvent(state, EventCatalog.ReverseDns.WorkspaceArchived);
+        await _eventStore.AppendAsync(envelope);
+        PokeDispatcherBestEffort();
+    }
+
+    private async Task EmitRestoredAsync(WorkspaceState state)
+    {
+        var envelope = BuildEvent(state, EventCatalog.ReverseDns.WorkspaceRestored);
         await _eventStore.AppendAsync(envelope);
         PokeDispatcherBestEffort();
     }

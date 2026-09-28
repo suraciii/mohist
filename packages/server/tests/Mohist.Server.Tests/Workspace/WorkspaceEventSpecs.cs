@@ -131,6 +131,48 @@ public class WorkspaceEventSpecs : IClassFixture<DefaultMohistIntegrationFixture
     }
 
     [Fact]
+    public async Task Restore_EmitsWorkspaceRestoredWithIssueLineage()
+    {
+        var issueNumber = await CreateIssueAndStartAsync();
+        await _client.PostOkAsync($"/api/projects/{_projectId}/issues/{issueNumber}/stop");
+        await _client.PostOkAsync($"/api/projects/{_projectId}/issues/{issueNumber}/close");
+        await _client.PostOkAsync($"/api/projects/{_projectId}/workspaces/issue-{issueNumber}/restore");
+
+        var rows = await WorkspaceEventsAsync($"issue-{issueNumber}");
+        Assert.Collection(rows,
+            created => Assert.Equal(EventCatalog.ReverseDns.WorkspaceCreated, created.Type),
+            archived => Assert.Equal(EventCatalog.ReverseDns.WorkspaceArchived, archived.Type),
+            restored =>
+            {
+                Assert.Equal(EventCatalog.ReverseDns.WorkspaceRestored, restored.Type);
+                Assert.Equal("issue", Lineage(restored, EventCatalog.Lineage.WorkspaceOriginKind));
+                Assert.Equal(issueNumber.ToString(), Lineage(restored, EventCatalog.Lineage.Issue));
+                ProducerConformance.Assert(
+                    EventProducerFamily.Workspace,
+                    Extensions(restored),
+                    new ProducerLineageContext(
+                        ProjectId: _projectId,
+                        Workspace: $"issue-{issueNumber}",
+                        WorkspaceOriginKind: "issue",
+                        Issue: issueNumber.ToString()));
+            });
+    }
+
+    [Fact]
+    public async Task Restore_ActiveWorkspace_EmitsNoRestoredEvent()
+    {
+        await _client.PostOkAsync($"/api/projects/{_projectId}/workspaces", new
+        {
+            name = "evt-restore-idem",
+            repos = new[] { "server" },
+        });
+        await _client.PostOkAsync($"/api/projects/{_projectId}/workspaces/evt-restore-idem/restore");
+
+        var row = await SingleWorkspaceEventAsync("evt-restore-idem");
+        Assert.Equal(EventCatalog.ReverseDns.WorkspaceCreated, row.Type);
+    }
+
+    [Fact]
     public async Task RoutingTest_DryRun_MatchesWorkspaceCreatedEvent()
     {
         await SeedActiveAgentAsync("agent-ws");

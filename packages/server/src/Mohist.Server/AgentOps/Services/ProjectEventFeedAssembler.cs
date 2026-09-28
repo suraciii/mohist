@@ -450,6 +450,7 @@ public sealed class ProjectEventFilter
         "com.mohist.workflow.task.completed", "com.mohist.workflow.task.failed",
         "com.mohist.workflow.check.passed", "com.mohist.workflow.check.failed", "com.mohist.workflow.check.pending",
         "com.mohist.workflow.repair-scheduled", "com.mohist.workflow.artifact.recorded",
+        "com.mohist.workflow.provenance.recorded",
     ];
 
     private static readonly string[] AgentSessionTypes =
@@ -463,7 +464,7 @@ public sealed class ProjectEventFilter
 
     private static readonly string[] WorkspaceTypes =
     [
-        "com.mohist.workspace.created", "com.mohist.workspace.archived",
+        "com.mohist.workspace.created", "com.mohist.workspace.archived", "com.mohist.workspace.restored",
     ];
 
     private readonly HashSet<string> _types;

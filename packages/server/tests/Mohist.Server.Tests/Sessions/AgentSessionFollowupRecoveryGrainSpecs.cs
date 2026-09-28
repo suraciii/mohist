@@ -139,6 +139,49 @@ public sealed partial class AgentSessionFollowupGrainSpecs
     }
 
     [Fact]
+    public async Task UnboundTerminalLaunch_SettlesAcceptedSlackFollowupOnce()
+    {
+        var sessionId = $"followup-unbound-terminal-{Guid.NewGuid():N}";
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await grain.OpenAsync(OpenCommand());
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: "unbound-launch-input",
+            TurnId: "unbound-launch-turn",
+            Prompt: "launch",
+            Source: "agent-launch",
+            JobId: "unbound-launch-job"));
+        var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "continue",
+            Source: "agent-session-followup",
+            IdempotencyKey: "unbound-followup",
+            Provenance: new AgentSessionInputProvenance(
+                "slack", "T-unbound", "C-unbound", null, "U-unbound", "M-unbound", "connection-unbound"),
+            AllowPendingInitialLaunch: true));
+
+        await grain.MarkInitialTurnTerminalAsync(
+            "unbound-launch-job",
+            AgentTurnStatus.Failed,
+            new AgentTurnResult(FailureReason: "launch rejected", FailureCategory: "invalid-request"));
+        await grain.MarkInitialTurnTerminalAsync(
+            "unbound-launch-job",
+            AgentTurnStatus.Failed,
+            new AgentTurnResult(FailureReason: "launch rejected", FailureCategory: "invalid-request"));
+
+        var state = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(state);
+        var followup = state!.Status.Turns!.Single(turn => turn.Id == accepted.TurnId);
+        Assert.Equal(AgentTurnStatus.Failed, followup.Status);
+        Assert.Equal("runtime-session-missing", followup.Result?.FailureCategory);
+        Assert.Contains(
+            "execution state is unresolved",
+            followup.Result?.Message,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            state.Status.PendingFollowups ?? [],
+            lease => lease.OperationId == accepted.OperationId);
+    }
+
+    [Fact]
     public async Task InitialTurnTerminal_DispatchesQueuedFollowup()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-initial-terminal-dispatch");

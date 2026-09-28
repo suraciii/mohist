@@ -150,6 +150,36 @@ public static class WorkspaceEntityRoutes
             }
         });
 
+        group.MapPost("/{name}/restore", async (
+            HttpContext context,
+            string projectRef,
+            string name,
+            IGrainFactory grains,
+            CancellationToken ct) =>
+        {
+            var project = context.GetResolvedProject();
+            try
+            {
+                var grain = grains.GetGrain<IWorkspaceGrain>(
+                    GrainKey.Workspace(project.Id, name));
+                var current = await grain.GetAsync();
+                if (current is null)
+                    return ApiResults.NotFound($"Workspace '{name}' not found");
+
+                // Restoring by name targets whatever origin the workspace
+                // already has; the grain restores archived workspaces and
+                // returns active ones unchanged (idempotent).
+                var workspace = await grain.RestoreByOriginAsync(current.Origin);
+                return workspace is null
+                    ? ApiResults.NotFound($"Workspace '{name}' not found")
+                    : ApiResults.Ok(workspace);
+            }
+            catch (WorkspaceDomainException ex)
+            {
+                return WorkspaceError(ex);
+            }
+        });
+
         return app;
     }
 

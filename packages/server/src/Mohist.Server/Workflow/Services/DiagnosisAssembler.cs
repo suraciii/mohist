@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -13,7 +14,25 @@ public sealed record DiagnosisView(
     FailureStatusView? Failure,
     IReadOnlyList<DiagnosisTaskView> Tasks,
     DiagnosisDispatchView Dispatch,
-    IReadOnlyList<DiagnosisEventView> Events);
+    IReadOnlyList<DiagnosisEventView> Events,
+    IReadOnlyList<DiagnosisProvenanceFactView>? Provenance = null);
+
+public sealed record DiagnosisProvenanceFactView(
+    DateTimeOffset Time,
+    string Action,
+    string ActorKind,
+    string ActorId,
+    string Source,
+    string Outcome,
+    string? Stage,
+    string? TaskId,
+    int? Attempt,
+    string? Result,
+    string? Reason,
+    string? Target,
+    string? WorkflowRunId = null,
+    string? ProjectId = null,
+    int? IssueNumber = null);
 
 public sealed record DiagnosisTaskView(
     string TaskId,
@@ -42,7 +61,25 @@ public sealed record DiagnosisRecoveryHandlerView(
 
 public sealed record DiagnosisDispatchView(
     string Status,
-    JsonElement? Snapshot = null);
+    JsonElement? Snapshot = null,
+    DiagnosisActiveWorkView? ActiveWork = null);
+
+/// <summary>
+/// The Run's persisted in-flight work, read from the same run-state fields
+/// the Runner status projection (<c>RunnerActiveWorkReader</c>) uses for
+/// activeWorks: the current stage's running task (effective work id
+/// <c>WorkId ?? Id</c>) or the stage's checks work id. It is an observation
+/// of persisted state, never a fabricated dispatch snapshot.
+/// <c>MatchesSnapshotWorkId</c> separates "the snapshot row for the live
+/// work is absent" from "the snapshot lookup key and the live work
+/// diverged"; when both the snapshot and the active work are absent the
+/// dispatch is truly missing and this view is null.
+/// </summary>
+public sealed record DiagnosisActiveWorkView(
+    string WorkId,
+    string WorkType,
+    string Stage,
+    bool MatchesSnapshotWorkId);
 
 public sealed record DiagnosisEventView(
     long Id,
@@ -87,40 +124,15 @@ public sealed class DiagnosisAssembler
             ? run.Stages.FirstOrDefault(s => string.Equals(s.Id, failure.Stage, StringComparison.Ordinal))
             : null;
         stage ??= run.Stages.FirstOrDefault(s => string.Equals(s.Id, run.CurrentStageId, StringComparison.Ordinal));
-
         var selectedTask = SelectTask(stage, failure);
-
-        var workId = selectedTask?.WorkId;
-        if (workId is null)
-            workId = stage?.TerminalChecksWorkId ?? stage?.ChecksWorkId;
+        var workId = SnapshotWorkId(stage, selectedTask);
 
         var snapshotJson = workId is null
             ? null
             : await _snapshots.LoadJsonAsync(run.Id, workId, ct);
-        var snapshot = ParseSnapshot(snapshotJson);
-        var events = await _events.ListWorkflowEventsAsync(run.Id, Math.Max(0, eventLimit), ct);
-        var tasks = stage is null
-            ? []
-            : stage.Tasks
-                .OrderByDescending(task => failure?.TaskId is not null && ReferenceEquals(task, selectedTask))
-                .Select(task => ToTask(task, run, snapshotJson, selectedTask))
-                .ToList();
+        var events = await _events.ListValidWorkflowEventsAsync(run.Id, ct);
 
-        return new DiagnosisView(
-            run.Id,
-            run.Status.ToString(),
-            failure is null ? null : new FailureStatusView(
-                failure.Reason.ToString(),
-                failure.Stage,
-                failure.TaskId,
-                failure.CheckName,
-                failure.Message,
-                failure.Error),
-            tasks,
-            snapshotJson is null
-                ? new DiagnosisDispatchView("missing")
-                : new DiagnosisDispatchView("present", SanitizeJson(snapshot)),
-            events.Select(ToEvent).ToList());
+        return Assemble(run, snapshotJson, events, eventLimit);
     }
 
     public static DiagnosisView Assemble(
@@ -135,6 +147,8 @@ public sealed class DiagnosisAssembler
             : null;
         stage ??= run.Stages.FirstOrDefault(s => string.Equals(s.Id, run.CurrentStageId, StringComparison.Ordinal));
         var selectedTask = SelectTask(stage, failure);
+        var workId = SnapshotWorkId(stage, selectedTask);
+        var activeWork = PersistedActiveWork(run, workId);
 
         return new DiagnosisView(
             run.Id,
@@ -145,9 +159,47 @@ public sealed class DiagnosisAssembler
                 .Select(task => ToTask(task, run, snapshotJson, selectedTask))
                 .ToList(),
             snapshotJson is null
-                ? new DiagnosisDispatchView("missing")
-                : new DiagnosisDispatchView("present", SanitizeJson(ParseSnapshot(snapshotJson))),
-            events.TakeLast(Math.Max(0, eventLimit)).Select(ToEvent).ToList());
+                ? new DiagnosisDispatchView("missing", ActiveWork: activeWork)
+                : new DiagnosisDispatchView("present", SanitizeJson(ParseSnapshot(snapshotJson)), activeWork),
+            events.TakeLast(Math.Max(0, eventLimit)).Select(ToEvent).ToList(),
+            events.Select(stored => ToProvenance(stored, run.Id)).Where(fact => fact is not null).Cast<DiagnosisProvenanceFactView>().ToList());
+    }
+
+    private static string? SnapshotWorkId(StageRun? stage, WorkflowActionAttempt? selectedTask)
+    {
+        var workId = selectedTask is { Status: WorkflowActionAttemptStatus.Running } running
+            ? running.WorkId ?? running.Id
+            : selectedTask?.WorkId;
+        if (workId is null)
+            workId = stage?.TerminalChecksWorkId ?? stage?.ChecksWorkId;
+        return workId;
+    }
+
+    // PersistedActiveWork reports the in-flight work the Run state persists,
+    // using the same fields as the Runner status projection
+    // (RunnerActiveWorkReader): the current stage's running task with its
+    // effective work id (WorkId ?? Id), otherwise the stage's checks work
+    // id. It never fabricates a dispatch snapshot; it only tells whether
+    // persisted active work exists and whether that work is the one the
+    // snapshot lookup used.
+    private static DiagnosisActiveWorkView? PersistedActiveWork(WorkflowRun run, string? snapshotWorkId)
+    {
+        var current = run.Stages.FirstOrDefault(s => string.Equals(s.Id, run.CurrentStageId, StringComparison.Ordinal));
+        if (current is null) return null;
+
+        if (current.RunningTask is { } task)
+        {
+            var workId = task.WorkId ?? task.Id;
+            return new DiagnosisActiveWorkView(workId, "task", current.Id, Matches(workId, snapshotWorkId));
+        }
+        if (!string.IsNullOrWhiteSpace(current.ChecksWorkId))
+        {
+            return new DiagnosisActiveWorkView(current.ChecksWorkId, "checks", current.Id, Matches(current.ChecksWorkId, snapshotWorkId));
+        }
+        return null;
+
+        static bool Matches(string activeWorkId, string? snapshotWorkId) =>
+            snapshotWorkId is not null && string.Equals(activeWorkId, snapshotWorkId, StringComparison.Ordinal);
     }
 
     private static DiagnosisTaskView ToTask(
@@ -233,6 +285,57 @@ public sealed class DiagnosisAssembler
         if (string.IsNullOrWhiteSpace(json)) return null;
         try { return JsonDocument.Parse(json).RootElement.Clone(); }
         catch (JsonException) { return null; }
+    }
+
+    private static DiagnosisProvenanceFactView? ToProvenance(StoredCloudEvent stored, string runId)
+    {
+        if (!string.Equals(
+                stored.Envelope.Type,
+                EventCatalog.ReverseDns.WorkflowProvenanceRecorded,
+                StringComparison.Ordinal)
+            || stored.Envelope.Data is not { } data)
+            return null;
+
+        try
+        {
+            var fact = data.Deserialize<WorkflowProvenanceRecorded>(JSON.Options);
+            if (fact is null) return null;
+            var extensions = stored.Envelope.Extensions;
+            var projectId = extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var project)
+                ? project
+                : null;
+            var issueNumber = extensions.TryGetValue(EventCatalog.Lineage.Issue, out var issue)
+                && int.TryParse(issue, out var parsedIssue)
+                ? (int?)parsedIssue
+                : null;
+            var lineageRunId = extensions.TryGetValue(EventCatalog.Lineage.WorkflowRunId, out var eventRunId)
+                ? eventRunId
+                : runId;
+            return new DiagnosisProvenanceFactView(
+                stored.Envelope.Time,
+                fact.Action,
+                fact.ActorKind,
+                fact.ActorId,
+                fact.Source,
+                fact.Outcome,
+                fact.Stage,
+                fact.TaskId,
+                fact.Attempt,
+                fact.Result,
+                fact.Reason,
+                fact.Target,
+                lineageRunId,
+                projectId,
+                issueNumber);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     private static DiagnosisEventView ToEvent(StoredCloudEvent stored) => new(

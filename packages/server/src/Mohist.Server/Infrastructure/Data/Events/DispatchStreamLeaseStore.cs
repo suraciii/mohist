@@ -88,13 +88,16 @@ public sealed class DispatchStreamLeaseStore : IDispatchStreamLeaseStore
             new("@origin", origin),
             new("@source", source),
         };
+        // DateTimeOffset is stored as wall-clock TEXT by SQLite. julianday()
+        // parses each offset before comparing, while the UPDATE remains one
+        // atomic lease-arbitration statement.
         var stolen = await db.Database.ExecuteSqlRawAsync(
             """
             UPDATE "DispatchStreamLeases"
             SET "LeaseOwner" = @owner, "LeaseUntil" = @until, "NextAttemptAt" = NULL, "UpdatedAt" = @now
             WHERE "Origin" = @origin AND "Source" = @source
-              AND ("LeaseUntil" <= @now OR "LeaseOwner" = @owner)
-              AND ("NextAttemptAt" IS NULL OR "NextAttemptAt" <= @now)
+              AND (julianday("LeaseUntil") <= julianday(@now) OR "LeaseOwner" = @owner)
+              AND ("NextAttemptAt" IS NULL OR julianday("NextAttemptAt") <= julianday(@now))
             """,
             steal,
             ct);
@@ -251,7 +254,13 @@ public sealed class DispatchStreamLeaseStore : IDispatchStreamLeaseStore
     async Task<int> IDispatchStreamLeaseStore.CountParkedAsync(DateTimeOffset now, CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return await db.DispatchStreamLeases.AsNoTracking()
-            .CountAsync(l => l.NextAttemptAt != null && l.NextAttemptAt > now, ct);
+        // SQLite cannot translate DateTimeOffset comparisons, and its TEXT
+        // storage sorts by local wall-clock, so the instant comparison must
+        // happen after materialization. The null filter stays in SQL.
+        var nextAttempts = await db.DispatchStreamLeases.AsNoTracking()
+            .Where(l => l.NextAttemptAt != null)
+            .Select(l => l.NextAttemptAt)
+            .ToListAsync(ct);
+        return nextAttempts.Count(next => next > now);
     }
 }

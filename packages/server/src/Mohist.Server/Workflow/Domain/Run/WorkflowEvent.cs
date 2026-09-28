@@ -29,6 +29,7 @@ public union WorkflowEvent(
     CheckFailed,
     CheckPending,
     ChecksInterrupted,
+    WorkflowProvenanceRecorded,
     WorkflowArtifactRecorded);
 
 public sealed record WorkflowRunStarted;

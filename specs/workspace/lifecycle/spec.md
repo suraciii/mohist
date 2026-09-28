@@ -138,11 +138,24 @@ checkout, and Git guards remain in the Repository.
 - An archived Workspace remains available for history but accepts no new
   AgentSessions.
 
+An archived Issue Workspace can be restored through `mo workspace restore
+issue-<number>` or the Project workspace restore API. The restore keeps its
+name, Issue origin and Repository bindings, clears the old Runner home, and
+lets the next dispatch rematerialize the directory. Repeating restore on an
+active Workspace changes nothing. Retrying an Issue Workflow restores an
+archived Workspace with the same Issue origin only after the prior Run has
+passed its external-effect fence. If durable provenance records a push, Pull
+Request, or merge, or the prior Run has an unsettled failure, recovery blocks
+with the original Run linked and no new Run, Workspace, or AgentJob. A safe
+replacement keeps the original Run and failure history separate. The old
+directory and unpushed files are not promised to survive restoration; use the
+pushed branch or rerun Plan to regenerate non-Repository artifacts.
+
 ## Events
 
-Workspace creation and archival produce platform events. Subscribers can filter
-those events by source. For example, a channel Agent can clean up after an
-archive event, or a create event can trigger dependency installation. See
+Workspace creation, restoration and archival produce platform events.
+Subscribers can filter those events by source. For example, a channel Agent can
+clean up after an archive event, or a create event can trigger dependency installation. See
 [Event Routing](../../agent/event-routing/spec.md) for the event contract.
 
 ## Runner-side Directory Reclamation

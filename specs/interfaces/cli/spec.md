@@ -198,8 +198,8 @@ enter the language.
 - `epic`: `list`, `view`, `create`, `edit`, `add`, `remove`, `start`, `pause`,
   `resume`, `done`, `close`, `reopen`.
 - `label`: `list`, `create`, `edit`, `delete`.
-- `workflow`: `list`, `view`, `create`, `edit`, `delete`, `validate`;
-  `view --yaml` reads the raw Workflow Definition.
+- `workflow`: `list`, `view`, `create`, `edit`, `delete`, `validate`, `enable`,
+  `disable`; `view --yaml` reads the raw Workflow Definition.
 - `run`: `list`, `view`, `why`, `watch`, `approve`, `request-changes`, `retry`,
   `rerun`, `pause`, `resume`, `stop`; `view --yaml` reads the complete
   Definition bound to the Run; `feedback list/view`;
@@ -340,6 +340,19 @@ step.
 `--parent`, and `--epic`. With `--json` field selection, one call can compare
 multiple Issues without an `issue view` call for each one.
 
+`mo issue events <number> [--limit <positive-integer>]` reads the bounded
+Issue event feed from the project-scoped `/events` endpoint. Its JSON catalog
+is `id`, `eventId`, `source`, `type`, `specVersion`, `subject`, `time`,
+`dataContentType`, `data`, and `extensions`; `--json <fields>` selects from
+that catalog and bare `--json` discovers it without a request.
+`mo issue logs <number> --task <task-id> [--cursor <non-negative-integer>]
+[--limit <positive-integer>]` reads one Workflow task's cursor-paginated logs.
+The task selector is required; there is no issue-wide logs endpoint. The
+task-scoped route is `/workflow/tasks/{task-id}/logs`, with the task id
+path-escaped by the CLI. Its JSON catalog is `lines`, `nextCursor`, and
+`truncated`; each line contains `seq`, `timestamp`, `source`, and `text`.
+Unknown selected fields are rejected before HTTP.
+
 Approval Point decisions, recovery, pause, and termination change the WorkflowRun
 and therefore exist only under `mo run`. Issue comments, prerequisites, templates, Variables,
 diff, and commits remain under `mo issue` because they describe or support the
@@ -353,6 +366,13 @@ Project default, or Profile Definition affects only future Runs. See
 [Workflow Profile: Select a Profile](../../workflow/profiles/spec.md#select-a-profile) for
 the complete timing rules. `workflow edit --help` must state that active Runs
 keep their bound Definition.
+
+`mo workflow enable <profile-id>` and `mo workflow disable <profile-id>` use
+the supported Project routes to change whether a Profile is available for
+future selections. Both return the JSON object `{profileId, enabled}` and
+support `--json profileId,enabled` or bare `--json` discovery. Disabling the
+last enabled built-in Profile is rejected by the Server. Enablement changes
+do not rewrite the Definition or alter Runs that already captured a Profile.
 
 The Profile collection belongs to Workflow. The Project default and explicit
 Issue selection are references to a Profile and do not belong to the Profile.
@@ -443,6 +463,17 @@ attempts, dispatch facts, and bounded event evidence that explain why a Run is
 stopped or not advancing. Use it after `mo run view` shows a failure, blocker,
 or unexpected stage state. It is a read-only diagnosis and does not retry,
 rerun, pause, or stop the Run.
+
+The `dispatch` object preserves the existing `status` and `snapshot` fields
+and may include `activeWork`, an observation of persisted Runner-visible work
+with `workId`, `workType`, `stage`, and `matchesSnapshotWorkId`. A missing
+snapshot with matching active work means the persisted work is present but its
+dispatch snapshot is absent; a non-matching observation identifies divergent
+work; absence of both remains truly missing. Human output explicitly prints
+`observation: active work present` whenever `activeWork` is present alongside
+`status: missing`, so `run why` does not contradict `runner status` while
+preserving the fact that the dispatch snapshot itself is missing. The
+observation never fabricates a snapshot.
 
 An accepted control answers with the Run it changed, in the same shape `run view`
 reads: `status` (including the `status` string, `currentStage`, and the

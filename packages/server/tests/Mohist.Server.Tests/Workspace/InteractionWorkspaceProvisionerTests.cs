@@ -423,6 +423,10 @@ public sealed class InteractionWorkspaceProvisionerTests
 
         public Task ArchiveByIssueAsync(int issueNumber, DateTimeOffset now) => throw new NotSupportedException();
 
+        public Task<WorkspaceState?> RestoreByIssueAsync(int issueNumber) => throw new NotSupportedException();
+
+        public Task<WorkspaceState?> RestoreByOriginAsync(WorkspaceOrigin origin) => throw new NotSupportedException();
+
         public Task<WorkspaceState?> CloseAsync(DateTimeOffset now) => throw new NotSupportedException();
 
         public Task<WorkspaceHome?> GetHomeAsync() => throw new NotSupportedException();

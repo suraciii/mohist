@@ -371,6 +371,28 @@
         "id": "rpc_session_command",
         "error": { "code": -32603, "message": "Internal error" }
       }
+    },
+    {
+      "method": "repository.preflight",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "rpc_repository_preflight",
+        "method": "repository.preflight",
+        "params": {
+          "gitUrl": "https://example.test/repo.git",
+          "baseBranch": "main"
+        }
+      },
+      "success": {
+        "jsonrpc": "2.0",
+        "id": "rpc_repository_preflight",
+        "result": { "exitCode": 0 }
+      },
+      "error": {
+        "jsonrpc": "2.0",
+        "id": "rpc_repository_preflight",
+        "error": { "code": -32602, "message": "Invalid params" }
+      }
     }
   ]
 }

@@ -4,6 +4,7 @@ using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Api;
 
@@ -24,6 +25,9 @@ public static partial class IssueRoutes
                 return ApiResults.BadRequest("stage is required");
             if (string.IsNullOrWhiteSpace(req.Body))
                 return ApiResults.BadRequest("body is required");
+            var displayName = NormalizeDisplayName(req.DisplayName);
+            if (displayName.Failure is { } failure)
+                return failure;
 
             var project = GetRequiredProject(ctx);
             var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
@@ -31,9 +35,15 @@ public static partial class IssueRoutes
 
             try
             {
-                var displayName = ApprovalOperatorValidation.Normalize(req.DisplayName);
                 var feedbackId = await grains.GetGrain<IWorkflowGrain>(wrId).RequestChangesAsync(
-                    req.Body, currentUser.Principal.Id, displayName);
+                    req.Body,
+                    currentUser.Principal.Id,
+                    displayName.Value,
+                    new WorkflowProvenanceActor(
+                        WorkflowProvenanceActorKinds.User,
+                        currentUser.Principal.Id,
+                        displayName.Value),
+                    "api");
                 var feedback = await grains.GetGrain<IWorkflowGrain>(wrId).GetFeedbackAsync(feedbackId);
                 if (feedback is null)
                     return ApiResults.NotFound("Feedback was created but could not be read back");

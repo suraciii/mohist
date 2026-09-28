@@ -274,6 +274,34 @@ public class IssueApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
     }
 
     [Fact]
+    public async Task StartIssue_WithInvalidRemoteBaseBranch_ReportsPreflightFailure()
+    {
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            $"web-preflight-{Guid.NewGuid():N}",
+            repoName: "origin",
+            gitUrl: "git@example.com:mohist.git",
+            baseBranch: "preflight-invalid");
+        var issue = await _client.PostDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Invalid base branch", isDraft = false });
+
+        using var response = await _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/start",
+            null);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("repository_base_branch_missing", payload.GetProperty("code").GetString());
+        var details = payload.GetProperty("details");
+        Assert.Equal("repository.baseBranch", details.GetProperty("field").GetString());
+        Assert.False(details.GetProperty("executionCreated").GetBoolean());
+        Assert.Equal(
+            details.GetProperty("nextStep").GetString(),
+            payload.GetProperty("nextAction").GetString());
+    }
+
+    [Fact]
     public async Task SystemInfo_ReturnsTypedRuntimePayload()
     {
         var system = await _client.GetDataAsync<SystemInfoDto>("/api/system/info");

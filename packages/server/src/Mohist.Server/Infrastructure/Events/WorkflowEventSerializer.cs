@@ -36,6 +36,7 @@ internal static class WorkflowEventSerializer
         [typeof(CheckPending)] = EventCatalog.ReverseDns.CheckPending,
         [typeof(ChecksInterrupted)] = EventCatalog.ReverseDns.ChecksInterrupted,
         [typeof(WorkflowArtifactRecorded)] = EventCatalog.ReverseDns.WorkflowArtifactRecorded,
+        [typeof(WorkflowProvenanceRecorded)] = EventCatalog.ReverseDns.WorkflowProvenanceRecorded,
     };
 
     internal static IReadOnlyCollection<string> ProducedTypes => BusTypes.Values.ToArray();
@@ -87,6 +88,7 @@ internal static class WorkflowEventSerializer
         nameof(CheckPending) => data.Deserialize<CheckPending>(JsonOptions)!,
         nameof(ChecksInterrupted) => data.Deserialize<ChecksInterrupted>(JsonOptions)!,
         nameof(WorkflowArtifactRecorded) => data.Deserialize<WorkflowArtifactRecorded>(JsonOptions)!,
+        nameof(WorkflowProvenanceRecorded) => data.Deserialize<WorkflowProvenanceRecorded>(JsonOptions)!,
         _ => throw new InvalidOperationException($"Unknown workflow event '{type}'"),
     };
 
@@ -118,6 +120,7 @@ internal static class WorkflowEventSerializer
         CheckPending x => x,
         ChecksInterrupted x => x,
         WorkflowArtifactRecorded x => x,
+        WorkflowProvenanceRecorded x => x,
         null => throw new InvalidOperationException("Null workflow event"),
     };
 }

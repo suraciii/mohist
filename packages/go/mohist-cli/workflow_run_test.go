@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -722,5 +723,65 @@ func TestWorkflowEditHelpAndFieldDiscoveryStayOffline(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWorkflowProfileEnableDisableUseSupportedToggleRoutes(t *testing.T) {
+	for _, test := range []struct {
+		action  string
+		enabled bool
+	}{
+		{action: "enable", enabled: true},
+		{action: "disable", enabled: false},
+	} {
+		t.Run(test.action, func(t *testing.T) {
+			var got *http.Request
+			deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				got = r
+				return response(http.StatusOK, fmt.Sprintf(`{"success":true,"data":{"profileId":"ship","enabled":%t}}`, test.enabled)), nil
+			}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+			if code := Run(context.Background(), []string{"workflow", test.action, "ship", "--project", "proj-1", "--json", "profileId,enabled"}, deps); code != ExitOK {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+			}
+			if got == nil || got.Method != http.MethodPost || got.URL.Path != "/api/projects/proj-1/workflow-profile/"+test.action {
+				t.Fatalf("request=%v", got)
+			}
+			body, err := io.ReadAll(got.Body)
+			if err != nil || string(body) != `{"profileId":"ship"}` {
+				t.Fatalf("body=%q err=%v", string(body), err)
+			}
+			want := fmt.Sprintf(`{"enabled":%t,"profileId":"ship"}`+"\n", test.enabled)
+			if out.String() != want || errOut.Len() != 0 {
+				t.Fatalf("stdout=%q want %q stderr=%q", out.String(), want, errOut.String())
+			}
+		})
+	}
+}
+
+func TestWorkflowProfileToggleRequiresProfileAndRejectsUnknownFieldBeforeHTTP(t *testing.T) {
+	for _, args := range [][]string{
+		{"workflow", "enable", "--project", "proj-1"},
+		{"workflow", "disable", "ship", "--project", "proj-1", "--json", "unknown"},
+	} {
+		calls := 0
+		deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls++
+			return nil, errors.New("must not call")
+		}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+		if code := Run(context.Background(), args, deps); code != ExitUsage || calls != 0 {
+			t.Fatalf("code=%d calls=%d args=%v stderr=%q", code, calls, args, errOut.String())
+		}
+	}
+}
+
+func TestWorkflowProfileToggleBareJSONListsLocalCatalog(t *testing.T) {
+	calls := 0
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("must not call")
+	}), map[string]string{})
+	if code := Run(context.Background(), []string{"workflow", "enable", "ship", "--json"}, deps); code != ExitOK || calls != 0 || out.String() != strings.Join(workflowToggleFields, "\n")+"\n" || errOut.Len() != 0 {
+		t.Fatalf("code=%d calls=%d stdout=%q stderr=%q", code, calls, out.String(), errOut.String())
 	}
 }

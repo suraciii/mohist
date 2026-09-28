@@ -326,6 +326,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            services.RemoveAll<Mohist.Server.Issue.Services.IRepositorySourcePreflight>();
+            services.AddSingleton<Mohist.Server.Issue.Services.IRepositorySourcePreflight, TestRepositorySourcePreflight>();
             services.RemoveAll<IWorkflowRunStore>();
             services.AddScoped<WorkflowRunStore>();
             services.AddSingleton<WorkflowRunLoadFailureProbe>();

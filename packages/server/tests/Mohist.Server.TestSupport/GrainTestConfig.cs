@@ -251,6 +251,7 @@ public static class GrainTestConfig
                 services.GetRequiredService<IGrainFactory>(),
                 services.GetRequiredService<IDbContextFactory<MohistDbContext>>()));
         siloBuilder.Services.AddRequiredInfrastructure();
+        siloBuilder.Services.AddSingleton<Mohist.Server.Issue.Services.IRepositorySourcePreflight, TestRepositorySourcePreflight>();
         siloBuilder.Services.AddSingleton<IActionCatalogSource>(NullActionCatalogSource.Instance);
         siloBuilder.Services.AddScoped<IWorkflowProfileProvider, WorkflowProfileProvider>();
         siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();

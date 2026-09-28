@@ -25,6 +25,8 @@ var templateListFields = []string{"id", "name", "description", "source"}
 var templateFields = []string{"id", "name", "description", "body", "source"}
 var commentFields = []string{"id", "projectId", "issueNumber", "body", "createdAt", "attachments", "author", "displayName"}
 var watchFields = []string{"number", "watching", "muted"}
+var issueEventFields = []string{"id", "eventId", "source", "type", "specVersion", "subject", "time", "dataContentType", "data", "extensions"}
+var issueLogFields = []string{"lines", "nextCursor", "truncated"}
 
 var labelKeyPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 var ansiEscapePattern = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))`)
@@ -77,8 +79,14 @@ func parseIssue(args []string) (command, error) {
 		c.kind = "issue-archive-all"
 		c.catalog = archiveFields
 	}
-	if action == "rebase" || action == "diff" || action == "commits" || action == "logs" || action == "events" {
+	if action == "rebase" || action == "diff" || action == "commits" {
 		c.catalog = nil
+	}
+	if action == "events" {
+		c.catalog = issueEventFields
+	}
+	if action == "logs" {
+		c.catalog = issueLogFields
 	}
 	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
 		return discovered, err
@@ -141,6 +149,44 @@ func parseIssueOptions(c command, args []string, action string) (command, error)
 				return command{}, usage(arg + " requires a value")
 			}
 			c.args = append(c.args, "idempotency-key", args[i+1])
+			i++
+		case "--task":
+			if action != "logs" {
+				return command{}, usage(arg + " is only supported for issue logs")
+			}
+			if i+1 >= len(args) {
+				return command{}, usage(arg + " requires a value")
+			}
+			task := strings.TrimSpace(args[i+1])
+			if task == "" {
+				return command{}, usage("--task requires a non-empty value")
+			}
+			c.args = append(c.args, "task", task)
+			i++
+		case "--cursor":
+			if action != "logs" {
+				return command{}, usage(arg + " is only supported for issue logs")
+			}
+			if i+1 >= len(args) {
+				return command{}, usage(arg + " requires a value")
+			}
+			cursor, err := strconv.ParseInt(args[i+1], 10, 64)
+			if err != nil || cursor < 0 {
+				return command{}, usage("--cursor must be a non-negative integer")
+			}
+			c.args = append(c.args, "cursor", args[i+1])
+			i++
+		case "--limit":
+			if action != "logs" && action != "events" {
+				return command{}, usage(arg + " is only supported for issue logs and issue events")
+			}
+			if i+1 >= len(args) {
+				return command{}, usage(arg + " requires a value")
+			}
+			if limit, err := strconv.Atoi(args[i+1]); err != nil || limit <= 0 {
+				return command{}, usage("--limit must be a positive integer")
+			}
+			c.args = append(c.args, "limit", args[i+1])
 			i++
 		case "--json":
 			var err error
@@ -207,6 +253,9 @@ func parseIssueOptions(c command, args []string, action string) (command, error)
 		if stdinCarriers > 1 {
 			return command{}, usage("at most one of --body-file, --stage-models-file, --stage-model-variants-file may read from stdin")
 		}
+	}
+	if action == "logs" && !hasArg(c.args, "task") {
+		return command{}, usage("--task <task-id> is required for issue logs")
 	}
 	if err := validateFields(c.fields, c.catalog, "mo issue "+action); err != nil {
 		return command{}, err
@@ -816,6 +865,8 @@ func emptyMessage(kind string) string {
 		return "No labels"
 	case kind == "issue-template-list":
 		return "No issue templates"
+	case kind == "issue-events":
+		return "No events"
 	default:
 		return "No results"
 	}
@@ -969,8 +1020,23 @@ func organizationRequest(cmd command, base string, deps Dependencies) (string, s
 		return base + "/issues/archive-completed", http.MethodPost, map[string]any{}, false, nil
 	case "issue-rebase":
 		return issue + "/rebase", http.MethodPost, map[string]any{"baseBranch": argValue(cmd.args, "base-branch", "")}, false, nil
-	case "issue-diff", "issue-commits", "issue-logs", "issue-events":
+	case "issue-diff", "issue-commits":
 		return issue + "/" + strings.TrimPrefix(action, "issue-"), http.MethodGet, nil, false, nil
+	case "issue-events":
+		q := url.Values{}
+		if v := argValue(cmd.args, "limit", ""); v != "" {
+			q.Set("limit", v)
+		}
+		return issue + "/events" + querySuffix(q), http.MethodGet, nil, true, nil
+	case "issue-logs":
+		q := url.Values{}
+		if v := argValue(cmd.args, "cursor", ""); v != "" {
+			q.Set("cursor", v)
+		}
+		if v := argValue(cmd.args, "limit", ""); v != "" {
+			q.Set("limit", v)
+		}
+		return issue + "/workflow/tasks/" + url.PathEscape(argValue(cmd.args, "task", "")) + "/logs" + querySuffix(q), http.MethodGet, nil, false, nil
 	case "issue-prereq-add":
 		return issue + "/prerequisites", http.MethodPost, map[string]any{"prerequisiteNumber": numberValue(argValue(cmd.args, "prereq-number", ""))}, false, nil
 	case "issue-prereq-remove":

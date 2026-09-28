@@ -21,14 +21,51 @@ function view(overrides: Record<string, unknown> = {}) {
 function host(signal = new AbortController().signal): any {
   return { workDir: '/tmp', signal, variables: { issue: { title: 'Ship it' } } }
 }
-const inputs = { repositoryUrl: 'https://github.com/o/r.git', prNumber: 42, method: 'squash', subject: 'Ship it' }
+const inputs = {
+  repositoryUrl: 'https://github.com/o/r.git',
+  prNumber: 42,
+  method: 'squash',
+  subject: 'Ship it',
+  source: 'mohist/run-wr-42',
+  target: 'origin/main',
+}
+
+const MERGE_BASE_SHA = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+const SOURCE_COMMIT_SHA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+
+function gitOk(stdout: string) {
+  return { success: true, stdout, stderr: '', exitCode: 0, combinedOutput: stdout.trim() }
+}
+
+/** One valid commit record in the NUL-delimited publication log format. */
+function commitLog(message: string, sha = SOURCE_COMMIT_SHA) {
+  return `${sha}\x00Author\x00a@example.com\x00Committer\x00c@example.com\x00${message}\x00`
+}
+
+/** Serves the read-only merge-base/log history validation the action runs before registering auto-merge. */
+function validGitHistory(): NonNullable<RunnerResourceContext['githubPrGitRunner']> {
+  return async (_workDir, args) => {
+    if (args[0] === 'merge-base') return gitOk(`${MERGE_BASE_SHA}\n`)
+    if (args[0] === 'log') return gitOk(commitLog('Ship it\n\nDetails\n'))
+    const command = args.join(' ')
+    return {
+      success: false,
+      stdout: '',
+      stderr: `unexpected git call: ${command}`,
+      exitCode: 1,
+      combinedOutput: `unexpected git call: ${command}`,
+    }
+  }
+}
 
 function resources(
   gh: RunnerCommandRunner,
   overrides: NonNullable<RunnerResourceContext['githubPrChecksTiming']> = {},
+  git: NonNullable<RunnerResourceContext['githubPrGitRunner']> = validGitHistory(),
 ): RunnerResourceContext {
   return {
     githubPrGhRunner: gh,
+    githubPrGitRunner: git,
     githubPrChecksTiming: { pollIntervalMs: 1, autoMergeWaitMs: 50, ...overrides },
   }
 }
@@ -80,6 +117,91 @@ describe('enable auto merge', () => {
     const registration = gh.mock.calls.find((call: any) => call[1].includes('--auto'))!
     expect(registration[1]).toContain('Explicit subject')
     expect(registration[1]).not.toContain('Bounded PR title')
+  })
+  it('validates the final squash message and source commits before registering auto-merge', async () => {
+    const gh = vi
+      .fn()
+      .mockResolvedValueOnce(result('gh version'))
+      .mockResolvedValueOnce(result('auth ok'))
+      .mockResolvedValueOnce(result(view()))
+      .mockResolvedValueOnce(result('enabled'))
+      .mockResolvedValueOnce(result(view({ state: 'MERGED', mergeCommit: { oid: 'sha' }, autoMergeRequest: {} })))
+    const git = vi
+      .fn()
+      .mockResolvedValueOnce(gitOk(`${MERGE_BASE_SHA}\n`))
+      .mockResolvedValueOnce(gitOk(commitLog('Subject\n\nPolicy: yes\n')))
+    const out: any = await withRunnerResources(resources(gh, {}, git), () =>
+      enableGitHubPrAutoMergeAction(
+        {
+          ...inputs,
+          body: 'Details\n\nPolicy: yes',
+          requiredTrailers: ['Policy'],
+          source: 'HEAD',
+          target: 'origin/main',
+        } as any,
+        host(),
+      ),
+    )
+    expect(out.output.enabled).toBe(true)
+    expect(git).toHaveBeenCalledTimes(2)
+    expect(gh.mock.calls.filter((call: any) => call[1].includes('--auto'))).toHaveLength(1)
+  })
+
+  it('rejects an invalid final squash message before any external write', async () => {
+    const gh = vi
+      .fn()
+      .mockResolvedValueOnce(result('gh version'))
+      .mockResolvedValueOnce(result('auth ok'))
+      .mockResolvedValueOnce(result(view()))
+    const git = vi.fn()
+    const out: any = await withRunnerResources(resources(gh, {}, git), () =>
+      enableGitHubPrAutoMergeAction(
+        { ...inputs, body: 'Details', requiredTrailers: ['Policy'], source: 'HEAD', target: 'origin/main' } as any,
+        host(),
+      ),
+    )
+    expect(out.error.code).toBe('publication-validation-failed')
+    expect(git).not.toHaveBeenCalled()
+    expect(gh.mock.calls.filter((call: any) => call[1].includes('--auto'))).toHaveLength(0)
+  })
+
+  it('blocks auto-merge registration when a source commit carries a literal escaped newline under the default policy', async () => {
+    const gh = vi
+      .fn()
+      .mockResolvedValueOnce(result('gh version'))
+      .mockResolvedValueOnce(result('auth ok'))
+      .mockResolvedValueOnce(result(view()))
+    const git = vi
+      .fn()
+      .mockResolvedValueOnce(gitOk(`${MERGE_BASE_SHA}\n`))
+      .mockResolvedValueOnce(gitOk(commitLog('Ship it\\n\\nwith escaped newlines')))
+    const out = await withRunnerResources(resources(gh, {}, git), () =>
+      enableGitHubPrAutoMergeAction({ ...inputs }, host()),
+    )
+    expect(out.error?.code).toBe('publication-validation-failed')
+    expect(out.error?.message).toContain('literal escaped newline')
+    expect(gh.mock.calls.filter((call) => call[1].includes('--auto'))).toHaveLength(0)
+  })
+
+  it('does not let an embedded record separator smuggle a malformed trailer past the commit gate', async () => {
+    const gh = vi
+      .fn()
+      .mockResolvedValueOnce(result('gh version'))
+      .mockResolvedValueOnce(result('auth ok'))
+      .mockResolvedValueOnce(result(view()))
+    const git = vi
+      .fn()
+      .mockResolvedValueOnce(gitOk(`${MERGE_BASE_SHA}\n`))
+      .mockResolvedValueOnce(gitOk(commitLog('Ship it\n\nPolicy\x1e: yes')))
+    const out = await withRunnerResources(resources(gh, {}, git), () =>
+      enableGitHubPrAutoMergeAction(
+        { ...inputs, body: 'Details\n\nPolicy: yes', requiredTrailers: ['Policy'] },
+        host(),
+      ),
+    )
+    expect(out.error?.code).toBe('publication-validation-failed')
+    expect(out.error?.message).toContain('Malformed trailer line')
+    expect(gh.mock.calls.filter((call) => call[1].includes('--auto'))).toHaveLength(0)
   })
 
   it('is idempotent for already merged and performs no registration write', async () => {

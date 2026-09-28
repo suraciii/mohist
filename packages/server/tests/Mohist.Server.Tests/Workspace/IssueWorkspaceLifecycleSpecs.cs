@@ -205,4 +205,97 @@ public class IssueWorkspaceLifecycleSpecs : IClassFixture<DefaultMohistIntegrati
                 issueNumber + 999, _fixture.TimeProvider.GetUtcNow()));
         Assert.Equal("workspace_origin_mismatch", ex.Code);
     }
+
+    // --- Acceptance 5: retry after archive restores the same issue workspace ---
+
+    [Fact]
+    public async Task EnsureIssueWorkspaceAsync_ArchivedSameOrigin_RestoresInPlaceAndClearsStaleHome()
+    {
+        using var createIssue = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{_projectId}/issues",
+            new { title = "Restore archived workspace", isDraft = false });
+        createIssue.EnsureSuccessStatusCode();
+        var issue = await createIssue.Content.ReadFromJsonAsync<JsonElement>();
+        var issueNumber = issue.GetProperty("data").GetProperty("number").GetInt32();
+        var workspaceName = $"issue-{issueNumber}";
+
+        using var start = await _fixture.Client.PostAsync(
+            $"/api/projects/{_projectId}/issues/{issueNumber}/start", null);
+        Assert.Equal(System.Net.HttpStatusCode.OK, start.StatusCode);
+
+        var now = _fixture.TimeProvider.GetUtcNow();
+        await WorkspaceGrain(workspaceName).EnsureMaterializedOnAsync(
+            "runner-1", "/var/lib/mohist/workspaces/issue", now);
+        await WorkspaceGrain(workspaceName).ArchiveByIssueAsync(issueNumber, now);
+
+        var archived = await WorkspaceGrain(workspaceName).GetAsync();
+        Assert.Equal(WorkspaceStatus.Archived, archived!.Status);
+        Assert.NotNull(archived.ArchivedAt);
+
+        var restored = await WorkspaceGrain(workspaceName).EnsureIssueWorkspaceAsync(
+            issueNumber, "server", _fixture.TimeProvider.GetUtcNow());
+
+        Assert.Equal(workspaceName, restored.Name);
+        Assert.Equal(WorkspaceStatus.Active, restored.Status);
+        Assert.Null(restored.ArchivedAt);
+        Assert.Null(restored.Home);
+        var origin = Assert.IsType<WorkspaceOrigin.Issue>(restored.Origin);
+        Assert.Equal(issueNumber, origin.IssueNumber);
+        Assert.Equal(["server"], restored.RepositoryNames);
+
+        // Restore is in place: the convergence path never derives a
+        // suffixed replacement workspace for the same issue origin.
+        Assert.Null(await WorkspaceGrain($"{workspaceName}-2").GetAsync());
+    }
+
+    [Fact]
+    public async Task EnsureIssueWorkspaceAsync_AfterRestore_IsIdempotent()
+    {
+        using var createIssue = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{_projectId}/issues",
+            new { title = "Restore idempotency", isDraft = false });
+        createIssue.EnsureSuccessStatusCode();
+        var issue = await createIssue.Content.ReadFromJsonAsync<JsonElement>();
+        var issueNumber = issue.GetProperty("data").GetProperty("number").GetInt32();
+        var workspaceName = $"issue-{issueNumber}";
+
+        using var start = await _fixture.Client.PostAsync(
+            $"/api/projects/{_projectId}/issues/{issueNumber}/start", null);
+        Assert.Equal(System.Net.HttpStatusCode.OK, start.StatusCode);
+
+        await WorkspaceGrain(workspaceName).ArchiveByIssueAsync(
+            issueNumber, _fixture.TimeProvider.GetUtcNow());
+
+        var first = await WorkspaceGrain(workspaceName).EnsureIssueWorkspaceAsync(
+            issueNumber, "server", _fixture.TimeProvider.GetUtcNow());
+        var second = await WorkspaceGrain(workspaceName).EnsureIssueWorkspaceAsync(
+            issueNumber, "server", _fixture.TimeProvider.GetUtcNow());
+
+        Assert.Equal(WorkspaceStatus.Active, second.Status);
+        Assert.Equal(first.CreatedAt, second.CreatedAt);
+        Assert.Null(second.ArchivedAt);
+    }
+
+    [Fact]
+    public async Task RestoreByIssueAsync_WrongIssueNumber_ThrowsOriginMismatch()
+    {
+        using var createIssue = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{_projectId}/issues",
+            new { title = "Restore mismatch test", isDraft = false });
+        createIssue.EnsureSuccessStatusCode();
+        var issue = await createIssue.Content.ReadFromJsonAsync<JsonElement>();
+        var issueNumber = issue.GetProperty("data").GetProperty("number").GetInt32();
+        var workspaceName = $"issue-{issueNumber}";
+
+        using var start = await _fixture.Client.PostAsync(
+            $"/api/projects/{_projectId}/issues/{issueNumber}/start", null);
+        Assert.Equal(System.Net.HttpStatusCode.OK, start.StatusCode);
+
+        await WorkspaceGrain(workspaceName).ArchiveByIssueAsync(
+            issueNumber, _fixture.TimeProvider.GetUtcNow());
+
+        var ex = await Assert.ThrowsAsync<WorkspaceDomainException>(
+            () => WorkspaceGrain(workspaceName).RestoreByIssueAsync(issueNumber + 999));
+        Assert.Equal("workspace_origin_mismatch", ex.Code);
+    }
 }

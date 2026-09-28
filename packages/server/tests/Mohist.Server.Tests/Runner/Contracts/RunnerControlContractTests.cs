@@ -32,6 +32,7 @@ public sealed class RunnerControlContractTests
         "session.followup",
         "session.stop",
         "session.command",
+        "repository.preflight",
     ];
 
     [Fact]
@@ -140,6 +141,14 @@ public sealed class RunnerControlContractTests
                     Assert.False(string.IsNullOrWhiteSpace(request.Params.OperationId));
                     Assert.Equal(SessionCommandKind.Reset, request.Params.Command);
                     Assert.True(request.Success.Result.Ok);
+                });
+                break;
+            case "repository.preflight":
+                Decode<RepositoryPreflightParams, RepositoryPreflightResult>(entry, request =>
+                {
+                    Assert.Equal("https://example.test/repo.git", request.Params.GitUrl);
+                    Assert.Equal("main", request.Params.BaseBranch);
+                    Assert.Equal(0, request.Success.Result.ExitCode);
                 });
                 break;
             default:

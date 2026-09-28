@@ -2,6 +2,7 @@ import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { WorkExecutor } from '../src/runtime/executor.js'
 import { rebaseAction } from '../src/actions/rebase.js'
 import { pushAction } from '../src/actions/push.js'
+import { PUBLICATION_LOG_FORMAT } from '../src/actions/publication.js'
 import { verifyOnlyWorkspacePreparer } from './support/workspace-mock.js'
 import type { ActionResult, JsonObject, DispatchWorkItem } from '../src/core/types.js'
 import type { ActionTestContext as ActionContext } from './support/action-test-context.js'
@@ -332,6 +333,12 @@ describe('worktree cleanup before delivery', () => {
       switch (command) {
         case 'rev-parse mo/worktree-cleanup':
           return gitOk('squashed-sha\n')
+        case 'merge-base origin/master mo/worktree-cleanup':
+          return gitOk('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n')
+        case `log --format=${PUBLICATION_LOG_FORMAT} aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..mo/worktree-cleanup`:
+          return gitOk(
+            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\x00Agent\x00agent@example.com\x00Agent\x00agent@example.com\x00Complete worktree cleanup\n\x00\n',
+          )
         case 'push origin mo/worktree-cleanup:master':
           return gitOk('To origin\n   base-sha..squashed-sha  mo/worktree-cleanup -> master')
         case 'ls-remote origin refs/heads/master':
@@ -360,6 +367,11 @@ describe('worktree cleanup before delivery', () => {
     expect(pushCalls).toEqual([
       { workDir: worktree.workDir, command: 'rev-parse mo/worktree-cleanup' },
       { workDir: worktree.workDir, command: 'ls-remote origin refs/heads/master' },
+      { workDir: worktree.workDir, command: 'merge-base origin/master mo/worktree-cleanup' },
+      {
+        workDir: worktree.workDir,
+        command: `log --format=${PUBLICATION_LOG_FORMAT} aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..mo/worktree-cleanup`,
+      },
       { workDir: worktree.workDir, command: 'push origin mo/worktree-cleanup:master' },
       { workDir: worktree.workDir, command: 'ls-remote origin refs/heads/master' },
     ])

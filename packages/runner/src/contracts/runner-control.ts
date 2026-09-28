@@ -39,6 +39,15 @@ export interface WorkspaceQueryParams {
   query: WorkspaceQuery
 }
 
+export interface RepositoryPreflightParams {
+  gitUrl: string
+  baseBranch: string
+}
+
+export interface RepositoryPreflightResult {
+  exitCode: number
+}
+
 export interface WorkspaceCommitDiffParams extends WorkspaceQueryParams {
   hash: string
 }

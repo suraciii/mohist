@@ -1,6 +1,7 @@
 import type { ActionResult, JsonObject } from '../core/types.js'
 import type { ActionHost } from './host.js'
 import { runCommand, type CommandLineOptions } from '../system/process.js'
+import { git } from './git.js'
 import { NETWORK_COMMAND_TIMEOUT_MS } from './git.js'
 import { omitGitHubClosingReferences, resolveCreatePrText } from './github-pr-issue-fields.js'
 import { combinedGhOutput, extractPrNumberFromUrl, parsePrListWithDraft } from './github-pr-parse.js'
@@ -15,7 +16,21 @@ import {
 } from './github-pr-types.js'
 import { parseGitHubRepository } from './github-pr-repository.js'
 import { fail as actionFail, succeed } from './action-result.js'
+import {
+  formatPublicationValidationErrors,
+  parsePublicationCommits,
+  publicationPolicyFromInputs,
+  PUBLICATION_LOG_FORMAT,
+  resolvePublicationStrategy,
+  unsupportedStrategyMessage,
+  validatePublicationCommits,
+  validateMessageTrailers,
+  type PublicationPolicy,
+  type PublicationStrategy,
+} from './publication.js'
 type GhRunner = typeof runCommand
+
+const CREATE_PR_SUPPORTED_STRATEGIES: readonly PublicationStrategy[] = ['github-api']
 
 const ACTION_SOURCE = 'action:create-github-pr'
 
@@ -32,6 +47,13 @@ export async function createGitHubPrAction(inputs: JsonObject, host: ActionHost)
     return actionFail('invalid-input', "create-github-pr requires 'repositoryUrl', 'source', and 'target'")
   const githubRepository = parseGitHubRepository(repositoryUrl)
   if (!githubRepository) return actionFail('config-error', 'create-github-pr requires a valid GitHub repository URL')
+  const strategy = resolvePublicationStrategy(inputs, CREATE_PR_SUPPORTED_STRATEGIES, 'github-api')
+  if (strategy.kind === 'unsupported') {
+    return actionFail(
+      'publication-strategy-unsupported',
+      unsupportedStrategyMessage('mohist/create-github-pr', strategy.requested, strategy.supported),
+    )
+  }
   const draft = inputs['draft'] !== false
   const workDir = host.workDir
 
@@ -77,14 +99,24 @@ export async function createGitHubPrAction(inputs: JsonObject, host: ActionHost)
   if (text.kind === 'failure') {
     return fail('config-error', text.message, { output: text.message })
   }
-
+  const body = omitGitHubClosingReferences(text.body)
+  const publicationPolicy = publicationPolicyFromInputs(inputs)
+  const publicationErrors = [...validateMessageTrailers(text.title), ...validateMessageTrailers(body)]
+  if (publicationErrors.length > 0) {
+    const details = formatPublicationValidationErrors(publicationErrors)
+    return fail('publication-validation-failed', `PR publication blocked:\n${details}`, { output: details })
+  }
+  const commitValidation = await validateSourceCommits(workDir, source, target, publicationPolicy, host.signal)
+  if (commitValidation) {
+    return fail(commitValidation.code, commitValidation.message, { output: commitValidation.message })
+  }
   const opened = await openOrReusePr(
     gh,
     workDir,
     source,
     target,
     text.title,
-    omitGitHubClosingReferences(text.body),
+    body,
     draft,
     host.signal,
     record,
@@ -242,6 +274,51 @@ export async function openOrReusePr(
   }
 
   return { kind: 'ok', prNumber, prUrl: url, operation: 'created', output: createOutput }
+}
+
+async function validateSourceCommits(
+  workDir: string,
+  source: string,
+  target: string,
+  policy: PublicationPolicy,
+  signal: AbortSignal,
+): Promise<{ code: GitHubPrErrorCode; message: string } | null> {
+  const mergeBase = await git(workDir, ['merge-base', target, source], signal, {
+    timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+  })
+  if (!mergeBase.success || !mergeBase.stdout.trim()) {
+    return {
+      code: 'publication-validation-failed',
+      message: `PR publication blocked: commits could not be read for validation (${mergeBase.combinedOutput || 'git merge-base failed'}). No PR was written.`,
+    }
+  }
+  const log = await git(
+    workDir,
+    ['log', `--format=${PUBLICATION_LOG_FORMAT}`, `${mergeBase.stdout.trim()}..${source}`],
+    signal,
+    { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS },
+  )
+  if (!log.success) {
+    return {
+      code: 'publication-validation-failed',
+      message: `PR publication blocked: commits could not be read for validation (${log.combinedOutput || 'git log failed'}). No PR was written.`,
+    }
+  }
+  let commits
+  try {
+    commits = parsePublicationCommits(log.stdout)
+  } catch {
+    return {
+      code: 'publication-validation-failed',
+      message: 'PR publication blocked: malformed commit history. No PR was written.',
+    }
+  }
+  const errors = validatePublicationCommits(commits, policy)
+  if (errors.length === 0) return null
+  return {
+    code: 'publication-validation-failed',
+    message: `PR publication blocked by commit validation:\n${formatPublicationValidationErrors(errors)}\nNo PR was written.`,
+  }
 }
 
 export function buildCreateGitHubPrOutput(output: CreateGitHubPrOutput): ActionResult {

@@ -443,6 +443,22 @@ public class ProjectEventFeedAssemblerTests
     }
 
     [Fact]
+    public async Task ListAsync_WorkflowFilter_IncludesPublicationProvenance()
+    {
+        var projectId = UniqueProject();
+        var workflowRunId = UniqueWorkflowRun();
+        await _seeds.SeedIssueAsync(projectId, 1);
+        await _seeds.SeedWorkflowRunAsync(projectId, workflowRunId, 1);
+        await _seeds.AppendWorkflowEventAsync(workflowRunId, projectId, 1,
+            EventCatalog.ReverseDns.WorkflowProvenanceRecorded,
+            data: new { action = "push", outcome = "completed" });
+
+        var eventView = Assert.Single(await CreateAssembler().ListAsync(projectId, filter: Filter("workflow-stage")));
+        Assert.Equal(EventCatalog.ReverseDns.WorkflowProvenanceRecorded, eventView.Type);
+        Assert.Equal("push", eventView.Data.GetProperty("action").GetString());
+    }
+
+    [Fact]
     public async Task ListAsync_DoesNotCreateAnyNewEvents()
     {
         var projectId = UniqueProject();

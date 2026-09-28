@@ -555,7 +555,7 @@ type command struct {
 	mergedLabels map[string]string
 }
 
-var diagnosisFields = []string{"workflowRunId", "status", "failure", "tasks", "dispatch", "events"}
+var diagnosisFields = []string{"workflowRunId", "status", "failure", "tasks", "dispatch", "events", "provenance"}
 var doctorFields = []string{"name", "status", "detail", "nextAction"}
 
 const maxDiagnosisEvents = 200
@@ -761,7 +761,7 @@ func leafValueOption(kind, arg string) bool {
 		"--runtime", "--variant", "--reasoning-effort", "--purpose", "--instructions", "--instructions-file", "--avatar-file",
 		"--skills", "--permissions", "--max-concurrent-runs", "--allowed-subagent", "--parent-session", "--prompt", "--prompt-file",
 		"--workspace", "--epic", "--idempotency-key", "--at", "--text", "--text-file", "--run", "--continuation", "--attach", "--turn-id",
-		"--expected-revision":
+		"--expected-revision", "--task", "--cursor":
 		return true
 	default:
 		return false
@@ -798,7 +798,7 @@ func groupHelp(name string) string {
 		return projectSpaceHelp(name)
 	}
 	if name == "workflow" {
-		return "USAGE\n    mo workflow [<action>] [flags]\n\nProject-scoped Workflow Profiles.\n\nActions: list, view, create, edit, delete, validate\nSee also: mo run --help"
+		return "USAGE\n    mo workflow [<action>] [flags]\n\nProject-scoped Workflow Profiles.\n\nActions: list, view, create, edit, delete, validate, enable, disable\nSee also: mo run --help"
 	}
 	if name == "run" {
 		return runGroupHelp()
@@ -1129,7 +1129,12 @@ func renderDiagnosis(out io.Writer, data json.RawMessage) error {
 	}
 	if dispatch, ok := value("dispatch").(map[string]any); ok && dispatch != nil {
 		fmt.Fprintln(out, "dispatch:")
-		printFields(out, dispatch, 1, []string{"status", "snapshot"})
+		printFields(out, dispatch, 1, []string{"status", "snapshot", "activeWork"})
+		if status, _ := dispatch["status"].(string); status == "missing" {
+			if activeWork, present := dispatch["activeWork"].(map[string]any); present && activeWork != nil {
+				fmt.Fprintln(out, "  observation: active work present")
+			}
+		}
 	}
 	if events, ok := value("events").([]any); ok && len(events) > 0 {
 		fmt.Fprintln(out, "events:")
@@ -1139,6 +1144,14 @@ func renderDiagnosis(out io.Writer, data json.RawMessage) error {
 		for _, event := range events {
 			if eventMap, ok := event.(map[string]any); ok {
 				printEvent(out, eventMap)
+			}
+		}
+	}
+	if facts, ok := value("provenance").([]any); ok && len(facts) > 0 {
+		fmt.Fprintln(out, "provenance:")
+		for _, fact := range facts {
+			if fields, ok := fact.(map[string]any); ok {
+				printFields(out, fields, 1, []string{"time", "action", "actorKind", "actorId", "source", "outcome", "stage", "attempt", "result", "target"})
 			}
 		}
 	}
@@ -1381,13 +1394,14 @@ func classifyFailure(e *operationError, method string, keyed bool, stage failure
 
 // failureView is the structured form of one Issue or Run failure: one JSON
 // object on stderr that states the stable code, the effect, whether retry is
-// safe, and the next action.
+// safe, the next action, and any Server-supplied diagnostic details.
 type failureView struct {
-	Code       string `json:"code"`
-	Message    string `json:"message"`
-	Effect     string `json:"effect"`
-	RetrySafe  bool   `json:"retrySafe"`
-	NextAction string `json:"nextAction,omitempty"`
+	Code       string          `json:"code"`
+	Message    string          `json:"message"`
+	Effect     string          `json:"effect"`
+	RetrySafe  bool            `json:"retrySafe"`
+	NextAction string          `json:"nextAction,omitempty"`
+	Details    json.RawMessage `json:"details,omitempty"`
 }
 
 // failureFacts projects any error onto the failure view. A usage failure
@@ -1411,7 +1425,20 @@ func failureFacts(err error) failureView {
 		Effect:     effect,
 		RetrySafe:  operation.retrySafe != nil && *operation.retrySafe,
 		NextAction: operation.nextAction,
+		Details:    operation.details,
 	}
+}
+
+func failureDetailValues(err error) map[string]json.RawMessage {
+	var operation *operationError
+	if !errors.As(err, &operation) || len(operation.details) == 0 || string(operation.details) == "null" {
+		return nil
+	}
+	var details map[string]json.RawMessage
+	if json.Unmarshal(operation.details, &details) != nil {
+		return nil
+	}
+	return details
 }
 
 // failureMessage strips the rendered error decoration so the structured form
@@ -1426,13 +1453,21 @@ func failureMessage(message, code string) string {
 
 // writeFailure reports one Issue or Run failure. A --json invocation receives
 // the structured failure object on stderr; the human form keeps the existing
-// error line and adds the hint when a recovery action exists.
+// error line and adds diagnostic field/reason details and the hint when a
+// recovery action exists.
 func writeFailure(out io.Writer, structured bool, err error) {
 	if structured {
 		_ = json.NewEncoder(out).Encode(failureFacts(err))
 		return
 	}
 	writeError(out, err)
+	details := failureDetailValues(err)
+	if field := stringValueRaw(details["field"]); field != "" {
+		fmt.Fprintln(out, "field: "+field)
+	}
+	if reason := stringValueRaw(details["reason"]); reason != "" {
+		fmt.Fprintln(out, "reason: "+reason)
+	}
 	var operation *operationError
 	if errors.As(err, &operation) && operation.nextAction != "" {
 		fmt.Fprintln(out, "hint: "+operation.nextAction)

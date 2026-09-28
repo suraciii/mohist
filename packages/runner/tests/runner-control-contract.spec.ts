@@ -27,6 +27,7 @@ import type {
   SessionCommandRequest,
   SessionStopParams,
   WorkspaceCommitDiffParams,
+  RepositoryPreflightParams,
   WorkspaceFileContentParams,
   WorkspaceQueryParams,
 } from '../src/contracts/runner-control.js'
@@ -41,6 +42,7 @@ const requestMethods = [
   'session.followup',
   'session.stop',
   'session.command',
+  'repository.preflight',
 ] as const
 
 const standardErrors = new Map([
@@ -88,6 +90,7 @@ describe('runner control JSON contract', () => {
     const followup = request<FollowupParams>(entries.get('session.followup')!).params
     const stop = request<SessionStopParams>(entries.get('session.stop')!).params
     const command = request<SessionCommandRequest>(entries.get('session.command')!).params
+    const preflight = request<RepositoryPreflightParams>(entries.get('repository.preflight')!).params
 
     expect(query).toMatchObject({
       projectId: 'project_1',
@@ -100,6 +103,7 @@ describe('runner control JSON contract', () => {
     expect(followup).toMatchObject({ operationId: 'operation_followup_1', turnId: 'turn_followup_1' })
     expect(stop).toMatchObject({ sessionId: 'session_1', turnId: 'turn_stop_1', operationId: 'operation_stop_1' })
     expect(command).toMatchObject({ command: 'reset', operationId: 'operation_command_1' })
+    expect(preflight).toMatchObject({ gitUrl: 'https://example.test/repo.git', baseBranch: 'main' })
   })
 })
 

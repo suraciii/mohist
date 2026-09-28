@@ -2,6 +2,17 @@ import type { ActionResult, JsonObject } from '../core/types.js'
 import type { ActionHost } from './host.js'
 import { booleanInput, stringInput } from '../core/json.js'
 import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from './git.js'
+import {
+  PUBLICATION_LOG_FORMAT,
+  formatPublicationValidationErrors,
+  parsePublicationCommits,
+  publicationPolicyFromInputs,
+  resolvePublicationStrategy,
+  unsupportedStrategyMessage,
+  validatePublicationCommits,
+  type PublicationPolicy,
+  type PublicationStrategy,
+} from './publication.js'
 import { timeoutStepMetadata, type GitHubPrStep } from './github-pr-types.js'
 import { fail, succeed } from './action-result.js'
 import { currentRunnerResources, type RunnerGitRunner } from '../system/filesystem.js'
@@ -31,6 +42,14 @@ function networkOptions(host: ActionHost): GitOptions | undefined {
   return { sink: { log: host.log, source: ACTION_SOURCE }, timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }
 
+/**
+ * `partial-git` publishes from the existing workspace clone. `full-clone`
+ * first requests all objects from the configured remote, which makes commit
+ * validation safe for partial/promisor clones. There is deliberately no
+ * implicit fallback between strategies.
+ */
+const PUSH_SUPPORTED_STRATEGIES: readonly PublicationStrategy[] = ['partial-git', 'full-clone']
+
 export async function pushAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
   const source = stringInput(inputs, 'source')
   const target = stringInput(inputs, 'target')
@@ -41,11 +60,59 @@ export async function pushAction(inputs: JsonObject, host: ActionHost): Promise<
   const force = booleanInput(inputs, 'force') === true
   const forceWithLease = !force && booleanInput(inputs, 'forceWithLease') === true
   const refspec = `${source}:${target}`
+  const strategy = resolvePublicationStrategy(inputs, PUSH_SUPPORTED_STRATEGIES, 'partial-git')
+  if (strategy.kind === 'unsupported') {
+    return pushOutput(
+      source,
+      target,
+      remote,
+      host.workDir,
+      null,
+      false,
+      force,
+      forceWithLease,
+      unsupportedStrategyMessage('mohist/push', strategy.requested, strategy.supported),
+      'publication-strategy-unsupported',
+      1,
+      [],
+      false,
+      'partial-git',
+    )
+  }
   const workDir = host.workDir
-  const opts = sinkOptions(host)
   const networkOpts = networkOptions(host)
   const steps: GitHubPrStep[] = []
-
+  if (strategy.strategy === 'full-clone') {
+    const fetchArgs = ['fetch', '--no-filter', remote]
+    const fetch = await git(workDir, fetchArgs, host.signal, networkOpts)
+    steps.push({
+      name: 'git-fetch-full-clone',
+      command: fetchArgs.join(' '),
+      exitCode: fetch.exitCode,
+      output: fetch.combinedOutput,
+      ...timeoutStepMetadata(fetch),
+    })
+    if (!fetch.success) {
+      return pushOutput(
+        source,
+        target,
+        remote,
+        host.workDir,
+        null,
+        false,
+        force,
+        forceWithLease,
+        `Full-clone publication could not obtain complete objects: ${fetch.combinedOutput || 'git fetch failed'}. No push was performed.`,
+        'publication-full-clone-failed',
+        fetch.exitCode,
+        steps,
+        false,
+        strategy.strategy,
+      )
+    }
+  }
+  const opts = sinkOptions(host)
+  const strategyName = strategy.strategy
   const sourceResolve = await git(workDir, ['rev-parse', source], host.signal, opts)
   if (!sourceResolve.success) {
     return pushOutput(
@@ -60,6 +127,9 @@ export async function pushAction(inputs: JsonObject, host: ActionHost): Promise<
       sourceResolve.combinedOutput,
       sourceResolve.status === 'timeout' ? 'timeout' : 'push-failed',
       sourceResolve.exitCode,
+      steps,
+      false,
+      strategyName,
     )
   }
   const landedCommit = sourceResolve.stdout.trim()
@@ -85,6 +155,35 @@ export async function pushAction(inputs: JsonObject, host: ActionHost): Promise<
       'timeout',
       remoteBefore.result.exitCode,
       steps,
+    )
+  }
+
+  const validation = await validateCommitsBeforePush(
+    workDir,
+    source,
+    remote,
+    typeof inputs['baseBranch'] === 'string' ? inputs['baseBranch'] : target,
+    publicationPolicyFromInputs(inputs),
+    host.signal,
+    opts,
+    networkOpts,
+  )
+  if (validation) {
+    return pushOutput(
+      source,
+      target,
+      remote,
+      workDir,
+      landedCommit,
+      false,
+      force,
+      forceWithLease,
+      validation.message,
+      validation.code,
+      validation.exitCode,
+      steps,
+      false,
+      strategyName,
     )
   }
 
@@ -158,10 +257,69 @@ export async function pushAction(inputs: JsonObject, host: ActionHost): Promise<
     push.exitCode,
     steps,
     updated,
+    strategyName,
   )
 }
 
-type PushFailureCode = 'base-moved' | 'push-failed' | 'timeout' | null
+type PushFailureCode =
+  | 'base-moved'
+  | 'push-failed'
+  | 'timeout'
+  | 'publication-strategy-unsupported'
+  | 'publication-full-clone-failed'
+  | 'publication-validation-failed'
+  | 'publication-validation-unavailable'
+  | null
+
+async function validateCommitsBeforePush(
+  workDir: string,
+  source: string,
+  remote: string,
+  baseBranch: string,
+  policy: PublicationPolicy,
+  signal: AbortSignal,
+  localOpts?: GitOptions,
+  networkOpts?: GitOptions,
+): Promise<{ code: Exclude<PushFailureCode, null>; message: string; exitCode: number | null } | null> {
+  const mergeBase = await git(workDir, ['merge-base', `${remote}/${baseBranch}`, source], signal, localOpts)
+  if (!mergeBase.success || !mergeBase.stdout.trim()) {
+    return {
+      code: 'publication-validation-unavailable',
+      message:
+        `Push blocked: commits could not be read for publication validation (${mergeBase.combinedOutput || 'git merge-base failed'}). ` +
+        'Complete the clone or choose an explicit publication strategy that supports this repository. No push was performed.',
+      exitCode: mergeBase.exitCode,
+    }
+  }
+  const range = [`${mergeBase.stdout.trim()}..${source}`]
+  const log = await git(workDir, ['log', `--format=${PUBLICATION_LOG_FORMAT}`, ...range], signal, networkOpts)
+  if (!log.success) {
+    return {
+      code: 'publication-validation-unavailable',
+      message:
+        `Push blocked: commits could not be read for publication validation (${log.combinedOutput || 'git log failed'}). ` +
+        'On a partial clone this means required objects are missing locally; complete the clone (for example `git fetch origin`) and retry. No push was performed.',
+      exitCode: log.exitCode,
+    }
+  }
+  let commits
+  try {
+    commits = parsePublicationCommits(log.stdout)
+  } catch (error) {
+    return {
+      code: 'publication-validation-unavailable',
+      message: `Push blocked: malformed commit history (${String(error)}). No push was performed.`,
+      exitCode: 1,
+    }
+  }
+  const errors = validatePublicationCommits(commits, policy)
+  if (errors.length === 0) return null
+  return {
+    code: 'publication-validation-failed',
+    message: `Push blocked by publication validation:\n${formatPublicationValidationErrors(errors)}\nFix the commits and retry. No push was performed.`,
+    exitCode: 1,
+  }
+}
 
 function pushOutput(
   source: string,
@@ -177,6 +335,7 @@ function pushOutput(
   exitCode: number | null,
   steps: GitHubPrStep[] = [],
   updated = false,
+  strategy: PublicationStrategy = 'partial-git',
 ): ActionResult {
   if (!pushed) {
     const message =
@@ -184,12 +343,18 @@ function pushOutput(
         ? 'Push failed because the target branch moved (non-fast-forward). Rebase and try again.'
         : failureCode === 'timeout'
           ? 'Push timed out.'
-          : `Push failed: ${gitOutput || 'unknown error'}`
+          : failureCode === 'publication-strategy-unsupported' ||
+              failureCode === 'publication-full-clone-failed' ||
+              failureCode === 'publication-validation-failed' ||
+              failureCode === 'publication-validation-unavailable'
+            ? gitOutput
+            : `Push failed: ${gitOutput || 'unknown error'}`
     return fail(failureCode ?? 'push-failed', message, { exitCode: exitCode ?? 1 })
   }
   const output: JsonObject = {
     kind: 'push',
     status: 'completed',
+    strategy,
     source,
     target,
     remote,

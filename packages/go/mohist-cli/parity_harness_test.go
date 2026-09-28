@@ -16,7 +16,7 @@ import (
 // The fixtures are embedded so parity tests cannot accidentally depend on the
 // checkout, current directory, or a generated service artifact.
 //
-//go:embed testdata/parity/run-why/*
+//go:embed testdata/parity
 var parityFixtures embed.FS
 
 type parityContract struct {
@@ -51,9 +51,9 @@ func (t *parityTransport) RoundTrip(request *http.Request) (*http.Response, erro
 	}, nil
 }
 
-func readParityFixture(t *testing.T, name string) []byte {
+func readParityFixture(t *testing.T, dir, name string) []byte {
 	t.Helper()
-	data, err := parityFixtures.ReadFile("testdata/parity/run-why/" + name)
+	data, err := parityFixtures.ReadFile("testdata/parity/" + dir + "/" + name)
 	if err != nil {
 		t.Fatalf("read parity fixture %q: %v", name, err)
 	}
@@ -89,7 +89,7 @@ func parityDeps(transport *parityTransport) (Dependencies, *strings.Builder, *st
 
 func TestRunWhyParityContract(t *testing.T) {
 	var contract parityContract
-	if err := json.Unmarshal(readParityFixture(t, "contract.json"), &contract); err != nil {
+	if err := json.Unmarshal(readParityFixture(t, "run-why", "contract.json"), &contract); err != nil {
 		t.Fatalf("decode contract: %v", err)
 	}
 	if contract.Command != "run why" {
@@ -99,13 +99,13 @@ func TestRunWhyParityContract(t *testing.T) {
 		t.Fatalf("field catalog = %v, want %v", contract.Catalog, diagnosisFields)
 	}
 
-	transport := &parityTransport{responseBody: string(readParityFixture(t, "response.json"))}
+	transport := &parityTransport{responseBody: string(readParityFixture(t, "run-why", "response.json"))}
 	deps, stdout, stderr := parityDeps(transport)
 
 	if code := Run(context.Background(), contract.HelpArgs, deps); code != ExitOK {
 		t.Fatalf("help exit code = %d", code)
 	}
-	if stdout.String() != string(readParityFixture(t, "help.stdout")) || stderr.Len() != 0 {
+	if stdout.String() != string(readParityFixture(t, "run-why", "help.stdout")) || stderr.Len() != 0 {
 		t.Fatalf("help output stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 	if len(transport.requests) != 0 {
@@ -116,7 +116,7 @@ func TestRunWhyParityContract(t *testing.T) {
 	if code := Run(context.Background(), contract.HumanArgs, deps); code != ExitOK {
 		t.Fatalf("human exit code = %d", code)
 	}
-	if stdout.String() != string(readParityFixture(t, "human.stdout")) || stderr.Len() != 0 {
+	if stdout.String() != string(readParityFixture(t, "run-why", "human.stdout")) || stderr.Len() != 0 {
 		t.Fatalf("human output stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 	assertParityRequest(t, transport, contract.Request)
@@ -125,7 +125,7 @@ func TestRunWhyParityContract(t *testing.T) {
 	if code := Run(context.Background(), contract.SelectedArgs, deps); code != ExitOK {
 		t.Fatalf("selected JSON exit code = %d", code)
 	}
-	if stdout.String() != string(readParityFixture(t, "selected.stdout")) || stderr.Len() != 0 {
+	if stdout.String() != string(readParityFixture(t, "run-why", "selected.stdout")) || stderr.Len() != 0 {
 		t.Fatalf("selected output stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 	if len(transport.requests) != 2 {
@@ -136,11 +136,36 @@ func TestRunWhyParityContract(t *testing.T) {
 	if code := Run(context.Background(), contract.UsageArgs, deps); code != ExitUsage {
 		t.Fatalf("usage exit code = %d", code)
 	}
-	if stdout.Len() != 0 || stderr.String() != string(readParityFixture(t, "usage.stderr")) {
+	if stdout.Len() != 0 || stderr.String() != string(readParityFixture(t, "run-why", "usage.stderr")) {
 		t.Fatalf("usage output stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 	if len(transport.requests) != 2 {
 		t.Fatalf("usage issued a request; count = %d", len(transport.requests))
+	}
+}
+
+// TestRunWhyDispatchActiveWorkParity pins the human rendering of the
+// persisted active-work observation for the three dispatch states the
+// diagnosis contract distinguishes: snapshot missing with matching active
+// work, snapshot missing with divergent active work, and neither snapshot
+// nor active work.
+func TestRunWhyDispatchActiveWorkParity(t *testing.T) {
+	for _, scenario := range []string{"active-match", "active-mismatch", "active-none"} {
+		t.Run(scenario, func(t *testing.T) {
+			dir := "run-why-dispatch-" + scenario
+			transport := &parityTransport{responseBody: string(readParityFixture(t, dir, "response.json"))}
+			deps, stdout, stderr := parityDeps(transport)
+
+			if code := Run(context.Background(), []string{"run", "why", "wr-1"}, deps); code != ExitOK {
+				t.Fatalf("human exit code = %d stderr=%q", code, stderr.String())
+			}
+			if stdout.String() != string(readParityFixture(t, dir, "human.stdout")) || stderr.Len() != 0 {
+				t.Fatalf("human output stdout=%q stderr=%q", stdout.String(), stderr.String())
+			}
+			if len(transport.requests) != 1 || transport.requests[0].URL.EscapedPath() != "/api/runs/wr-1/diagnosis" {
+				t.Fatalf("requests = %v", transport.requests)
+			}
+		})
 	}
 }
 

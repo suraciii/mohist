@@ -2,6 +2,7 @@ package mohistcli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -132,6 +133,47 @@ func TestRunMapsTransportAndCancellation(t *testing.T) {
 	if code := Run(ctx, []string{"doctor"}, deps); code != ExitCanceled {
 		t.Fatalf("cancel code=%d", code)
 	}
+}
+
+func TestIssueStartPreflightFailurePreservesDetailsInJSONAndHumanOutput(t *testing.T) {
+	const envelope = `{"success":false,"error":"Issue cannot start","code":"issue_start_rejected","details":{"field":"repositoryName","reason":"repository is required","repositoryName":"mohist","baseBranch":"main","executionCreated":false}}`
+
+	t.Run("json", func(t *testing.T) {
+		deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return response(http.StatusConflict, envelope), nil
+		}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+		if code := Run(context.Background(), []string{"issue", "start", "42", "--project", "proj-1", "--idempotency-key", "start-1", "--json", "status"}, deps); code != ExitOperation {
+			t.Fatalf("code=%d stderr=%q", code, errOut.String())
+		}
+		var failure struct {
+			Details map[string]any `json:"details"`
+		}
+		if err := json.Unmarshal([]byte(errOut.String()), &failure); err != nil {
+			t.Fatalf("stderr=%q: %v", errOut.String(), err)
+		}
+		for field, want := range map[string]any{
+			"field": "repositoryName", "reason": "repository is required",
+			"repositoryName": "mohist", "baseBranch": "main", "executionCreated": false,
+		} {
+			if got := failure.Details[field]; got != want {
+				t.Errorf("details[%q]=%v, want %v", field, got, want)
+			}
+		}
+	})
+
+	t.Run("human", func(t *testing.T) {
+		deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return response(http.StatusConflict, envelope), nil
+		}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+		if code := Run(context.Background(), []string{"issue", "start", "42", "--project", "proj-1", "--idempotency-key", "start-1"}, deps); code != ExitOperation {
+			t.Fatalf("code=%d stderr=%q", code, errOut.String())
+		}
+		for _, want := range []string{"field: repositoryName", "reason: repository is required"} {
+			if !strings.Contains(errOut.String(), want) {
+				t.Errorf("stderr=%q missing %q", errOut.String(), want)
+			}
+		}
+	})
 }
 
 func TestRunMaintenanceDefaultsCurrentDirectory(t *testing.T) {

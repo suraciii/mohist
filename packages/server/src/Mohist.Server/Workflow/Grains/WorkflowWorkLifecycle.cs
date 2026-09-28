@@ -18,7 +18,11 @@ internal sealed class WorkflowWorkLifecycle
     /// artifact before the producing task closes.
     /// </summary>
     public async Task<IReadOnlyList<WorkflowEvent>> ApplyTaskReportAsync(
-        WorkflowRun run, TaskReport report, string stageId, string actionAttemptId)
+        WorkflowRun run,
+        TaskReport report,
+        string stageId,
+        string actionAttemptId,
+        string? workerId = null)
     {
         var now = _owner.Now();
         var reportStage = run.Stages.SingleOrDefault(stage => stage.Id == stageId);
@@ -90,6 +94,13 @@ internal sealed class WorkflowWorkLifecycle
                 events.AddRange(run.Rerun(now));
             else if (feedbackId is not null)
                 run.PrepareNextDispatchForOpenFeedback(now);
+            events.AddRange(WorkflowProvenanceMapping.FromTaskReport(
+                stageId,
+                reportStage?.Attempt ?? 0,
+                actionAttemptId,
+                currentTask?.Uses,
+                workerId,
+                report).Select(static fact => (WorkflowEvent)fact));
         }
         else
         {
@@ -120,10 +131,31 @@ internal sealed class WorkflowWorkLifecycle
             && string.Equals(promise.GetString(), "FAIL", StringComparison.Ordinal);
     }
 
-    public Task<IReadOnlyList<WorkflowEvent>> ApplyCheckReportAsync(WorkflowRun run, CheckReport report)
+    public Task<IReadOnlyList<WorkflowEvent>> ApplyCheckReportAsync(
+        WorkflowRun run,
+        CheckReport report,
+        string? workerId = null)
     {
         var now = _owner.Now();
-        return Task.FromResult<IReadOnlyList<WorkflowEvent>>(run.ProcessCheckResults(report.Results, now));
+        var events = run.ProcessCheckResults(report.Results, now).ToList();
+        var stage = run.Stages.SingleOrDefault(candidate =>
+            string.Equals(candidate.Id, report.Stage, StringComparison.Ordinal));
+        if (stage is not null)
+        {
+            foreach (var result in report.Results)
+            {
+                var check = stage.Checks.FirstOrDefault(candidate =>
+                    string.Equals(candidate.Name, result.Name, StringComparison.Ordinal));
+                if (check is null) continue;
+                events.AddRange(WorkflowProvenanceMapping.FromCheckResult(
+                    report.Stage,
+                    stage.Attempt,
+                    check.Uses,
+                    workerId,
+                    result).Select(static fact => (WorkflowEvent)fact));
+            }
+        }
+        return Task.FromResult<IReadOnlyList<WorkflowEvent>>(events);
     }
 
     public async Task<IReadOnlyList<WorkflowEvent>> AbandonRunningWorkAsync(WorkflowRun run, string reason)

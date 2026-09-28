@@ -27,11 +27,19 @@ describe('local Git Action manifests', () => {
       repositoryUrl: { required: true },
       prNumber: { required: true },
       subject: { types: ['string'] },
+      body: { types: ['string'] },
     })
     expect(inputs('mohist/enable-github-pr-auto-merge')).not.toHaveProperty('subjectFrom')
     const autoMerge = registry.resolve('mohist/enable-github-pr-auto-merge')
     if (autoMerge.kind !== 'definition') throw new Error('Missing mohist/enable-github-pr-auto-merge')
     expect(autoMerge.definition.manifest.capabilities).toBeUndefined()
+    expect(
+      validateActionInput(autoMerge.definition.manifest, {
+        repositoryUrl: 'https://github.com/o/r.git',
+        prNumber: 42,
+        body: 'Signed-off-by: Agent <agent@example.com>',
+      }),
+    ).toMatchObject({ kind: 'ok' })
     expect(registry.resolve('mohist/archive-change').kind).toBe('unknown')
     expect(registry.resolve('mohist/merge-github-pr').kind).toBe('unknown')
   })

@@ -43,7 +43,7 @@ func projectSpaceHelp(group string) string {
 	case "repo":
 		return "USAGE\n    mo repo <list|create|edit|delete> [flags]\n\nManage Repositories inside the active Project.\n\nActions: list, create, edit, delete"
 	default:
-		return "USAGE\n    mo workspace <list|view|create|close|repo> [flags]\n\nManage named workspaces in the active Project.\n\nActions: list, view, create, close, repo"
+		return "USAGE\n    mo workspace <list|view|create|close|restore|repo> [flags]\n\nManage named workspaces in the active Project.\n\nActions: list, view, create, close, restore, repo"
 	}
 }
 
@@ -101,6 +101,8 @@ func parseWorkspace(args []string) (command, error) {
 		return parseWorkspaceCreate(args[1:])
 	case "close":
 		return parseNamedSpace("workspace-close", args[1:], nil, "workspace", true)
+	case "restore":
+		return parseNamedSpace("workspace-restore", args[1:], nil, "workspace", true)
 	case "repo":
 		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
 			return command{help: true, helpText: "USAGE\n    mo workspace repo <add|remove> <name> <repo> [flags]"}, nil
@@ -676,6 +678,8 @@ func runProjectSpace(ctx context.Context, deps Dependencies, c *client, cmd comm
 			body["repos"] = repos
 		}
 		return resourceRequest(ctx, deps, c, http.MethodPost, base+"/workspaces", body, cmd, false)
+	case "workspace-restore":
+		return resourceRequest(ctx, deps, c, http.MethodPost, base+"/workspaces/"+url.PathEscape(name)+"/restore", nil, cmd, false)
 	case "workspace-close":
 		return resourceRequest(ctx, deps, c, http.MethodPost, base+"/workspaces/"+url.PathEscape(name)+"/close", nil, cmd, false)
 	case "workspace-repo-add":

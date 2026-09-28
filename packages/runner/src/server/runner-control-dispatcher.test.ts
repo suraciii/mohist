@@ -33,6 +33,7 @@ function handlerSet(): RunnerControlHandlers {
     sessionFollowup: vi.fn(async () => 'followup'),
     sessionStop: vi.fn(async () => 'stopped'),
     sessionCommand: vi.fn(async () => 'command'),
+    repositoryPreflight: vi.fn(async () => ({ exitCode: 0 })),
   }
 }
 
@@ -115,11 +116,12 @@ describe('RunnerControlDispatcher', () => {
         },
         'sessionCommand',
       ],
+      ['repository.preflight', { gitUrl: 'https://example.test/repo.git', baseBranch: 'main' }, 'repositoryPreflight'],
     ] as const
     requests.forEach(([method, params], index) => h.receive({ jsonrpc: '2.0', id: `id-${index}`, method, params }))
     await settle()
     for (const [, , name] of requests) expect(h.handlers[name]).toHaveBeenCalledOnce()
-    expect(h.sent).toHaveLength(9)
+    expect(h.sent).toHaveLength(10)
   })
 
   it('preserves nullable results and typed domain results', async () => {
@@ -219,6 +221,23 @@ describe('RunnerControlDispatcher', () => {
       { jsonrpc: '2.0', id: 'params', error: { code: -32602, message: 'Invalid params' } },
     ])
     expect(h.errors()).toBe(4)
+  })
+
+  it('rejects unsafe repository transports as invalid params', async () => {
+    const h = harness()
+    h.receive({
+      jsonrpc: '2.0',
+      id: 'unsafe',
+      method: 'repository.preflight',
+      params: { gitUrl: 'user::host/repo', baseBranch: 'main' },
+    })
+    await settle()
+    expect(h.sent).toContainEqual({
+      jsonrpc: '2.0',
+      id: 'unsafe',
+      error: { code: -32602, message: 'Invalid params' },
+    })
+    expect(h.handlers.repositoryPreflight).not.toHaveBeenCalled()
   })
 
   it('rejects malformed nested values before effects and ignores unknown notifications', () => {

@@ -193,6 +193,21 @@ queued, executing, waiting for a decision, or stopped for recovery.
 
 The Web UI shows health as a colored dot on each Issue card.
 
+## Workflow Provenance
+
+WorkflowRun records machine-readable facts for manual Approval Point decisions,
+retry/rerun/recovery, and settled publication actions. The facts carry the Run
+and Issue lineage, Stage attempt when known (or an explicit replacement-run
+link for recovery), timestamp, actor, source, action and outcome. Recovery
+facts are appended after the start operation: they report `succeeded` only
+when a replacement run was returned, and report `failed` or `unknown` when
+the operation did not produce a confirmed replacement.
+Push, Pull Request creation and merge are separate facts; a verified GitHub
+check rollup records passed and skipped checks separately. A skipped check is
+never reported as passed. `mo run why <run-ref> --json` and the diagnosis API
+expose these facts alongside bounded events; logs and artifacts retain the
+detailed evidence. Agent-authored summaries do not create provenance facts.
+
 ## When Is Action Required?
 
 Action is required when:

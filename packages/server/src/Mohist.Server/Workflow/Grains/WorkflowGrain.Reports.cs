@@ -140,7 +140,7 @@ public partial class WorkflowGrain
         var artifactUploadIds = effectiveReport.ArtifactUploadIds?.ToArray();
         effectiveReport = await ValidateTaskReportArtifactsAsync(activeWork, effectiveReport);
         var events = await _workLifecycle.ApplyTaskReportAsync(
-            _run, effectiveReport, activeWork.Item.Stage, activeWork.ActionAttemptId);
+            _run, effectiveReport, activeWork.Item.Stage, activeWork.ActionAttemptId, workerId);
         if (artifactUploadIds is { Length: > 0 } && effectiveReport.Artifacts is { Count: > 0 })
         {
             await CommitWithArtifactsAsync(events, new WorkflowArtifactBindingIntent(
@@ -231,7 +231,7 @@ public partial class WorkflowGrain
         currentStage.TerminalChecksWorkId = workId;
         currentStage.TerminalChecksWorkerId = workerId;
         currentStage.TerminalChecksResultFingerprint = report.TerminalResultFingerprint;
-        var events = await _workLifecycle.ApplyCheckReportAsync(_run, report);
+        var events = await _workLifecycle.ApplyCheckReportAsync(_run, report, workerId);
         _workLifecycle.RequeueRunningChecks(_run);
 
         await CommitAsync(events);

@@ -6,14 +6,27 @@ import { NETWORK_COMMAND_TIMEOUT_MS } from './git.js'
 import { combinedGhOutput } from './github-pr-parse.js'
 import { parsePrStatusCheckRollupResult, classifyPrChecks } from './github-pr-checks.js'
 import { delayWithSignal, withGitHubRepository } from './github-pr-checks-wait.js'
-import { getGitHubPrGh } from './github-pr-runtime.js'
+import { getGitHubPrGh, getGitHubPrGit } from './github-pr-runtime.js'
 import { parseGitHubRepository } from './github-pr-repository.js'
 import { currentRunnerResources, type RunnerCommandRunner } from '../system/filesystem.js'
 import { fail, succeed } from './action-result.js'
 import { timeoutStepMetadata, type GitHubPrStep } from './github-pr-types.js'
 import { looksLikeRetrySafe } from './github-pr-classify.js'
+import {
+  formatPublicationValidationErrors,
+  parsePublicationCommits,
+  publicationPolicyFromInputs,
+  PUBLICATION_LOG_FORMAT,
+  resolvePublicationStrategy,
+  unsupportedStrategyMessage,
+  validateMessageTrailers,
+  validatePublicationCommits,
+  type PublicationPolicy,
+  type PublicationStrategy,
+} from './publication.js'
 
 const ACTION_SOURCE = 'action:enable-github-pr-auto-merge'
+const AUTO_MERGE_SUPPORTED_STRATEGIES: readonly PublicationStrategy[] = ['github-api']
 const DEFAULT_WAIT_MS = 30 * 60_000
 const DEFAULT_POLL_MS = 15_000
 const DEFAULT_RETRY_LIMIT = 3
@@ -51,6 +64,13 @@ export async function enableGitHubPrAutoMergeAction(inputs: JsonObject, host: Ac
       'config-error',
       method !== 'squash' ? `Unsupported merge method '${method}'` : 'Invalid GitHub repository URL',
     )
+  const strategy = resolvePublicationStrategy(inputs, AUTO_MERGE_SUPPORTED_STRATEGIES, 'github-api')
+  if (strategy.kind === 'unsupported') {
+    return fail(
+      'publication-strategy-unsupported',
+      unsupportedStrategyMessage('mohist/enable-github-pr-auto-merge', strategy.requested, strategy.supported),
+    )
+  }
 
   const resources = currentRunnerResources()
   const now = resources?.githubPrChecksTiming?.now ?? Date.now
@@ -65,6 +85,7 @@ export async function enableGitHubPrAutoMergeAction(inputs: JsonObject, host: Ac
   }
   const gh = getGitHubPrGh()
   const steps: GitHubPrStep[] = []
+  let enabled = false
   const record = (name: string, command: string, result: CommandResult) =>
     steps.push({
       name,
@@ -99,12 +120,29 @@ export async function enableGitHubPrAutoMergeAction(inputs: JsonObject, host: Ac
   const terminal = terminalFailure(initial.view, prNumber)
   if (terminal) return terminal
   if (initial.view.state === 'MERGED') return success(false, initial.view)
+  const policy = publicationPolicyFromInputs(inputs)
 
-  let enabled = false
   if (!initial.view.autoMergeRequest) {
     const subject = stringInput(inputs, 'subject') ?? initial.view.title
+    const body = stringInput(inputs, 'body') ?? ''
+    const publicationErrors = validateMessageTrailers(`${subject}\n\n${body}`, policy.requiredTrailers)
+    if (publicationErrors.length > 0) {
+      return fail(
+        'publication-validation-failed',
+        `Auto-merge publication blocked:\n${formatPublicationValidationErrors(publicationErrors)}`,
+      )
+    }
+    const source = stringInput(inputs, 'source')
+    const target = stringInput(inputs, 'target')
+    const commitValidation = await validateSourceCommits(host.workDir, source, target, policy, host.signal)
+    if (commitValidation) return fail('publication-validation-failed', commitValidation)
+  }
+
+  if (!initial.view.autoMergeRequest) {
+    const subject = stringInput(inputs, 'subject') ?? initial.view.title
+    const body = stringInput(inputs, 'body') ?? ''
     const args = withGitHubRepository(
-      ['pr', 'merge', String(prNumber), '--auto', '--squash', '--subject', subject, '--body', ''],
+      ['pr', 'merge', String(prNumber), '--auto', '--squash', '--subject', subject, '--body', body],
       repository,
     )
     const result = await runBounded(gh, args, host, timing)
@@ -282,6 +320,44 @@ function isAmbiguousRegistrationFailure(result: CommandResult, output: string): 
 function isUnavailable(output: string): boolean {
   const lower = output.toLowerCase()
   return lower.includes('auto-merge') && (lower.includes('not enabled') || lower.includes('not allowed'))
+}
+
+async function validateSourceCommits(
+  workDir: string,
+  source: string | undefined,
+  target: string | undefined,
+  policy: PublicationPolicy,
+  signal: AbortSignal,
+): Promise<string | null> {
+  if (!source || !target) {
+    return 'Auto-merge publication blocked: source and target are required to validate commit messages.'
+  }
+  const git = getGitHubPrGit()
+  const mergeBase = await git(workDir, ['merge-base', target, source], signal, {
+    timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+  })
+  if (!mergeBase.success || !mergeBase.stdout.trim()) {
+    return `Auto-merge publication blocked: commits could not be read for validation (${mergeBase.combinedOutput || 'git merge-base failed'}).`
+  }
+  const log = await git(
+    workDir,
+    ['log', `--format=${PUBLICATION_LOG_FORMAT}`, `${mergeBase.stdout.trim()}..${source}`],
+    signal,
+    { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS },
+  )
+  if (!log.success) {
+    return `Auto-merge publication blocked: commits could not be read for validation (${log.combinedOutput || 'git log failed'}).`
+  }
+  let commits
+  try {
+    commits = parsePublicationCommits(log.stdout)
+  } catch {
+    return 'Auto-merge publication blocked: malformed commit history.'
+  }
+  const errors = validatePublicationCommits(commits, policy)
+  return errors.length === 0
+    ? null
+    : `Auto-merge publication blocked by commit validation:\n${formatPublicationValidationErrors(errors)}`
 }
 
 function remainingMs(timing: Timing): number {
