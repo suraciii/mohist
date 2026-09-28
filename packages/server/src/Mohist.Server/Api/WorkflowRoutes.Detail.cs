@@ -51,4 +51,30 @@ public static partial class WorkflowRoutes
 
         return app;
     }
+
+    /// <summary>
+    /// <c>GET /api/workflow-runs/{workflowRunId}/binding</c> — the on-demand
+    /// actual-binding read (issue #1099), the resource behind
+    /// <c>mo run view &lt;runId&gt; --json binding</c>. Returns the
+    /// start-time facts the run itself retains and, when a snapshot was
+    /// retained, the complete bound semantic definition. A historical run
+    /// without a snapshot answers with its known identity/status and an
+    /// explicit unavailability reason instead of falling back to the latest
+    /// Profile. The read sits on the same authenticated surface as the
+    /// detail route; it grants no new access path.
+    /// </summary>
+    public static WebApplication MapWorkflowRunBindingRoute(this WebApplication app)
+    {
+        app.MapGet("/api/workflow-runs/{workflowRunId}/binding", async (
+            string workflowRunId,
+            WorkflowQuerier workflowReader) =>
+        {
+            var binding = await workflowReader.GetBindingAsync(workflowRunId);
+            return binding is null
+                ? ApiResults.NotFound($"Workflow run '{workflowRunId}' not found")
+                : ApiResults.Ok(binding);
+        });
+
+        return app;
+    }
 }

@@ -1338,7 +1338,7 @@ func TestNonblankValuesAreSentUntrimmed(t *testing.T) {
 		},
 		{
 			name:     "workflow-edit",
-			args:     []string{"workflow", "edit", "p-1"},
+			args:     []string{"workflow", "edit", "p-1", "--expected-revision", "rev-1"},
 			wantPath: "/api/projects/proj/workflow-profiles/p-1",
 			flag:     "--file",
 			key:      "definitionSource",

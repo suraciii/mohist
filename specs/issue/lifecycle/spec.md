@@ -141,6 +141,15 @@ with `mo issue done` or `mo issue close`. When its target Repository is
 connected to GitHub, the linked GitHub Issue can drive the same lifecycle. See
 [GitHub](../../integrations/github/issue-mirroring/spec.md#linked-pairs).
 
+For Workflow starts, Mohist checks that the bound Repository remote is reachable
+and its base branch exists before creating the Issue Workspace, WorkflowRun or
+AgentJob. Unsafe executable Git transports (including `ext::` and custom remote
+helpers) are rejected without invoking Git. A missing Git executable or failed
+process start is also reported as an actionable preflight error. An invalid
+remote, unsafe transport, unavailable Git executable, or missing branch fails
+with the Repository field, reason and corrective next step; the same API error
+is presented by CLI and Web. No execution resource is created on this failure.
+
 ## Respond to an Approval Point
 
 After Plan or Check, the Issue enters `awaiting approval`. The Workflow waits
@@ -223,8 +232,16 @@ can be reopened. Use `reopen` to return a closed Issue to `backlog`.
 
 ## Recover from Failure
 
-Recovery is a core Mohist capability. See
-[Troubleshooting](../../../docs/troubleshooting.md) for the situation-to-recovery mapping.
+Recovery is a core Mohist capability. A retry of a terminal prior WorkflowRun
+must not silently replay a publication effect. Mohist reads that Run's durable
+provenance before replacing it. A prior Run with a recorded push, Pull Request,
+merge, or an unsettled failure is blocked with the prior Run ID and a concrete
+reconciliation step; the Issue remains linked to that Run and no new
+WorkflowRun, Workspace, or AgentJob is created. A stopped Run with no such
+evidence may be replaced after normal start preflight.
+
+See [Troubleshooting](../../../docs/troubleshooting.md) for the
+situation-to-recovery mapping.
 
 ## Archive an Issue
 

@@ -16,7 +16,7 @@ import type {
   WorkflowTimeline,
   IssueWorkflowProfileYamlResponse,
 } from '../model/types'
-import type { WorkflowRunDetail } from '../model/workflow-run'
+import type { WorkflowRunBinding, WorkflowRunDetail } from '../model/workflow-run'
 import type { IssueListParams } from './query-keys'
 
 export function getIssues(params?: IssueListParams, signal?: AbortSignal) {
@@ -37,6 +37,10 @@ export function getIssue(number: number, projectId?: string | null, signal?: Abo
 
 export function getWorkflowRunDetail(workflowRunId: string, signal?: AbortSignal) {
   return request<WorkflowRunDetail>(`/workflow-runs/${encodeURIComponent(workflowRunId)}`, { signal })
+}
+
+export function getWorkflowRunBinding(workflowRunId: string, signal?: AbortSignal) {
+  return request<WorkflowRunBinding>(`/workflow-runs/${encodeURIComponent(workflowRunId)}/binding`, { signal })
 }
 
 export function getParentIssueCandidates(projectId?: string | null, signal?: AbortSignal) {

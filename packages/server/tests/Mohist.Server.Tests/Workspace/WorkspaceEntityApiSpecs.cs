@@ -10,6 +10,7 @@ using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Workspace.Domain;
 using Mohist.Server.Workspace.Grains;
 using Xunit;
 
@@ -186,5 +187,57 @@ public class WorkspaceEntityApiSpecs : IClassFixture<DefaultMohistIntegrationFix
         var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
         Assert.Equal("archived", data.GetProperty("status").GetString());
         Assert.NotNull(data.GetProperty("archivedAt").GetString());
+    }
+
+    [Fact]
+    public async Task Restore_ArchivedWorkspace_ReturnsActiveWithRepositoriesPreserved()
+    {
+        var name = $"restore-{Guid.NewGuid():N}";
+        await CreateWorkspaceAsync(name);
+        using var close = await _fixture.Client.PostAsync(
+            $"/api/projects/{_projectId}/workspaces/{name}/close", null);
+        close.EnsureSuccessStatusCode();
+
+        using var response = await _fixture.Client.PostAsync(
+            $"/api/projects/{_projectId}/workspaces/{name}/restore", null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Equal("active", data.GetProperty("status").GetString());
+
+        var state = await _fixture.Grains.GetGrain<IWorkspaceGrain>(
+            GrainKey.Workspace(_projectId, name)).GetAsync();
+        Assert.NotNull(state);
+        Assert.Equal(WorkspaceStatus.Active, state!.Status);
+        Assert.Null(state.ArchivedAt);
+        Assert.Null(state.Home);
+        Assert.Equal(["server"], state.RepositoryNames);
+    }
+
+    [Fact]
+    public async Task Restore_ActiveWorkspace_IsIdempotent()
+    {
+        var name = $"restore-idem-{Guid.NewGuid():N}";
+        await CreateWorkspaceAsync(name);
+
+        using var first = await _fixture.Client.PostAsync(
+            $"/api/projects/{_projectId}/workspaces/{name}/restore", null);
+        using var second = await _fixture.Client.PostAsync(
+            $"/api/projects/{_projectId}/workspaces/{name}/restore", null);
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        var state = await _fixture.Grains.GetGrain<IWorkspaceGrain>(
+            GrainKey.Workspace(_projectId, name)).GetAsync();
+        Assert.Equal(WorkspaceStatus.Active, state!.Status);
+    }
+
+    [Fact]
+    public async Task Restore_UnknownWorkspace_ReturnsNotFound()
+    {
+        using var response = await _fixture.Client.PostAsync(
+            $"/api/projects/{_projectId}/workspaces/nope-{Guid.NewGuid():N}/restore", null);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 }

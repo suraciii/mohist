@@ -39,6 +39,7 @@ import {
   getIssueWorkflowTaskLog,
   getLabels,
   getParentIssueCandidates,
+  getWorkflowRunBinding,
   getWorkflowRunDetail,
   getWorkflowTimeline,
   getWorkflowYaml,
@@ -163,6 +164,19 @@ export function useWorkflowRunDetail(workflowRunId: string | null | undefined) {
   return useQuery({
     queryKey: workflowRunKeys.detail(workflowRunId),
     queryFn: ({ signal }: QueryFunctionContext) => getWorkflowRunDetail(workflowRunId!, signal),
+    enabled: !!workflowRunId,
+  })
+}
+
+/**
+ * On-demand actual-binding read for one Run (#1099): start-time identity
+ * facts plus the bound semantic definition snapshot. Distinct from the
+ * Issue's next-start selection; never falls back to the latest Profile.
+ */
+export function useWorkflowRunBinding(workflowRunId: string | null | undefined) {
+  return useQuery({
+    queryKey: workflowRunKeys.binding(workflowRunId),
+    queryFn: ({ signal }: QueryFunctionContext) => getWorkflowRunBinding(workflowRunId!, signal),
     enabled: !!workflowRunId,
   })
 }

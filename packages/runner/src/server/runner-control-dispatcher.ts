@@ -19,6 +19,7 @@ export interface RunnerControlHandlers {
   sessionFollowup(params: ReceiveFollowupPayload): Promise<unknown>
   sessionStop(params: CancelAgentSessionPayload): Promise<unknown>
   sessionCommand(params: SessionCommandRequest): Promise<unknown>
+  repositoryPreflight(params: { gitUrl: string; baseBranch: string }): Promise<unknown>
 }
 
 export interface RunnerControlDispatcherOutput {
@@ -127,6 +128,14 @@ export class RunnerControlDispatcher {
       case 'session.command':
         return isSessionCommand(params)
           ? () => this.handlers.sessionCommand(normalizeSessionCommand(params))
+          : 'invalid'
+      case 'repository.preflight':
+        return nonempty(params.gitUrl) && !String(params.gitUrl).includes('::') && nonempty(params.baseBranch)
+          ? () =>
+              this.handlers.repositoryPreflight({
+                gitUrl: params.gitUrl as string,
+                baseBranch: params.baseBranch as string,
+              })
           : 'invalid'
       default:
         return 'unknown'

@@ -166,8 +166,11 @@ The same implementation is exposed through three entry points:
 
 - **Profile save API:** rejects an invalid Definition and returns the combined
   Profile, Definition, and Action-contract errors.
-- **`mo workflow validate --file <path>`:** validates locally without resolving
-  a Project or contacting Server. `--file -` reads stdin.
+- **`mo workflow validate --file <path>`:** validates with the selected
+  Project's Server — the same Definition and Action-catalog rules as save,
+  without writing. `--file -` reads stdin. Local preflight covers only usage
+  and file input; an unreachable Server or catalog reports the skipped scope
+  instead of passing the Definition.
 - **CI:** validates built-in Profiles and complete examples from
   `specs/workflow/definition/spec.md` as golden cases. Snippets containing `<...>`
   placeholders are excluded.
@@ -181,10 +184,12 @@ The Profile save entry point combines three non-overlapping decisions:
   required fields, and types.
 
 All errors use the same YAML path convention and identify their source. None
-repeats another layer's rules. The local command runs Profile composition and
-Definition validation. Save also validates the materialized model against the
-Action catalog. A successful save response states whether Action validation ran
-with `actionValidation: { performed, reason? }`.
+repeats another layer's rules. Validation and save run Profile composition,
+Definition validation, and the Action-catalog check under the same input and
+catalog context; a save revalidates. A validation or save response states
+whether the Action check ran through `actionValidationStatus` with an
+`actionValidationSkipReason` when it was skipped, beside `definitionErrors`
+and `actionErrors` that carry each error's YAML path and source.
 
 Built-in Profile loading and runtime loading perform Definition validation
 without the catalog. Legacy `with.agent`, `with.kind`, `with.type`, and

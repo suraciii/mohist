@@ -169,6 +169,48 @@ public class IssueWorkflowRepositoryResolutionSpecs
     }
 
     [Fact]
+    public async Task StartWorkAsync_InvalidRemoteBaseBranch_DoesNotCreateExecutionResources()
+    {
+        var projectId = $"proj_{Guid.NewGuid():N}";
+        var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
+        await projectGrain.CreateAsync(
+            $"proj-{Guid.NewGuid():N}",
+            new Mohist.Server.Project.Domain.RepositoryInfo
+            {
+                Name = "origin",
+                GitUrl = "git@example.com:mohist.git",
+                BaseBranch = "preflight-invalid",
+                IsDefault = true,
+            },
+            "git diff --check");
+
+        var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
+        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
+        await issueGrain.CreateAsync(projectId, number, "Invalid base branch", body: null, labels: null, priority: null);
+
+        var ex = await Assert.ThrowsAsync<IssueStartRepositoryUnavailableException>(
+            () => issueGrain.StartWorkAsync());
+
+        Assert.Equal("repository_base_branch_missing", ex.Code);
+        Assert.Equal("repository.baseBranch", ex.Field);
+        Assert.Equal("origin", ex.RepositoryName);
+        Assert.Equal("preflight-invalid", ex.BaseBranch);
+        Assert.Contains("No Workspace, WorkflowRun, or AgentJob was created", ex.NextStep);
+
+        using var scope = _services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Empty(await db.WorkflowRuns
+            .Where(row => row.MetadataProjectId == projectId)
+            .ToListAsync());
+        Assert.Empty(await db.Workspaces
+            .Where(row => row.ProjectId == projectId)
+            .ToListAsync());
+        Assert.Empty(await db.AgentJobs
+            .Where(row => row.ProjectId == projectId || row.IssueProjectId == projectId)
+            .ToListAsync());
+    }
+
+    [Fact]
     public async Task StartWorkAsync_ExistingIssueWithoutRepositorySelection_UsesUpgradedDefaultRepository()
     {
         var projectId = $"proj_{Guid.NewGuid():N}";

@@ -10,20 +10,32 @@ internal static class WorkflowProfileYamlParser
         string fallbackId,
         ActionCatalog? catalog = null)
     {
-        var result = WorkflowProfileParser.Parse(yaml, fallbackId);
-        var errors = result.Errors.ToList();
-        if (result.Profile is not null)
-        {
-            errors.AddRange(RejectRuntimeActions(result.Profile.Definition));
-            if (catalog is not null)
-                errors.AddRange(ActionContractValidator.Validate(result.Profile.Definition, catalog));
-        }
+        var (profile, errors) = TryParse(yaml, fallbackId);
+        if (profile is not null && catalog is not null)
+            errors.AddRange(ActionContractValidator.Validate(profile.Definition, catalog));
         if (errors.Count > 0)
             throw new WorkflowDefinitionValidationException(errors
                 .OrderBy(error => error.Path, StringComparer.Ordinal)
                 .ThenBy(error => error.Message, StringComparer.Ordinal)
                 .ToArray());
-        return result.Profile!;
+        return profile!;
+    }
+
+    /// <summary>
+    /// Parses without throwing so callers can report definition errors as
+    /// facts instead of an exception. Returns the Profile when the source
+    /// parses (possibly alongside removed-runtime-Action rejections) and
+    /// every collected error, unsorted.
+    /// </summary>
+    public static (WorkflowProfile? Profile, List<ValidationError> Errors) TryParse(
+        string yaml,
+        string fallbackId)
+    {
+        var result = WorkflowProfileParser.Parse(yaml, fallbackId);
+        var errors = result.Errors.ToList();
+        if (result.Profile is not null)
+            errors.AddRange(RejectRuntimeActions(result.Profile.Definition));
+        return (result.Profile, errors);
     }
 
     private static IReadOnlyList<ValidationError> RejectRuntimeActions(WorkflowDefinition definition)

@@ -14,6 +14,7 @@ approval:
       with:
         source: HEAD
         target: ${{ workspace.branch }}
+        baseBranch: ${{ repository.baseBranch }}
         remote: origin
         force: true
         working-directory: REPOS/${{ repository.name }}
@@ -112,6 +113,7 @@ stages:
     with:
       source: HEAD
       target: ${{ workspace.branch }}
+      baseBranch: ${{ repository.baseBranch }}
       remote: origin
       force: true
       working-directory: REPOS/${{ repository.name }}
@@ -178,6 +180,7 @@ stages:
     with:
       source: HEAD
       target: ${{ workspace.branch }}
+      baseBranch: ${{ repository.baseBranch }}
       remote: origin
       force: true
       working-directory: REPOS/${{ repository.name }}
@@ -213,6 +216,7 @@ stages:
           with:
             source: HEAD
             target: ${{ workspace.branch }}
+            baseBranch: ${{ repository.baseBranch }}
             remote: origin
             force: true
             working-directory: REPOS/${{ repository.name }}
@@ -242,6 +246,7 @@ stages:
     with:
       source: HEAD
       target: ${{ workspace.branch }}
+      baseBranch: ${{ repository.baseBranch }}
       remote: origin
       force: true
       working-directory: REPOS/${{ repository.name }}
@@ -251,7 +256,13 @@ stages:
     with:
       repositoryUrl: ${{ repository.gitUrl }}
       prNumber: ${{ vars.github.pr.number }}
+      source: ${{ workspace.branch }}
+      target: ${{ repository.baseBranch }}
       method: squash
+      requiredTrailers:
+      - Workflow-Run
+      body: |
+        Workflow-Run: ${{ workflow.runId }}
       working-directory: REPOS/${{ repository.name }}
     recovery:
       budget: 2
@@ -284,6 +295,7 @@ stages:
           with:
             source: HEAD
             target: ${{ workspace.branch }}
+            baseBranch: ${{ repository.baseBranch }}
             remote: origin
             force: true
             working-directory: REPOS/${{ repository.name }}
@@ -303,6 +315,7 @@ stages:
           with:
             source: HEAD
             target: ${{ workspace.branch }}
+            baseBranch: ${{ repository.baseBranch }}
             remote: origin
             force: true
             working-directory: REPOS/${{ repository.name }}

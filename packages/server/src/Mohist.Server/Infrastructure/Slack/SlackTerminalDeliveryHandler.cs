@@ -50,6 +50,24 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
             : delivery.JobKey.StartsWith("agent-session-followup:", StringComparison.Ordinal)
                 ? $"{delivery.JobKey}:progress"
                 : null;
+        if (IsRuntimeSessionMissingFollowup(delivery))
+        {
+            var rejectionSource = new SlackMessageIdentity(
+                delivery.WorkspaceTeamId,
+                delivery.ConversationId,
+                delivery.MessageTs!);
+            await SlackFollowupRejection.EnqueueAsync(
+                outbox,
+                projectId,
+                delivery.ConnectionId,
+                rejectionSource,
+                string.IsNullOrWhiteSpace(delivery.Message)
+                    ? SlackFollowupRejection.OwnerTerminalText
+                    : delivery.Message,
+                delivery.ThreadTs,
+                ct);
+        }
+
         if (ShouldRenderRetry(projectId, delivery))
         {
             SlackRetryAction? retry = null;
@@ -125,6 +143,14 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
             delivery.JobKey,
             delivery.ConnectionId);
     }
+    private static bool IsRuntimeSessionMissingFollowup(SlackTerminalDelivery delivery) =>
+        delivery.JobKey.StartsWith("agent-session-followup:", StringComparison.Ordinal)
+        && string.Equals(delivery.Status, "failed", StringComparison.Ordinal)
+        && string.Equals(
+            delivery.FailureCategory,
+            SlackFollowupRejection.RuntimeSessionMissingCategory,
+            StringComparison.Ordinal)
+        && !string.IsNullOrWhiteSpace(delivery.MessageTs);
 
     private static bool ShouldRenderRetry(string projectId, SlackTerminalDelivery delivery) =>
         !string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal)

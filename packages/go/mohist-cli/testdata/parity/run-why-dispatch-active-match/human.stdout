@@ -1,0 +1,10 @@
+run: wr-1
+status: Running
+dispatch:
+  status: missing
+  activeWork:
+    matchesSnapshotWorkId: true
+    stage: build
+    workId: build-work-1
+    workType: task
+  observation: active work present

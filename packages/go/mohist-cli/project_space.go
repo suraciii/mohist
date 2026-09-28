@@ -43,7 +43,7 @@ func projectSpaceHelp(group string) string {
 	case "repo":
 		return "USAGE\n    mo repo <list|create|edit|delete> [flags]\n\nManage Repositories inside the active Project.\n\nActions: list, create, edit, delete"
 	default:
-		return "USAGE\n    mo workspace <list|view|create|close|repo> [flags]\n\nManage named workspaces in the active Project.\n\nActions: list, view, create, close, repo"
+		return "USAGE\n    mo workspace <list|view|create|close|restore|repo> [flags]\n\nManage named workspaces in the active Project.\n\nActions: list, view, create, close, restore, repo"
 	}
 }
 
@@ -101,6 +101,8 @@ func parseWorkspace(args []string) (command, error) {
 		return parseWorkspaceCreate(args[1:])
 	case "close":
 		return parseNamedSpace("workspace-close", args[1:], nil, "workspace", true)
+	case "restore":
+		return parseNamedSpace("workspace-restore", args[1:], nil, "workspace", true)
 	case "repo":
 		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
 			return command{help: true, helpText: "USAGE\n    mo workspace repo <add|remove> <name> <repo> [flags]"}, nil
@@ -676,6 +678,8 @@ func runProjectSpace(ctx context.Context, deps Dependencies, c *client, cmd comm
 			body["repos"] = repos
 		}
 		return resourceRequest(ctx, deps, c, http.MethodPost, base+"/workspaces", body, cmd, false)
+	case "workspace-restore":
+		return resourceRequest(ctx, deps, c, http.MethodPost, base+"/workspaces/"+url.PathEscape(name)+"/restore", nil, cmd, false)
 	case "workspace-close":
 		return resourceRequest(ctx, deps, c, http.MethodPost, base+"/workspaces/"+url.PathEscape(name)+"/close", nil, cmd, false)
 	case "workspace-repo-add":
@@ -736,17 +740,27 @@ func resourceRequest(ctx context.Context, deps Dependencies, c *client, method, 
 }
 
 func (c *client) request(ctx context.Context, method, path string, body any) (json.RawMessage, error) {
+	env, err := c.requestEnvelope(ctx, method, path, body)
+	if err != nil {
+		return nil, err
+	}
+	return env.Data, nil
+}
+
+// requestEnvelope returns the whole success envelope so callers that need
+// siblings of data — a save's validation facts — can read them.
+func (c *client) requestEnvelope(ctx context.Context, method, path string, body any) (envelope, error) {
 	var reader io.Reader
 	if body != nil {
 		b, e := json.Marshal(body)
 		if e != nil {
-			return nil, classifyFailure(&operationError{message: "error: request could not be created [request_error]"}, method, false, failureLocal, 0)
+			return envelope{}, classifyFailure(&operationError{message: "error: request could not be created [request_error]"}, method, false, failureLocal, 0)
 		}
 		reader = strings.NewReader(string(b))
 	}
 	req, e := http.NewRequestWithContext(ctx, method, c.base.String()+path, reader)
 	if e != nil {
-		return nil, classifyFailure(&operationError{message: "error: request could not be created [request_error]"}, method, false, failureLocal, 0)
+		return envelope{}, classifyFailure(&operationError{message: "error: request could not be created [request_error]"}, method, false, failureLocal, 0)
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set(operatorIDHeader, c.operatorID)
@@ -766,21 +780,21 @@ func (c *client) request(ctx context.Context, method, path string, body any) (js
 			if interrupted == nil {
 				interrupted = e
 			}
-			return nil, classifyFailure(requestInterruptedError(interrupted), method, false, failureSubmit, 0)
+			return envelope{}, classifyFailure(requestInterruptedError(interrupted), method, false, failureSubmit, 0)
 		}
-		return nil, classifyFailure(&operationError{message: "error: Mohist Server request failed [service_unavailable]", code: "service_unavailable"}, method, false, failureSubmit, 0)
+		return envelope{}, classifyFailure(&operationError{message: "error: Mohist Server request failed [service_unavailable]", code: "service_unavailable"}, method, false, failureSubmit, 0)
 	}
 	defer resp.Body.Close()
 	b, e := io.ReadAll(resp.Body)
 	if e != nil {
-		return nil, classifyFailure(&operationError{message: "error: Mohist Server response could not be read [response_error]", code: "response_error"}, method, false, failureResponse, resp.StatusCode)
+		return envelope{}, classifyFailure(&operationError{message: "error: Mohist Server response could not be read [response_error]", code: "response_error"}, method, false, failureResponse, resp.StatusCode)
 	}
 	if len(b) == 0 && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return nil, nil
+		return envelope{}, nil
 	}
 	var env envelope
 	if json.Unmarshal(b, &env) != nil {
-		return nil, classifyFailure(responseStatusFailure(resp.StatusCode), method, false, failureResponse, resp.StatusCode)
+		return envelope{}, classifyFailure(responseStatusFailure(resp.StatusCode), method, false, failureResponse, resp.StatusCode)
 	}
 	success := (env.Success == nil && resp.StatusCode >= 200 && resp.StatusCode < 300) || (env.Success != nil && *env.Success)
 	if !success || resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -792,9 +806,9 @@ func (c *client) request(ctx context.Context, method, path string, body any) (js
 		if message == "" {
 			message = "Mohist Server request failed"
 		}
-		return nil, classifyFailure(&operationError{message: "error: " + message + " [" + code + "]", code: code, details: env.Details, effect: env.Effect, retrySafe: env.RetrySafe, nextAction: env.NextAction}, method, false, failureServer, resp.StatusCode)
+		return envelope{}, classifyFailure(&operationError{message: "error: " + message + " [" + code + "]", code: code, details: env.Details, effect: env.Effect, retrySafe: env.RetrySafe, nextAction: env.NextAction}, method, false, failureServer, resp.StatusCode)
 	}
-	return env.Data, nil
+	return env, nil
 }
 
 func resolveProject(deps Dependencies, explicit string) (string, bool) {

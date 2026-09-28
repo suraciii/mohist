@@ -19,7 +19,7 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
     private static readonly IReadOnlyDictionary<string, (Type Params, Type Result, bool AllowsNull)> RequestMethods =
         new Dictionary<string, (Type, Type, bool)>(StringComparer.Ordinal)
         {
-            ["workspace.diff"] = (typeof(WorkspaceQueryParams), typeof(RunnerWorkspaceDiffResult), true),
+            ["repository.preflight"] = (typeof(RepositoryPreflightParams), typeof(RepositoryPreflightResult), false),
             ["workspace.commits"] = (typeof(WorkspaceQueryParams), typeof(RunnerWorkspaceCommitsResult), true),
             ["workspace.commit-diff"] = (typeof(WorkspaceCommitDiffParams), typeof(RunnerWorkspaceCommitDiffResult), true),
             ["workspace.status"] = (typeof(WorkspaceQueryParams), typeof(WorkspaceStatus), false),

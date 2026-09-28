@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createRunnerControlHandlers } from './runner-control-handlers.js'
 
 describe('createRunnerControlHandlers', () => {
-  it('binds all nine methods to the existing transport-neutral domain handlers', async () => {
+  it('binds all ten methods to the existing transport-neutral domain handlers', async () => {
     const command = vi.fn(async () => ({ ok: true }))
     const handlers = createRunnerControlHandlers({
       workspaceGit: {
@@ -13,6 +13,7 @@ describe('createRunnerControlHandlers', () => {
       followup: {},
       cancel: {},
       sessionCommand: { handler: command },
+      repositoryPreflight: { runCommand: vi.fn(async () => ({ exitCode: 0, stdout: 'secret', stderr: '' })) },
     })
     const query = {}
 
@@ -55,5 +56,10 @@ describe('createRunnerControlHandlers', () => {
       }),
     ).resolves.toEqual({ ok: true })
     expect(command).toHaveBeenCalledOnce()
+    await expect(
+      handlers.repositoryPreflight({ gitUrl: 'https://example.test/repo.git', baseBranch: 'main' }),
+    ).resolves.toEqual({
+      exitCode: 0,
+    })
   })
 })

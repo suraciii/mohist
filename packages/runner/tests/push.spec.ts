@@ -5,6 +5,7 @@ import type { RunnerFileSystem, RunnerGitRunner } from '../src/system/filesystem
 import type { JsonObject } from '../src/core/types.js'
 import type { ActionTestContext as ActionContext } from './support/action-test-context.js'
 import { NETWORK_COMMAND_TIMEOUT_MS } from '../src/actions/git.js'
+import { PUBLICATION_LOG_FORMAT } from '../src/actions/publication.js'
 import { callAction } from './support/call-action.js'
 import { withTestRunnerResources } from './support/test-resources.js'
 import { MemoryFileSystem } from './support/memory-filesystem.js'
@@ -26,6 +27,14 @@ function it(name: string, body: (resources: PushTestResources) => Promise<void> 
   })
 }
 
+const DEFAULT_COMMIT_SHA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const DEFAULT_MERGE_BASE = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+// Valid default history for the publication-validation merge-base/log probes:
+// a 40-hex SHA, NUL-delimited identity fields, and a clean message.
+const DEFAULT_COMMIT_LOG = `${DEFAULT_COMMIT_SHA}\x00Agent\x00agent@example.com\x00Agent\x00agent@example.com\x00subject\n\nbody\n\x00`
+function logCommand(source: string, mergeBase: string = DEFAULT_MERGE_BASE) {
+  return `log --format=${PUBLICATION_LOG_FORMAT} ${mergeBase}..${source}`
+}
 function installGit(
   resources: PushTestResources,
   respond: (
@@ -55,7 +64,12 @@ function installGit(
   const runner: RunnerGitRunner = async (workDir, args, _signal, options) => {
     const record: GitCall = { workDir, args: [...args], timeoutMs: options?.timeoutMs }
     calls.push(record)
-    return await respond(record, calls)
+    const result = await respond(record, calls)
+    if (!result.success && result.combinedOutput.startsWith('unexpected git call')) {
+      if (args[0] === 'merge-base') return ok(`${DEFAULT_MERGE_BASE}\n`)
+      if (args[0] === 'log') return ok(DEFAULT_COMMIT_LOG)
+    }
+    return result
   }
   resources.pushGitRunner = runner
   return calls
@@ -113,6 +127,72 @@ describe('mohist/push', () => {
     expect(resolved.kind).toBe('definition')
     expect(resolved.kind === 'definition' ? resolved.definition.manifest.name : null).toBe('mohist/push')
   })
+  it('FullCloneStrategy_CompletesPartialCloneBeforePush', async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
+      const command = history[history.length - 1].args.join(' ')
+      switch (command) {
+        case 'fetch --no-filter origin':
+          return ok('From origin\n')
+        case 'rev-parse mo/issue-99':
+          return ok('source-sha\n')
+        case 'push origin source-sha:refs/heads/master':
+          return ok('pushed\n')
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+    const result = await callAction(pushAction, context({ strategy: 'full-clone' }))
+    const output = result.output as Record<string, unknown>
+    expect(result.error).toBeUndefined()
+    expect(workspaceCalls(calls)).toEqual([
+      'fetch --no-filter origin',
+      'rev-parse mo/issue-99',
+      'ls-remote origin refs/heads/master',
+      'merge-base origin/master source-sha',
+      logCommand('source-sha'),
+      'push origin source-sha:refs/heads/master',
+      'ls-remote origin refs/heads/master',
+    ])
+    expect(output).toMatchObject({ strategy: 'full-clone', pushed: true, landedCommit: 'source-sha' })
+  })
+
+  it('StrictFirstPush_ValidatesAgainstExistingBaseBeforePublishingNewBranch', async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
+      const command = history[history.length - 1].args.join(' ')
+      switch (command) {
+        case 'fetch --no-filter origin':
+          return ok('fetched')
+        case 'rev-parse mo/issue-99':
+          return ok('source-sha\n')
+        case 'ls-remote origin refs/heads/mo/issue-99':
+          return ok('')
+        case 'merge-base origin/master source-sha':
+          return ok(`${DEFAULT_MERGE_BASE}\n`)
+        case logCommand('source-sha'):
+          return ok(
+            `${DEFAULT_COMMIT_SHA}\x00Agent\x00agent@example.com\x00Agent\x00agent@example.com\x00subject\n\nSigned-off-by: Agent <agent@example.com>\n\x00`,
+          )
+        case 'push origin source-sha:refs/heads/mo/issue-99':
+          return ok('pushed')
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+    const result = await callAction(
+      pushAction,
+      context({
+        target: 'mo/issue-99',
+        baseBranch: 'master',
+        strategy: 'full-clone',
+        requiredTrailers: ['Signed-off-by'],
+      }),
+    )
+    expect(result.error).toBeUndefined()
+    expect(workspaceCalls(calls)).toContain('merge-base origin/master source-sha')
+    expect(workspaceCalls(calls).indexOf('merge-base origin/master source-sha')).toBeLessThan(
+      workspaceCalls(calls).indexOf('push origin source-sha:refs/heads/mo/issue-99'),
+    )
+  })
 
   it('MissingSource_FailsWithoutVariableFallback', async (resources) => {
     const calls = installGit(resources, async () => {
@@ -140,7 +220,7 @@ describe('mohist/push', () => {
       switch (command) {
         case 'rev-parse HEAD':
           return ok('checkpoint-sha\n')
-        case 'push --force origin HEAD:mo/issue-99':
+        case 'push --force origin checkpoint-sha:refs/heads/mo/issue-99':
           return ok('To https://example.com/repo.git\n   checkpoint-sha  HEAD -> mo/issue-99')
         case 'ls-remote origin refs/heads/mo/issue-99':
           return ok('old-sha\trefs/heads/mo/issue-99\n')
@@ -164,7 +244,9 @@ describe('mohist/push', () => {
     expect(workspaceCalls(calls)).toEqual([
       'rev-parse HEAD',
       'ls-remote origin refs/heads/mo/issue-99',
-      'push --force origin HEAD:mo/issue-99',
+      'merge-base origin/mo/issue-99 checkpoint-sha',
+      logCommand('checkpoint-sha'),
+      'push --force origin checkpoint-sha:refs/heads/mo/issue-99',
       'ls-remote origin refs/heads/mo/issue-99',
     ])
     expect(output).toMatchObject({
@@ -182,7 +264,7 @@ describe('mohist/push', () => {
       switch (command) {
         case 'rev-parse mo/issue-99':
           return ok('source-sha\n')
-        case 'push origin mo/issue-99:master':
+        case 'push origin source-sha:refs/heads/master':
           return ok('To https://example.com/repo.git\n   base-sha..source-sha  mo/issue-99 -> master')
         case 'ls-remote origin refs/heads/master':
           return ok('base-sha\trefs/heads/master\n')
@@ -198,7 +280,9 @@ describe('mohist/push', () => {
     expect(workspaceCalls(calls)).toEqual([
       'rev-parse mo/issue-99',
       'ls-remote origin refs/heads/master',
-      'push origin mo/issue-99:master',
+      'merge-base origin/master source-sha',
+      logCommand('source-sha'),
+      'push origin source-sha:refs/heads/master',
       'ls-remote origin refs/heads/master',
     ])
     expect(output).toMatchObject({
@@ -219,7 +303,7 @@ describe('mohist/push', () => {
       switch (command) {
         case 'rev-parse mo/issue-99':
           return ok('source-sha\n')
-        case 'push origin mo/issue-99:master':
+        case 'push origin source-sha:refs/heads/master':
           return ok('To https://example.com/repo.git\n   base-sha..source-sha  mo/issue-99 -> master')
         default:
           return fail(`unexpected git call: ${command}`)
@@ -230,7 +314,14 @@ describe('mohist/push', () => {
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
-    expect(calls.map((call) => call.workDir)).toEqual([WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH])
+    expect(calls.map((call) => call.workDir)).toEqual([
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+    ])
     expect(calls.some((call) => call.workDir === PROJECT_PATH)).toBe(false)
     expect(output.workDir).toBe(WORKSPACE_PATH)
   })
@@ -241,7 +332,7 @@ describe('mohist/push', () => {
       switch (command) {
         case 'rev-parse mo/issue-99':
           return ok('source-sha\n')
-        case 'push origin mo/issue-99:master':
+        case 'push origin source-sha:refs/heads/master':
           return ok('To https://example.com/repo.git\n   base-sha..source-sha  mo/issue-99 -> master')
         default:
           return fail(`unexpected git call: ${command}`)
@@ -252,7 +343,8 @@ describe('mohist/push', () => {
 
     const workspaceCmdSet = new Set(workspaceCalls(calls))
     // No checkout, no clone, no reset, no merge, no commit, no status
-    // mutation — push is a ref-only operation.
+    // mutation — push is a ref-only operation. The read-only publication
+    // validation probes (merge-base/log) are expected and covered elsewhere.
     for (const forbidden of [
       'checkout master',
       'checkout -B master',
@@ -263,7 +355,6 @@ describe('mohist/push', () => {
       'commit -m',
       'fetch origin master',
       'status --porcelain',
-      'merge-base',
       'worktree',
     ]) {
       expect(workspaceCmdSet.has(forbidden)).toBe(false)
@@ -276,7 +367,7 @@ describe('mohist/push', () => {
       switch (command) {
         case 'rev-parse mo/issue-99':
           return ok('source-sha\n')
-        case 'push origin mo/issue-99:master':
+        case 'push origin source-sha:refs/heads/master':
           return fail(
             "To https://example.com/repo.git\n ! [rejected]        master -> master (non-fast-forward)\nerror: failed to push some refs to 'https://example.com/repo.git'\nhint: Updates were rejected because the tip of your current branch is behind\nhint: its remote counterpart. Integrate the remote changes before pushing again.",
           )
@@ -296,7 +387,7 @@ describe('mohist/push', () => {
       switch (command) {
         case 'rev-parse mo/issue-99':
           return ok('source-sha\n')
-        case 'push origin mo/issue-99:master':
+        case 'push origin source-sha:refs/heads/master':
           return fail(
             'To https://example.com/repo.git\n ! [rejected]        master -> master (fetch first)\nerror: failed to push some refs',
           )
@@ -315,7 +406,7 @@ describe('mohist/push', () => {
       switch (command) {
         case 'rev-parse mo/issue-99':
           return ok('source-sha\n')
-        case 'push origin mo/issue-99:master':
+        case 'push origin source-sha:refs/heads/master':
           return fail(
             "fatal: could not read Username for 'https://example.com': terminal prompts disabled\nfatal: Authentication failed for 'https://example.com/repo.git/'",
           )
@@ -349,7 +440,7 @@ describe('mohist/push', () => {
       switch (command) {
         case 'rev-parse mo/issue-99':
           return ok('source-sha\n')
-        case 'push upstream mo/issue-99:master':
+        case 'push upstream source-sha:refs/heads/master':
           return ok('To upstream\n   base-sha..source-sha  mo/issue-99 -> master')
         default:
           return fail(`unexpected git call: ${command}`)
@@ -363,8 +454,8 @@ describe('mohist/push', () => {
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
-    expect(workspaceCalls(calls)).toContain('push upstream mo/issue-99:master')
-    expect(workspaceCalls(calls)).not.toContain('push origin mo/issue-99:master')
+    expect(workspaceCalls(calls)).toContain('push upstream source-sha:refs/heads/master')
+    expect(workspaceCalls(calls)).not.toContain('push origin source-sha:refs/heads/master')
     expect(output).toMatchObject({
       remote: 'upstream',
       refspec: 'mo/issue-99:master',
@@ -377,7 +468,7 @@ describe('mohist/push', () => {
       const command = history[history.length - 1].args.join(' ')
       if (command === 'rev-parse other') return ok('explicit-sha\n')
       if (command === 'ls-remote upstream refs/heads/release') return ok('old-sha\trefs/heads/release\n')
-      if (command === 'push upstream other:release') return ok('pushed')
+      if (command === 'push upstream explicit-sha:refs/heads/release') return ok('pushed')
       return fail(`unexpected git call: ${command}`)
     })
     const result = await callAction(
@@ -399,7 +490,9 @@ describe('mohist/push', () => {
     expect(workspaceCalls(calls)).toEqual([
       'rev-parse other',
       'ls-remote upstream refs/heads/release',
-      'push upstream other:release',
+      'merge-base upstream/release explicit-sha',
+      logCommand('explicit-sha'),
+      'push upstream explicit-sha:refs/heads/release',
       'ls-remote upstream refs/heads/release',
     ])
   })
@@ -410,7 +503,7 @@ describe('mohist/push', () => {
       switch (command) {
         case 'rev-parse custom-source':
           return ok('custom-sha\n')
-        case 'push origin custom-source:master':
+        case 'push origin custom-sha:refs/heads/master':
           return ok('To https://example.com/repo.git\n   base-sha..custom-sha  custom-source -> master')
         default:
           return fail(`unexpected git call: ${command}`)
@@ -428,7 +521,7 @@ describe('mohist/push', () => {
 
     expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toContain('rev-parse custom-source')
-    expect(workspaceCalls(calls)).toContain('push origin custom-source:master')
+    expect(workspaceCalls(calls)).toContain('push origin custom-sha:refs/heads/master')
     expect(output).toMatchObject({
       source: 'custom-source',
       landedCommit: 'custom-sha',
@@ -443,7 +536,7 @@ describe('mohist/push', () => {
       switch (command) {
         case 'rev-parse mo/issue-99':
           return ok('source-sha\n')
-        case 'push origin mo/issue-99:master':
+        case 'push origin source-sha:refs/heads/master':
           return ok('To https://example.com/repo.git\n   base-sha..source-sha  mo/issue-99 -> master')
         default:
           if (command.startsWith('clone')) landingCloneAttempted = true
@@ -462,7 +555,7 @@ describe('mohist/push', () => {
       switch (command) {
         case 'rev-parse mo/issue-99':
           return ok('abc123def456\n')
-        case 'push origin mo/issue-99:master':
+        case 'push origin abc123def456:refs/heads/master':
           return ok('To https://example.com/repo.git\n   base-sha..abc123def456  mo/issue-99 -> master')
         default:
           return fail(`unexpected git call: ${command}`)
@@ -488,7 +581,7 @@ describe('mohist/push', () => {
           return ok('rewritten-sha\n')
         case 'ls-remote origin refs/heads/master':
           return ok('remote-tip-sha\trefs/heads/master\n')
-        case 'push --force-with-lease=master:remote-tip-sha origin mo/issue-99:master':
+        case 'push --force-with-lease=master:remote-tip-sha origin rewritten-sha:refs/heads/master':
           return ok(
             'To https://example.com/repo.git\n + rewritten-sha...rewritten-sha  mo/issue-99 -> master (forced update)',
           )
@@ -504,11 +597,13 @@ describe('mohist/push', () => {
     expect(workspaceCalls(calls)).toEqual([
       'rev-parse mo/issue-99',
       'ls-remote origin refs/heads/master',
-      'push --force-with-lease=master:remote-tip-sha origin mo/issue-99:master',
+      'merge-base origin/master rewritten-sha',
+      logCommand('rewritten-sha'),
+      'push --force-with-lease=master:remote-tip-sha origin rewritten-sha:refs/heads/master',
       'ls-remote origin refs/heads/master',
     ])
-    expect(workspaceCalls(calls).some((cmd) => cmd === 'push origin mo/issue-99:master')).toBe(false)
-    expect(workspaceCalls(calls).some((cmd) => cmd === 'push --force-with-lease origin mo/issue-99:master')).toBe(false)
+    expect(workspaceCalls(calls).some((cmd) => cmd === 'push origin source-sha:refs/heads/master')).toBe(false)
+    expect(workspaceCalls(calls).some((cmd) => cmd === 'push --force-with-lease origin source-sha:master')).toBe(false)
     expect(output).toMatchObject({
       forceWithLease: true,
       pushed: true,
@@ -524,7 +619,7 @@ describe('mohist/push', () => {
           return ok('new-sha\n')
         case 'ls-remote origin refs/heads/master':
           return ok('')
-        case 'push origin mo/issue-99:master':
+        case 'push origin new-sha:refs/heads/master':
           return ok('To https://example.com/repo.git\n * [new branch]      mo/issue-99 -> master')
         default:
           return fail(`unexpected git call: ${command}`)
@@ -537,7 +632,9 @@ describe('mohist/push', () => {
     expect(workspaceCalls(calls)).toEqual([
       'rev-parse mo/issue-99',
       'ls-remote origin refs/heads/master',
-      'push origin mo/issue-99:master',
+      'merge-base origin/master new-sha',
+      logCommand('new-sha'),
+      'push origin new-sha:refs/heads/master',
       'ls-remote origin refs/heads/master',
     ])
     expect(workspaceCalls(calls).some((cmd) => cmd.includes('--force-with-lease'))).toBe(false)
@@ -551,7 +648,7 @@ describe('mohist/push', () => {
           return ok('rewritten-sha\n')
         case 'ls-remote origin refs/heads/master':
           return fail("fatal: unable to access 'https://example.com/repo.git': Could not resolve host")
-        case 'push --force-with-lease origin mo/issue-99:master':
+        case 'push --force-with-lease origin rewritten-sha:refs/heads/master':
           return ok('ok\n')
         default:
           return fail(`unexpected git call: ${command}`)
@@ -562,7 +659,7 @@ describe('mohist/push', () => {
 
     expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toContain('ls-remote origin refs/heads/master')
-    expect(workspaceCalls(calls)).toContain('push --force-with-lease origin mo/issue-99:master')
+    expect(workspaceCalls(calls)).toContain('push --force-with-lease origin rewritten-sha:refs/heads/master')
   })
 
   it('ForceWithLease_AcceptsTruthyStringAndRejectsAbsent', async (resources) => {
@@ -573,9 +670,9 @@ describe('mohist/push', () => {
           return ok('a-sha\n')
         case 'ls-remote origin refs/heads/master':
           return ok('remote-tip\trefs/heads/master\n')
-        case 'push --force-with-lease=master:remote-tip origin mo/issue-99:master':
+        case 'push --force-with-lease=master:remote-tip origin a-sha:refs/heads/master':
           return ok('ok\n')
-        case 'push origin mo/issue-99:master':
+        case 'push origin a-sha:refs/heads/master':
           return ok('ok\n')
         default:
           return fail(`unexpected git call: ${command}`)
@@ -587,7 +684,7 @@ describe('mohist/push', () => {
     expect(stringTrue.error).toBeUndefined()
     expect(stringTrueOutput.forceWithLease).toBe(true)
     expect(workspaceCalls(calls)).toContain('ls-remote origin refs/heads/master')
-    expect(workspaceCalls(calls)).toContain('push --force-with-lease=master:remote-tip origin mo/issue-99:master')
+    expect(workspaceCalls(calls)).toContain('push --force-with-lease=master:remote-tip origin a-sha:refs/heads/master')
 
     calls.length = 0
     const absent = await callAction(pushAction, context({ forceWithLease: 'no' }))
@@ -597,7 +694,9 @@ describe('mohist/push', () => {
     expect(workspaceCalls(calls)).toEqual([
       'rev-parse mo/issue-99',
       'ls-remote origin refs/heads/master',
-      'push origin mo/issue-99:master',
+      'merge-base origin/master a-sha',
+      logCommand('a-sha'),
+      'push origin a-sha:refs/heads/master',
       'ls-remote origin refs/heads/master',
     ])
     expect(workspaceCalls(calls).some((cmd) => cmd.startsWith('push --force-with-lease'))).toBe(false)
@@ -611,7 +710,7 @@ describe('mohist/push', () => {
           return ok('rewritten-sha\n')
         case 'ls-remote origin refs/heads/master':
           return ok('remote-tip-sha\trefs/heads/master\n')
-        case 'push --force-with-lease=master:remote-tip-sha origin mo/issue-99:master':
+        case 'push --force-with-lease=master:remote-tip-sha origin rewritten-sha:refs/heads/master':
           return fail(
             'To https://example.com/repo.git\n ! [rejected]        mo/issue-99 -> mo/issue-99 (non-fast-forward)\nerror: failed to push some refs',
           )
@@ -630,7 +729,7 @@ describe('mohist/push', () => {
       switch (command) {
         case 'rev-parse mo/issue-99':
           return ok('rewritten-sha\n')
-        case 'push --force origin mo/issue-99:master':
+        case 'push --force origin rewritten-sha:refs/heads/master':
           return ok(
             'To https://example.com/repo.git\n + rewritten-sha...rewritten-sha  mo/issue-99 -> master (forced update)',
           )
@@ -650,7 +749,9 @@ describe('mohist/push', () => {
     expect(workspaceCalls(calls)).toEqual([
       'rev-parse mo/issue-99',
       'ls-remote origin refs/heads/master',
-      'push --force origin mo/issue-99:master',
+      'merge-base origin/master rewritten-sha',
+      logCommand('rewritten-sha'),
+      'push --force origin rewritten-sha:refs/heads/master',
       'ls-remote origin refs/heads/master',
     ])
     expect(workspaceCalls(calls).some((cmd) => cmd.startsWith('push --force-with-lease'))).toBe(false)
@@ -669,7 +770,7 @@ describe('mohist/push', () => {
       switch (command) {
         case 'rev-parse mo/issue-99':
           return ok('rewritten-sha\n')
-        case 'push --force origin mo/issue-99:master':
+        case 'push --force origin rewritten-sha:refs/heads/master':
           return ok('ok\n')
         case 'ls-remote origin refs/heads/master':
           return history.filter((entry) => entry.args.join(' ') === command).length === 1
@@ -687,7 +788,9 @@ describe('mohist/push', () => {
     expect(workspaceCalls(calls)).toEqual([
       'rev-parse mo/issue-99',
       'ls-remote origin refs/heads/master',
-      'push --force origin mo/issue-99:master',
+      'merge-base origin/master rewritten-sha',
+      logCommand('rewritten-sha'),
+      'push --force origin rewritten-sha:refs/heads/master',
       'ls-remote origin refs/heads/master',
     ])
     expect(output).toMatchObject({
@@ -706,7 +809,7 @@ describe('mohist/push', () => {
           return ok('rewritten-sha\n')
         case 'ls-remote origin refs/heads/master':
           return ok('remote-tip-sha\trefs/heads/master\n')
-        case 'push --force-with-lease=master:remote-tip-sha origin mo/issue-99:master':
+        case 'push --force-with-lease=master:remote-tip-sha origin rewritten-sha:refs/heads/master':
           return ok('ok\n')
         default:
           return fail(`unexpected git call: ${command}`)
@@ -718,7 +821,9 @@ describe('mohist/push', () => {
 
     expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toContain('ls-remote origin refs/heads/master')
-    expect(workspaceCalls(calls)).toContain('push --force-with-lease=master:remote-tip-sha origin mo/issue-99:master')
+    expect(workspaceCalls(calls)).toContain(
+      'push --force-with-lease=master:remote-tip-sha origin rewritten-sha:refs/heads/master',
+    )
     expect(output).toMatchObject({
       force: false,
       forceWithLease: true,
@@ -732,7 +837,7 @@ describe('mohist/push', () => {
       switch (command) {
         case 'rev-parse mo/issue-99':
           return ok('source-sha\n')
-        case 'push origin mo/issue-99:master':
+        case 'push origin source-sha:refs/heads/master':
           return ok('To https://example.com/repo.git\n   base-sha..source-sha  mo/issue-99 -> master')
         default:
           return fail(`unexpected git call: ${command}`)
@@ -742,8 +847,12 @@ describe('mohist/push', () => {
     await callAction(pushAction, context())
 
     const revParse = calls.find((c) => c.args.join(' ') === 'rev-parse mo/issue-99')
-    const push = calls.find((c) => c.args.join(' ') === 'push origin mo/issue-99:master')
+    const mergeBase = calls.find((c) => c.args.join(' ') === 'merge-base origin/master source-sha')
+    const log = calls.find((c) => c.args.join(' ') === logCommand('source-sha'))
+    const push = calls.find((c) => c.args.join(' ') === 'push origin source-sha:refs/heads/master')
     expect(revParse?.timeoutMs).toBeUndefined()
+    expect(mergeBase?.timeoutMs).toBeUndefined()
+    expect(log?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
     expect(push?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
   })
 
@@ -755,7 +864,7 @@ describe('mohist/push', () => {
           return ok('rewritten-sha\n')
         case 'ls-remote origin refs/heads/master':
           return ok('remote-tip-sha\trefs/heads/master\n')
-        case 'push --force-with-lease=master:remote-tip-sha origin mo/issue-99:master':
+        case 'push --force-with-lease=master:remote-tip-sha origin rewritten-sha:refs/heads/master':
           return ok(
             'To https://example.com/repo.git\n + rewritten-sha...rewritten-sha  mo/issue-99 -> master (forced update)',
           )
@@ -769,7 +878,8 @@ describe('mohist/push', () => {
     const revParse = calls.find((c) => c.args.join(' ') === 'rev-parse mo/issue-99')
     const lsRemote = calls.find((c) => c.args.join(' ') === 'ls-remote origin refs/heads/master')
     const push = calls.find(
-      (c) => c.args.join(' ') === 'push --force-with-lease=master:remote-tip-sha origin mo/issue-99:master',
+      (c) =>
+        c.args.join(' ') === 'push --force-with-lease=master:remote-tip-sha origin rewritten-sha:refs/heads/master',
     )
     expect(revParse?.timeoutMs).toBeUndefined()
     expect(lsRemote?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
@@ -782,7 +892,7 @@ describe('mohist/push', () => {
       switch (command) {
         case 'rev-parse mo/issue-99':
           return ok('source-sha\n')
-        case 'push origin mo/issue-99:master':
+        case 'push origin source-sha:refs/heads/master':
           // D4-shaped timeout result: the structured fields propagate through
           // git() and the sentinel stderr matches `looksLikeRetrySafe`.
           return {
@@ -830,6 +940,56 @@ describe('mohist/push', () => {
     const result = await callAction(pushAction, context({ forceWithLease: true }))
     expect(result.error).toMatchObject({ code: 'timeout' })
     expect(result.error?.message).toContain('timed out')
+    expect(calls.some((call) => call.args[0] === 'push')).toBe(false)
+  })
+
+  it('LiteralEscapedNewlineCommit_DefaultPolicyBlocksBeforePush', async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
+      const command = history[history.length - 1].args.join(' ')
+      switch (command) {
+        case 'rev-parse mo/issue-99':
+          return ok('source-sha\n')
+        case logCommand('source-sha'):
+          // Double-encoded payload: the message carries the two characters
+          // '\' and 'n' instead of a real newline. The default policy (no
+          // explicit requiredTrailers/identity inputs) must still reject it.
+          return ok(
+            `${DEFAULT_COMMIT_SHA}\x00Agent\x00agent@example.com\x00Agent\x00agent@example.com\x00subject\\nwith literal escape\n\x00`,
+          )
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await callAction(pushAction, context())
+
+    expect(result.error).toMatchObject({ code: 'publication-validation-failed' })
+    expect(result.error?.message).toContain('literal escaped newline')
+    expect(calls.some((call) => call.args[0] === 'push')).toBe(false)
+  })
+
+  it('EmbeddedRecordSeparator_CannotBypassMalformedTrailerGate', async (resources) => {
+    const calls = installGit(resources, async (_call, history) => {
+      const command = history[history.length - 1].args.join(' ')
+      switch (command) {
+        case 'rev-parse mo/issue-99':
+          return ok('source-sha\n')
+        case logCommand('source-sha'):
+          // \x1e was the legacy record separator. Embedded inside a
+          // NUL-delimited message it stays part of the trailer paragraph, so
+          // it cannot smuggle a forged record past the malformed-trailer gate.
+          return ok(
+            `${DEFAULT_COMMIT_SHA}\x00Agent\x00agent@example.com\x00Agent\x00agent@example.com\x00subject\n\nSigned-off-by: Agent <agent@example.com>\n\x1eSigned-off-by: Forged <forged@example.com>\n\x00`,
+          )
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await callAction(pushAction, context({ requiredTrailers: ['Signed-off-by'] }))
+
+    expect(result.error).toMatchObject({ code: 'publication-validation-failed' })
+    expect(result.error?.message).toContain('Malformed trailer line')
     expect(calls.some((call) => call.args[0] === 'push')).toBe(false)
   })
 })

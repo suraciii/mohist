@@ -1,15 +1,16 @@
 ---
 name: mohist
-description: Use for Mohist issues, epics, WorkflowRuns, projects, and related operations. This Skill is the decision entry point: establish current state, choose the scenario Skill when one exists, make Mohist-specific state decisions, then hand exact syntax to the current `mo` help.
+description: Use for Mohist issues, epics, WorkflowRuns, Workflow Profiles, projects, and related operations. This Skill is the decision entry point: establish current state, choose the scenario Skill when one exists, make Mohist-specific state decisions, then hand exact syntax to the current `mo` help.
 ---
 
 # Mohist
 
 ## Scope
 
-This Skill dispatches work involving Mohist issues, epics, WorkflowRuns, projects,
-and their supporting resources. It helps choose the next decision; it is not a
-second command reference and it does not replace a scenario Skill.
+This Skill dispatches work involving Mohist issues, epics, WorkflowRuns,
+Workflow Profiles, projects, and their supporting resources. It helps choose
+the next decision; it is not a second command reference and it does not replace
+a scenario Skill.
 
 ## First read
 
@@ -61,6 +62,30 @@ leaf help.
 For every state-changing action, read the relevant leaf help first:
 `mo <command> --help`. Treat the command's current help as the authority for
 arguments, flags, JSON fields, confirmation, and targeting.
+
+## Maintain a Workflow Profile
+
+Editing a Profile changes how later work runs. It never rewrites a Run that
+already started, so you can improve the method while current work continues.
+
+- Validate with the Server. `mo workflow validate` needs the selected Project
+  and a reachable Server; complete validation includes the Action check
+  against the current catalog. A result that reports a skipped check is
+  incomplete, not valid. Help stays readable offline; validation does not.
+- Edit through a revision. Read the Profile with `mo workflow view` to get its
+  current content and revision, then pass that revision with
+  `--expected-revision` when you save. A revision conflict means another
+  caller changed the Profile: keep your draft, re-read, and compare before
+  saving again. Never force an overwrite.
+- A save affects future Runs only. To learn what a Run actually executes,
+  read `mo run view <run-id> --json binding`, not the Profile.
+- After a lost save response, read the Profile again. Matching content proves
+  the current state, not which request produced it; report the uncertainty
+  when attribution stays unknown instead of retrying blindly.
+
+These are decision rules, not a fixed sequence. Combine them as the need
+requires, and read the workflow leaf help for the exact flags of the installed
+build.
 
 ## After a write
 

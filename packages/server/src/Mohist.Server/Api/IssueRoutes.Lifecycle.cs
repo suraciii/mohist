@@ -74,6 +74,46 @@ public static partial class IssueRoutes
                             ApiEffect.None,
                             retrySafe: false));
                 }
+                catch (IssueStartPriorRunUnsafeException ex)
+                {
+                    return KeyedControlWrites.Outcome.Rejected(
+                        StatusCodes.Status409Conflict,
+                        ApiResults.Failure(
+                            ex.Message,
+                            StatusCodes.Status409Conflict,
+                            ex.Code,
+                            new
+                            {
+                                workflowRunId = ex.WorkflowRunId,
+                                executionCreated = false,
+                                nextStep = ex.NextStep,
+                            },
+                            ApiEffect.None,
+                            retrySafe: false,
+                            nextAction: ex.NextStep));
+                }
+
+                catch (IssueStartRepositoryUnavailableException ex)
+                {
+                    return KeyedControlWrites.Outcome.Rejected(
+                        StatusCodes.Status400BadRequest,
+                        ApiResults.Failure(
+                            ex.Message,
+                            StatusCodes.Status400BadRequest,
+                            ex.Code,
+                            new
+                            {
+                                field = ex.Field,
+                                reason = ex.Message,
+                                nextStep = ex.NextStep,
+                                repositoryName = ex.RepositoryName,
+                                baseBranch = ex.BaseBranch,
+                                executionCreated = false,
+                            },
+                            ApiEffect.None,
+                            retrySafe: false,
+                            nextAction: ex.NextStep));
+                }
                 catch (MissingPromptsException ex)
                 {
                     return KeyedControlWrites.Outcome.Rejected(

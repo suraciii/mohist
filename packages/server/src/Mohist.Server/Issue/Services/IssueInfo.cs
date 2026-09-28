@@ -39,6 +39,13 @@ public class IssueInfo
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? WorkflowProfileId { get; set; } = IssueWorkflowProfiles.LocalId;
     public string? WorkflowProfileMode { get; set; }
+    /// <summary>
+    /// Where the effective next-start selection came from: "issue"
+    /// (explicit selection), "project-default", or "system" fallback.
+    /// Null when the Issue has no Workflow. This selection fact is
+    /// independent of the binding any already-started run holds (#1099).
+    /// </summary>
+    public string? WorkflowProfileSource { get; set; }
     public bool NoWorkflow { get; set; }
     public WorkflowAttention? Attention { get; set; }
     public string? WorkflowStage { get; set; }

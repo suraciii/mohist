@@ -78,6 +78,8 @@ public static class MohistServiceRegistration
     public static IServiceCollection ConfigureMohistServices(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddMohistConventionalServices();
+        services.AddSingleton<IRepositorySourcePreflight>(sp =>
+            sp.GetRequiredService<RepositorySourcePreflight>());
         services.AddHttpContextAccessor();
         services.AddSingleton<IFileCredentialStore>(PhysicalFileCredentialStore.Instance);
         services.AddScoped<ICredentialStore>(sp => sp.GetRequiredService<CredentialStore>());

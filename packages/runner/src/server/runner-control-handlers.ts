@@ -4,6 +4,10 @@ import { createFollowupHandler, type FollowupHandlerDeps } from './followup-hand
 import { createSessionCommandHandler, type SessionCommandHandlerDeps } from './session-command-handler.js'
 import { createWorkspaceGitHandlers, type WorkspaceGitHandlerDeps } from './workspace-git-handlers.js'
 import { createWorkspaceRemovalHandler, type WorkspaceRemovalHandlerDeps } from './workspace-removal-handler.js'
+import {
+  createRepositoryPreflightHandler,
+  type RepositoryPreflightHandlerDeps,
+} from './repository-preflight-handler.js'
 
 export interface RunnerControlHandlerDeps {
   workspaceGit: WorkspaceGitHandlerDeps
@@ -11,6 +15,7 @@ export interface RunnerControlHandlerDeps {
   followup: FollowupHandlerDeps
   cancel: CancelHandlerDeps
   sessionCommand: SessionCommandHandlerDeps
+  repositoryPreflight?: RepositoryPreflightHandlerDeps
 }
 
 export function createRunnerControlHandlers(deps: RunnerControlHandlerDeps): RunnerControlHandlers {
@@ -19,6 +24,7 @@ export function createRunnerControlHandlers(deps: RunnerControlHandlerDeps): Run
   const followup = createFollowupHandler(deps.followup)
   const cancel = createCancelHandler(deps.cancel)
   const command = createSessionCommandHandler(deps.sessionCommand)
+  const preflight = createRepositoryPreflightHandler(deps.repositoryPreflight)
   return {
     workspaceDiff: git.getDiff,
     workspaceCommits: git.getCommits,
@@ -29,5 +35,6 @@ export function createRunnerControlHandlers(deps: RunnerControlHandlerDeps): Run
     sessionFollowup: followup,
     sessionStop: cancel,
     sessionCommand: command,
+    repositoryPreflight: preflight,
   }
 }

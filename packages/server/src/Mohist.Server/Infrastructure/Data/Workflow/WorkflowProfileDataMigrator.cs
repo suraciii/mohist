@@ -176,6 +176,7 @@ public static class WorkflowProfileDataMigrator
                 Description = profile.Description,
                 DefinitionSource = yamlSource,
                 SourceProvenance = nameof(WorkflowProfileSourceProvenance.CanonicalLegacy),
+                Revision = WorkflowProfileRevisionSeed.Next(),
                 CreatedAt = row.CreatedAt == default ? now : row.CreatedAt,
                 UpdatedAt = now,
             };
@@ -226,6 +227,7 @@ public static class WorkflowProfileDataMigrator
                 Description = profile.Description,
                 DefinitionSource = yamlSource,
                 SourceProvenance = nameof(WorkflowProfileSourceProvenance.CanonicalLegacy),
+                Revision = WorkflowProfileRevisionSeed.Next(),
                 CreatedAt = now,
                 UpdatedAt = now,
             };

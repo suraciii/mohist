@@ -2,6 +2,7 @@ import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { WorkExecutor } from '../src/runtime/executor.js'
 import { rebaseAction } from '../src/actions/rebase.js'
 import { pushAction } from '../src/actions/push.js'
+import { PUBLICATION_LOG_FORMAT } from '../src/actions/publication.js'
 import { verifyOnlyWorkspacePreparer } from './support/workspace-mock.js'
 import type { ActionResult, JsonObject, DispatchWorkItem } from '../src/core/types.js'
 import type { ActionTestContext as ActionContext } from './support/action-test-context.js'
@@ -247,6 +248,7 @@ function installRebaseMockGit(resources: WorktreeTestResources, calls: string[])
 }
 
 describe('worktree cleanup before delivery', () => {
+  const squashedSha = 'cccccccccccccccccccccccccccccccccccccccc'
   it('commits agent leftovers before rebase and push', async (resources) => {
     const worktree = createFakeWorktree()
     installExecutorGit(resources, worktree)
@@ -331,14 +333,20 @@ describe('worktree cleanup before delivery', () => {
       pushCalls.push({ workDir, command })
       switch (command) {
         case 'rev-parse mo/worktree-cleanup':
-          return gitOk('squashed-sha\n')
-        case 'push origin mo/worktree-cleanup:master':
-          return gitOk('To origin\n   base-sha..squashed-sha  mo/worktree-cleanup -> master')
+          return gitOk(`${squashedSha}\n`)
+        case `merge-base origin/master ${squashedSha}`:
+          return gitOk('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n')
+        case `log --format=${PUBLICATION_LOG_FORMAT} aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..${squashedSha}`:
+          return gitOk(
+            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\x00Agent\x00agent@example.com\x00Agent\x00agent@example.com\x00Complete worktree cleanup\n\x00\n',
+          )
+        case `push origin ${squashedSha}:refs/heads/master`:
+          return gitOk(`To origin\n   base-sha..${squashedSha}  mo/worktree-cleanup -> master`)
         case 'ls-remote origin refs/heads/master':
           return gitOk(
             pushCalls.filter((call) => call.command === command).length === 1
               ? 'base-sha\trefs/heads/master\n'
-              : 'squashed-sha\trefs/heads/master\n',
+              : `${squashedSha}\trefs/heads/master\n`,
           )
         default:
           return gitFail(`unexpected git call: ${command}`, 1)
@@ -353,14 +361,19 @@ describe('worktree cleanup before delivery', () => {
       status: 'completed',
       source: 'mo/worktree-cleanup',
       target: 'master',
-      landedCommit: 'squashed-sha',
+      landedCommit: squashedSha,
       pushed: true,
       workDir: worktree.workDir,
     })
     expect(pushCalls).toEqual([
       { workDir: worktree.workDir, command: 'rev-parse mo/worktree-cleanup' },
       { workDir: worktree.workDir, command: 'ls-remote origin refs/heads/master' },
-      { workDir: worktree.workDir, command: 'push origin mo/worktree-cleanup:master' },
+      { workDir: worktree.workDir, command: `merge-base origin/master ${squashedSha}` },
+      {
+        workDir: worktree.workDir,
+        command: `log --format=${PUBLICATION_LOG_FORMAT} aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..${squashedSha}`,
+      },
+      { workDir: worktree.workDir, command: `push origin ${squashedSha}:refs/heads/master` },
       { workDir: worktree.workDir, command: 'ls-remote origin refs/heads/master' },
     ])
   })

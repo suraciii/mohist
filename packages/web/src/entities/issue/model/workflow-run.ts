@@ -31,6 +31,55 @@ export interface WorkflowRunDetail {
   } | null
   workflowProfileId: string | null
 }
+/**
+ * Availability and content of the semantic definition one Run actually
+ * bound at start time (#1099). When `available` is true, `content` is the
+ * Run's retained start-time snapshot — never the latest Profile — and the
+ * read is complete, without truncation. When false, `reason` states the
+ * known cause and nothing is substituted.
+ */
+export interface WorkflowRunBindingDefinition {
+  available: boolean
+  source: 'run-snapshot' | null
+  reason: 'no-snapshot' | 'unreadable-snapshot' | 'unreadable-run-state' | null
+  content: WorkflowBoundDefinition | null
+}
+
+/**
+ * The bound semantic definition snapshot (the server's WorkflowDefinition
+ * shape). Web reads identify the method a Run followed — stages, tasks,
+ * checks — and render full content through the existing YAML reader, so
+ * this type carries identity plus the raw structure.
+ */
+export interface WorkflowBoundDefinition {
+  stages: {
+    stage: string
+    requiresApproval?: boolean
+    tasks: { id: string; title?: string; uses?: string }[]
+    checks: { id: string; title?: string; uses?: string }[]
+  }[]
+  approval?: Record<string, unknown> | null
+  recoveries?: Record<string, unknown> | null
+}
+
+/**
+ * The structured actual-binding read behind
+ * `GET /api/workflow-runs/{id}/binding` / `mo run view <run> --json binding`:
+ * the start-time facts the Run itself retains (identity, bound Profile,
+ * timing) plus the bound definition. This is the Run's binding, distinct
+ * from the Issue's next-start selection and its inheritance source.
+ */
+export interface WorkflowRunBinding {
+  workflowRunId: string
+  projectId: string | null
+  issueNumber: number | null
+  status: WorkflowRunStatus | string | null
+  workflowProfileId: string | null
+  explicitWorkflowProfileId: string | null
+  createdAt: string | null
+  startedAt: string | null
+  definition: WorkflowRunBindingDefinition
+}
 
 export function isTerminalWorkflowRunStatus(status: WorkflowRunStatus | string | null | undefined): boolean {
   return status === 'stopped' || status === 'completed'

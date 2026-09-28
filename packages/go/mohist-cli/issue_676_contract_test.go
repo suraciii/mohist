@@ -209,7 +209,6 @@ func TestIssue676HelpIsLocalAcrossMutationLeaves(t *testing.T) {
 func TestIssue676UnsupportedDiscoveryIsLocalUsage(t *testing.T) {
 	cases := [][]string{
 		{"project", "use", "--json"},
-		{"workflow", "validate", "--json", "--file", "workflow.yaml"},
 		{"run", "watch", "--json"},
 		{"webhook", "event-types", "--json"},
 		{"server", "status", "--json"},

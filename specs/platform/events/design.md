@@ -105,6 +105,45 @@ Claiming inserts the row or atomically steals it after `LeaseUntil`. A crashed
 worker therefore causes at-least-once redelivery. Lease expiry never loses or
 reorders a row.
 
+### Semantics Parity
+
+The SQL store and the in-memory `FakeDispatchStreamLeaseStore` expose identical
+observable lease semantics, so dispatcher Specs prove the same contract against
+either. A behavior change to one without the other is a contract break.
+
+`NextAttemptAt` comparison is an instant comparison, never a wall-clock text
+comparison. SQLite stores `DateTimeOffset` as TEXT whose lexical order is the
+local wall-clock order, which is not the instant order across offsets. The SQL
+store therefore uses SQLite's `julianday` date-time function for the conditional
+claim update, which parses each stored offset and compares the represented
+instants while preserving the claim's single-statement atomicity.
+`DispatchStreamLeaseStoreSpecs` proves this on a real migrated SQLite database,
+including mixed-offset rows whose wall-clock text order inverts their instant
+order.
+
+The in-memory fake and the real SQLite store expose the same instant comparison
+for claim eligibility.
+
+#### Real SQLite Storage Behavior
+
+The real SQLite store must preserve this rule for every claim operation:
+
+- A row with `NextAttemptAt IS NULL` is eligible when its lease is available.
+- A non-null `NextAttemptAt` is eligible only when its represented instant is
+  at or before the supplied `now` instant.
+- SQL must not use lexical ordering of the stored timestamp to decide whether
+  a non-null row is due. For example, a row stored as
+  `2026-07-01T13:00:00+01:00` is due at `2026-07-01T12:30:00Z`, while a row
+  stored as `2026-07-01T11:00:00-02:00` is not; both cases must be decided by
+  SQLite's parsed instant comparison.
+- Lease-expiry comparison uses the same parsed instant comparison, because a
+  parked lease carries its backoff timestamp in `LeaseUntil`.
+
+The in-memory fake and the real SQLite store must expose the same result for
+these cases. The real-storage specification is exercised by
+`DispatchStreamLeaseStoreSpecs` against the migrated SQLite schema; an
+in-memory-only test does not cover this boundary.
+
 ### Ordering and Wake-up
 
 One worker drains one stream at a time in `Id` order. A failing head row parks

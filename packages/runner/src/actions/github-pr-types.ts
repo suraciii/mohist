@@ -10,8 +10,9 @@ export type GitHubPrErrorCode =
   | 'pr-checks-failed'
   | 'conflict'
   | 'auto-merge-unavailable'
-  | 'enable-failed'
   | 'aborted'
+  | 'publication-strategy-unsupported'
+  | 'publication-validation-failed'
 
 export interface GitHubPrStep {
   name: string

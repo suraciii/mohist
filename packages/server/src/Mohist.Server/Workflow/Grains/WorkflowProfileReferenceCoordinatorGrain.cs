@@ -199,46 +199,151 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
         string commandId,
         long? expectedRevision)
     {
+        ArgumentNullException.ThrowIfNull(payload);
+        if (string.IsNullOrWhiteSpace(commandId))
+            throw new ArgumentException("commandId is required", nameof(commandId));
+        if (string.IsNullOrWhiteSpace(payload.ExpectedContentRevision))
+            throw new ArgumentException(
+                "An update requires the revision read with the content it replaces",
+                nameof(payload));
+
+        var existing = _state.State.Pending;
+        if (existing is not null)
+        {
+            if (string.Equals(existing.CommandId, commandId, StringComparison.Ordinal))
+            {
+                if (existing.Kind != WorkflowProfileCommandPayloadKinds.UpdateProfile
+                    || !string.Equals(existing.ProfileId, payload.ProfileId, StringComparison.Ordinal)
+                    || !string.Equals(
+                        existing.PayloadJson,
+                        WorkflowProfileCommandPayloadCodec.Serialize(payload),
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"Command '{commandId}' was reused with a different canonical payload");
+                }
+
+                // Retry of a command whose response was lost. Resolve the
+                // fence to a definitive outcome under its original
+                // precondition instead of issuing a second write: an
+                // already-applied commit answers with the stored state,
+                // a superseded one surfaces as a revision conflict.
+                var replayed = await ReplayUpdateFenceAsync(existing);
+                if (replayed is not null)
+                {
+                    await ClearFenceAsync(commandId);
+                    return replayed;
+                }
+
+                var current = await _provider.GetDetailAsync(payload.ProjectId, payload.ProfileId);
+                await ClearFenceAsync(commandId);
+                throw new WorkflowProfileRevisionConflictException(
+                    payload.ProjectId,
+                    payload.ProfileId,
+                    payload.ExpectedContentRevision,
+                    current?.Profile.Revision);
+            }
+
+            _ = await ReplayPendingAsync(existing);
+        }
+
         var pending = await AcquireFenceAsync(
             WorkflowProfileCommandPayloadKinds.UpdateProfile,
             payload.ProfileId,
             commandId,
             expectedRevision,
             payload);
+
         try
         {
-            var result = await _provider.UpdateAsync(
-                payload.ProjectId,
-                new WorkflowProfileCollectionEntry(
-                    payload.ProjectId,
-                    payload.ProfileId,
-                    payload.Name,
-                    payload.Description,
-                    WorkflowProfileSourceProvenance.Verbatim,
-                    IsBuiltIn: false,
-                    payload.DefinitionSource));
+            var result = await UpdateViaProviderAsync(payload);
             await ClearFenceAsync(commandId);
             return result;
         }
-        catch (WorkflowDefinitionValidationException)
+        catch
         {
+            // Every provider failure here is definitive: validation is
+            // reported (not thrown) inside the result, and the remaining
+            // errors (revision conflict, missing target, read-only,
+            // precondition shape) cannot succeed unchanged on retry.
             await ClearFenceAsync(commandId);
             throw;
+        }
+    }
+
+    private Task<WorkflowProfileSaveResult> UpdateViaProviderAsync(
+        WorkflowProfileCommandPayload.UpdateProfile payload) =>
+        _provider.UpdateAsync(
+            payload.ProjectId,
+            new WorkflowProfileCollectionEntry(
+                payload.ProjectId,
+                payload.ProfileId,
+                payload.Name,
+                payload.Description,
+                WorkflowProfileSourceProvenance.Verbatim,
+                IsBuiltIn: false,
+                payload.DefinitionSource),
+            payload.ExpectedContentRevision!);
+
+    /// <summary>
+    /// Resolves a pending update fence without a blind rewrite. The fence
+    /// payload carries the command's original content precondition, so a
+    /// replayed compare-and-set compares against the same revision the
+    /// caller read. A revision mismatch means that precondition no longer
+    /// holds: when the stored replaceable content already equals the
+    /// command's content, this very command committed before the
+    /// interruption and the stored row is its result; otherwise a newer
+    /// edit owns the row and the pending command is superseded — it must
+    /// not overwrite that state. Returns <c>null</c> for the superseded
+    /// and permanently-unapplicable outcomes.
+    /// </summary>
+    private async Task<WorkflowProfileSaveResult?> ReplayUpdateFenceAsync(
+        PendingWorkflowProfileCommand pending)
+    {
+        var p = (WorkflowProfileCommandPayload.UpdateProfile)
+            WorkflowProfileCommandPayloadCodec.Deserialize(pending.Kind, pending.PayloadJson);
+        try
+        {
+            return await UpdateViaProviderAsync(p);
+        }
+        catch (WorkflowProfileRevisionConflictException)
+        {
+            var current = await _provider.GetDetailAsync(p.ProjectId, p.ProfileId);
+            if (current is not null
+                && string.Equals(current.Profile.Name, p.Name, StringComparison.Ordinal)
+                && string.Equals(current.Profile.Description, p.Description, StringComparison.Ordinal)
+                && string.Equals(current.Profile.DefinitionSource, p.DefinitionSource, StringComparison.Ordinal))
+            {
+                // Matching content proves the stored state, not which
+                // request caused it; the answer reports the stored
+                // revision either way. The validation envelope is
+                // re-evaluated against the current catalog so the
+                // recovered response stays honest about its scope.
+                var validation = await _provider.ValidateAsync(p.DefinitionSource, p.ProfileId);
+                return new WorkflowProfileSaveResult(current.Profile, validation);
+            }
+
+            _log.LogWarning(
+                "WorkflowProfileReferenceCoordinator {ProjectId} replay of update command {CommandId} was superseded by revision {Revision} and was not reapplied",
+                p.ProjectId, pending.CommandId, current?.Profile.Revision);
+            return null;
         }
         catch (WorkflowProfileNotFoundException)
         {
-            await ClearFenceAsync(commandId);
-            throw;
+            // The target no longer exists; the command can never apply.
+            return null;
         }
         catch (WorkflowProfileReadOnlyException)
         {
-            await ClearFenceAsync(commandId);
-            throw;
+            // Built-in targets are permanently non-writable.
+            return null;
         }
         catch (ArgumentException)
         {
-            await ClearFenceAsync(commandId);
-            throw;
+            // A fence persisted before the precondition existed has no
+            // usable revision; re-applying it would be an unprotected
+            // overwrite, so the command is complete without effect.
+            return null;
         }
     }
 
@@ -401,17 +506,10 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
                 }
                 case WorkflowProfileCommandPayloadKinds.UpdateProfile:
                 {
-                    var p = (WorkflowProfileCommandPayload.UpdateProfile)payload;
-                    await _provider.UpdateAsync(
-                        p.ProjectId,
-                        new WorkflowProfileCollectionEntry(
-                            p.ProjectId,
-                            p.ProfileId,
-                            p.Name,
-                            p.Description,
-                            WorkflowProfileSourceProvenance.Verbatim,
-                            IsBuiltIn: false,
-                            p.DefinitionSource));
+                    // Superseded or unapplicable fences resolve to null and
+                    // the fence clears below, so future valid updates are
+                    // never permanently blocked by an abandoned command.
+                    _ = await ReplayUpdateFenceAsync(pending);
                     break;
                 }
                 case WorkflowProfileCommandPayloadKinds.DeleteProfile:
@@ -515,11 +613,13 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
             ProjectVerificationCommand.Require(verificationCommand);
         }
 
-        var entry = await _provider.GetAsync(request.ProjectId, selected);
-        if (entry is null) return null;
-        var definition = await _provider.GetDefinitionAsync(request.ProjectId, selected);
-        if (definition is null || definition.Stages.Count == 0)
+        // One coherent read: the binding snapshot a start takes is the
+        // complete definition of a single stored version, never a mix of
+        // two concurrent reads around a save.
+        var detail = await _provider.GetDetailAsync(request.ProjectId, selected);
+        if (detail is null || detail.Definition.Stages.Count == 0)
             return null;
+        var definition = detail.Definition;
         var metadata = request.Metadata with
         {
             ProjectId = request.ProjectId,

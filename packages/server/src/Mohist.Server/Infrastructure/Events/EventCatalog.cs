@@ -41,6 +41,7 @@ public static class EventCatalog
         ReverseDns.ChecksInterrupted,
         ReverseDns.RepairScheduled,
         ReverseDns.WorkflowArtifactRecorded,
+        ReverseDns.WorkflowProvenanceRecorded,
         ReverseDns.AgentSessionRuntimeBound,
         ReverseDns.AgentSessionUsageRecorded,
         ReverseDns.AgentSessionModelChanged,
@@ -76,6 +77,7 @@ public static class EventCatalog
         ReverseDns.InboxItemPersisted,
         ReverseDns.WorkspaceCreated,
         ReverseDns.WorkspaceArchived,
+        ReverseDns.WorkspaceRestored,
         ReverseDns.EpicCreated,
         ReverseDns.EpicUpdated,
         ReverseDns.EpicPriorityChanged,
@@ -200,6 +202,7 @@ public static class EventCatalog
         public const string ChecksInterrupted = "com.mohist.workflow.checks.interrupted";
         public const string RepairScheduled = "com.mohist.workflow.repair-scheduled";
         public const string WorkflowArtifactRecorded = "com.mohist.workflow.artifact.recorded";
+        public const string WorkflowProvenanceRecorded = "com.mohist.workflow.provenance.recorded";
 
         public const string AgentSessionRuntimeBound = "com.mohist.agent-session.runtime-bound";
         public const string AgentSessionUsageRecorded = "com.mohist.agent-session.usage-recorded";
@@ -248,6 +251,7 @@ public static class EventCatalog
 
         public const string WorkspaceCreated = "com.mohist.workspace.created";
         public const string WorkspaceArchived = "com.mohist.workspace.archived";
+        public const string WorkspaceRestored = "com.mohist.workspace.restored";
 
         public const string InboxItemPersisted = "com.mohist.inbox.item-persisted";
 

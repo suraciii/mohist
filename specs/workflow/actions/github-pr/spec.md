@@ -1,8 +1,9 @@
 # GitHub PR Actions
 
-GitHub PR Action repositories, branches, and Pull Request identities come from
-explicit `with` inputs. An Action does not read implicit fallback values from
-Variables. It always uses the workspace supplied by the host.
+GitHub PR Action repositories and branches come from explicit `with` inputs.
+The repository workspace uses `origin` for its GitHub remote. An Action does
+not read implicit fallback values from Variables and always uses the workspace
+supplied by the host.
 
 In these examples, `${{ repository.gitUrl }}`,
 `${{ repository.baseBranch }}`, and `${{ workspace.branch }}` come from the
@@ -32,8 +33,10 @@ Inputs:
 
 - `repositoryUrl` (required, text): Git repository URL that identifies the
   GitHub repository.
-- `source` (required, text): source branch.
-- `target` (required, text): target branch.
+- `source` (required, text): published source branch on `origin`; its remote tip
+  is read, validated as an immutable commit, and rechecked before a PR write.
+- `target` (required, text): target branch; validation compares against
+  `origin/<target>`, not a local branch that may be absent in a fresh clone.
 - `draft` (optional, Boolean, default `true`): whether to open the Pull
   Request as a draft.
 - `title` (optional, text): explicit Pull Request title.
@@ -43,7 +46,10 @@ Inputs:
 - `body` (optional, text): explicit Pull Request body.
 - `bodyFrom` (optional, text, default `issue.body`): Issue field used as the
   Pull Request body.
-
+- `requiredTrailers` (optional, text or array): required trailers validated
+  against every commit in the source-to-target range before any PR write.
+- `author` (optional, text): expected commit author identity.
+- `committer` (optional, text): expected commit committer identity.
 Outputs:
 
 - `kind`: output type identifier.
@@ -139,8 +145,18 @@ Inputs:
   supported.
 - `prNumber` (required, numeric): Pull Request number.
 - `subject` (optional, text): explicit squash-commit subject. When omitted,
-  the Action uses the title returned by its bounded Pull Request read. It does
-  not perform a separate Issue-field lookup.
+  the Action uses the title returned by its bounded Pull Request read. It
+  does not perform a separate Issue-field lookup.
+- `requiredTrailers` (required for squash auto-merge, non-empty text or array):
+  declared trailer policy required on the final squash message (subject and
+  body) before registration. Source commits still undergo newline and identity validation.
+- `body` (optional, text): explicit squash-commit body.
+- `author` (optional, text): expected commit author identity.
+- `committer` (optional, text): expected commit committer identity.
+- `source` / `target` (required, text): declared PR head and base branches.
+  The Action verifies these against GitHub's PR refs, validates the immutable
+  head/base commit IDs returned by GitHub, and submits `--match-head-commit`
+  so registration fails if the PR head moves after validation.
 
 Outputs:
 

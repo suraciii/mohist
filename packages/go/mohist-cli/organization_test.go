@@ -288,3 +288,99 @@ func TestOrganizationRequiredPositionalsRejectControlTokens(t *testing.T) {
 		}
 	}
 }
+
+func TestIssueEventsUsesEventsRouteWithLimitAndSelectedFields(t *testing.T) {
+	var got *http.Request
+	deps, out, errOut := organizationDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = r
+		return response(http.StatusOK, `{"success":true,"data":[{"id":9,"eventId":"evt-9","source":"server","type":"mohist.workflow.task.failed","specVersion":"1.0","subject":null,"time":"2026-09-28T00:00:00Z","dataContentType":"application/json","data":{"reason":"boom"},"extensions":{}}]}`), nil
+	}))
+	if code := Run(context.Background(), []string{"issue", "events", "42", "--project", "proj", "--limit", "5", "--json", "eventId,type"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if got == nil || got.Method != http.MethodGet || got.URL.Path != "/api/projects/proj/issues/42/events" || got.URL.RawQuery != "limit=5" {
+		t.Fatalf("request=%v query=%q", got, got.URL.RawQuery)
+	}
+	if out.String() != `[{"eventId":"evt-9","type":"mohist.workflow.task.failed"}]`+"\n" {
+		t.Fatalf("output=%q", out.String())
+	}
+}
+
+func TestIssueEventsEmptyListIsSuccessful(t *testing.T) {
+	deps, out, errOut := organizationDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"success":true,"data":[]}`), nil
+	}))
+	if code := Run(context.Background(), []string{"issue", "events", "42", "--project", "proj"}, deps); code != ExitOK || out.String() != "No events\n" || errOut.Len() != 0 {
+		t.Fatalf("code=%d out=%q err=%q", code, out.String(), errOut.String())
+	}
+}
+
+func TestIssueEventsBareJSONListsCatalogAndUnknownFieldSkipsHTTP(t *testing.T) {
+	calls := 0
+	deps, out, errOut := organizationDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("must not call")
+	}))
+	if code := Run(context.Background(), []string{"issue", "events", "42", "--json"}, deps); code != ExitOK || calls != 0 || out.String() != strings.Join(issueEventFields, "\n")+"\n" || errOut.Len() != 0 {
+		t.Fatalf("discovery code=%d calls=%d stdout=%q stderr=%q", code, calls, out.String(), errOut.String())
+	}
+	if code := Run(context.Background(), []string{"issue", "events", "42", "--project", "proj", "--json", "bogus"}, deps); code != ExitUsage || calls != 0 {
+		t.Fatalf("unknown field code=%d calls=%d", code, calls)
+	}
+}
+
+func TestIssueLogsUsesTaskScopedRouteWithCursorAndLimit(t *testing.T) {
+	var got *http.Request
+	deps, out, errOut := organizationDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = r
+		return response(http.StatusOK, `{"success":true,"data":{"lines":[{"seq":100,"timestamp":"2026-09-28T00:00:00Z","source":"stdout","text":"building"}],"nextCursor":101,"truncated":true}}`), nil
+	}))
+	if code := Run(context.Background(), []string{"issue", "logs", "42", "--task", "build.1", "--cursor", "100", "--limit", "50", "--project", "proj", "--json", "lines,nextCursor,truncated"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if got == nil || got.Method != http.MethodGet || got.URL.Path != "/api/projects/proj/issues/42/workflow/tasks/build.1/logs" || got.URL.RawQuery != "cursor=100&limit=50" {
+		t.Fatalf("request=%v query=%q", got, got.URL.RawQuery)
+	}
+	if out.String() != `{"lines":[{"seq":100,"timestamp":"2026-09-28T00:00:00Z","source":"stdout","text":"building"}],"nextCursor":101,"truncated":true}`+"\n" {
+		t.Fatalf("output=%q", out.String())
+	}
+}
+
+func TestIssueLogsRequiresTaskSelectorBeforeHTTP(t *testing.T) {
+	calls := 0
+	deps, _, errOut := organizationDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("must not call")
+	}))
+	if code := Run(context.Background(), []string{"issue", "logs", "42", "--project", "proj"}, deps); code != ExitUsage || calls != 0 || !strings.Contains(errOut.String(), "--task") {
+		t.Fatalf("code=%d calls=%d err=%q", code, calls, errOut.String())
+	}
+}
+
+func TestIssueLogsRejectsInvalidCursorAndLimitBeforeHTTP(t *testing.T) {
+	for _, args := range [][]string{
+		{"issue", "logs", "42", "--task", "build.1", "--cursor", "abc"},
+		{"issue", "logs", "42", "--task", "build.1", "--limit", "0"},
+		{"issue", "logs", "42", "--task", "build.1", "--limit", "-3"},
+	} {
+		calls := 0
+		deps, _, _ := organizationDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls++
+			return nil, errors.New("must not call")
+		}))
+		if code := Run(context.Background(), args, deps); code != ExitUsage || calls != 0 {
+			t.Fatalf("code=%d calls=%d for %v", code, calls, args)
+		}
+	}
+}
+
+func TestIssueLogsBareJSONListsCatalogWithoutHTTP(t *testing.T) {
+	calls := 0
+	deps, out, errOut := organizationDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("must not call")
+	}))
+	if code := Run(context.Background(), []string{"issue", "logs", "42", "--json"}, deps); code != ExitOK || calls != 0 || out.String() != strings.Join(issueLogFields, "\n")+"\n" || errOut.Len() != 0 {
+		t.Fatalf("code=%d calls=%d stdout=%q stderr=%q", code, calls, out.String(), errOut.String())
+	}
+}

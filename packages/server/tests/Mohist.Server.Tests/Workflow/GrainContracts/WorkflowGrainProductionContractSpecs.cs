@@ -211,6 +211,8 @@ public sealed class WorkflowGrainProductionContractSpecs
                 true,
                 null));
 
+        public Task<WorkflowProfileDetail?> GetDetailAsync(string projectId, string profileId, CancellationToken ct = default) =>
+            throw new NotSupportedException();
         public Task<string?> GetDefinitionSourceAsync(string projectId, string profileId, CancellationToken ct = default) =>
             throw new NotSupportedException();
 
@@ -226,6 +228,13 @@ public sealed class WorkflowGrainProductionContractSpecs
         public Task<WorkflowProfileSaveResult> UpdateAsync(
             string projectId,
             WorkflowProfileCollectionEntry request,
+            string expectedRevision,
+            CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<WorkflowDefinitionValidationResult> ValidateAsync(
+            string definitionSource,
+            string? profileId = null,
             CancellationToken ct = default) =>
             throw new NotSupportedException();
 

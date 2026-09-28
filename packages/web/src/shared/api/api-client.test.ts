@@ -93,6 +93,34 @@ describe('api client', () => {
     expect(requests[0].headers.get('content-type')).toBe('application/json')
   })
 
+  it('shows the repository field and corrective action when issue start fails preflight', async () => {
+    server.use(
+      http.post('*/api/projects/project-1/issues/7/start', () =>
+        HttpResponse.json(
+          {
+            success: false,
+            error:
+              "Repository 'source' does not have remote base branch 'main'. No Workspace, WorkflowRun, or AgentJob was created.",
+            code: 'repository_base_branch_missing',
+            details: { field: 'repository.baseBranch', executionCreated: false },
+            nextAction: 'Create or select origin/main and retry.',
+          },
+          { status: 400 },
+        ),
+      ),
+    )
+
+    await expect(request('/projects/project-1/issues/7/start', { method: 'POST' })).rejects.toMatchObject({
+      message: expect.stringContaining('repository.baseBranch: Repository'),
+      code: 'repository_base_branch_missing',
+      details: { executionCreated: false },
+      nextAction: 'Create or select origin/main and retry.',
+    })
+    await expect(request('/projects/project-1/issues/7/start', { method: 'POST' })).rejects.toThrow(
+      'Create or select origin/main and retry.',
+    )
+  })
+
   it('preserves recovery effect facts from JSON responses', async () => {
     server.use(
       http.post('*/api/projects/project-1/agent-sessions/session-1/compact', () =>

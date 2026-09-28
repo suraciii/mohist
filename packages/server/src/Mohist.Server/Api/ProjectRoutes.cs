@@ -124,6 +124,24 @@ public static class ProjectRoutes
             return ApiResults.Ok(await provider.ListAsync(project.Id));
         });
 
+        byRef.MapPost("/workflow-profiles/validate", async (
+            HttpContext context,
+            WorkflowProfileValidationRequest request,
+            IWorkflowProfileProvider provider) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.DefinitionSource))
+                return ApiResults.BadRequest("definitionSource is required", "definition_source_required");
+
+            var project = context.GetResolvedProject();
+            var validation = await provider.ValidateAsync(request.DefinitionSource, request.ProfileId);
+            return ApiResults.Ok(new WorkflowProfileValidationResponse(
+                project.Id,
+                validation.DefinitionErrors,
+                validation.ActionErrors,
+                validation.ActionValidationStatus,
+                validation.ActionValidationSkipReason));
+        });
+
         byRef.MapPost("/workflow-profiles", async (
             HttpContext context,
             WorkflowProfileSaveRequest request,
@@ -141,10 +159,6 @@ public static class ProjectRoutes
             {
                 return ApiResults.Conflict(ex.Message, "workflow_profile_read_only");
             }
-            catch (WorkflowDefinitionValidationException ex)
-            {
-                return ApiResults.BadRequest(ex.Message, "workflow_profile_definition_validation", ex.Errors);
-            }
         });
 
         byRef.MapGet("/workflow-profiles/{*profileId}", async (
@@ -154,23 +168,24 @@ public static class ProjectRoutes
         {
             var project = context.GetResolvedProject();
             var id = Uri.UnescapeDataString(profileId);
-            var profile = await provider.GetAsync(project.Id, id);
-            if (profile is null)
+            // One provider read: content, derived structure, and revision
+            // describe the same stored version, so an edit cannot
+            // interleave between the facts the caller will use as its
+            // next edit precondition.
+            var detail = await provider.GetDetailAsync(project.Id, id);
+            if (detail is null)
                 return ApiResults.NotFound($"WorkflowProfile '{id}' was not found");
 
-            var definition = await provider.GetDefinitionAsync(project.Id, id);
-            if (definition is null)
-                return ApiResults.NotFound($"WorkflowProfile '{id}' has no readable definition");
-
             return ApiResults.Ok(new WorkflowProfileDetailResponse(
-                profile.ProjectId,
-                profile.ProfileId,
-                profile.Name,
-                profile.Description,
-                profile.SourceProvenance,
-                profile.IsBuiltIn,
-                profile.DefinitionSource,
-                definition.Stages
+                detail.Profile.ProjectId,
+                detail.Profile.ProfileId,
+                detail.Profile.Name,
+                detail.Profile.Description,
+                detail.Profile.SourceProvenance,
+                detail.Profile.IsBuiltIn,
+                detail.Profile.Revision,
+                detail.Profile.DefinitionSource,
+                detail.Definition.Stages
                     .Select(stage => new WorkflowProfileStageSummary(
                         stage.Stage,
                         stage.RequiresApproval,
@@ -187,6 +202,13 @@ public static class ProjectRoutes
         {
             var project = context.GetResolvedProject();
             var id = Uri.UnescapeDataString(profileId);
+            if (string.IsNullOrWhiteSpace(request.ExpectedRevision))
+            {
+                return ApiResults.BadRequest(
+                    "expectedRevision is required: read the Profile, then submit the revision that read returned",
+                    "expected_revision_required");
+            }
+
             try
             {
                 var result = await grains.GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(project.Id)
@@ -196,7 +218,8 @@ public static class ProjectRoutes
                             id,
                             request.Name ?? id,
                             request.Description ?? string.Empty,
-                            request.DefinitionSource),
+                            request.DefinitionSource,
+                            ExpectedContentRevision: request.ExpectedRevision),
                         $"api-profile-update:{Guid.NewGuid():N}",
                         expectedRevision: null);
                 return result.ValidationResult.IsValid
@@ -211,9 +234,14 @@ public static class ProjectRoutes
             {
                 return ApiResults.NotFound(ex.Message);
             }
-            catch (WorkflowDefinitionValidationException ex)
+            catch (WorkflowProfileRevisionConflictException ex)
             {
-                return ApiResults.BadRequest(ex.Message, "workflow_profile_definition_validation", ex.Errors);
+                return ApiResults.Conflict(
+                    $"{ex.Message} Read the current content and revision, compare it with your draft, then reapply your changes.",
+                    "workflow_profile_revision_conflict",
+                    ex.CurrentRevision is null
+                        ? null
+                        : new { currentRevision = ex.CurrentRevision });
             }
         });
 
@@ -649,17 +677,6 @@ public static class ProjectRoutes
             ? prompt with { Source = "project-override" }
             : prompt;
 
-    internal static object ToActionValidationNotice(ActionValidationStatus status) => status switch
-    {
-        ActionValidationStatus.Performed => new { performed = true },
-        ActionValidationStatus.Skipped => new
-        {
-            performed = false,
-            reason = "Action-contract validation was not performed: no Runner has reported an Action catalog yet.",
-        },
-        _ => new { performed = false },
-    };
-
     private static bool TryGetRepositoryNameError(
         ArgumentException exception,
         string requestedName,
@@ -718,6 +735,7 @@ public sealed record WorkflowProfileDetailResponse(
     string Description,
     WorkflowProfileSourceProvenance SourceProvenance,
     bool IsBuiltIn,
+    string? Revision,
     string? DefinitionSource,
     IReadOnlyList<WorkflowProfileStageSummary> Stages);
 
@@ -726,7 +744,6 @@ public sealed record WorkflowProfileStageSummary(
     bool RequiresApproval,
     IReadOnlyList<string> Tasks,
     IReadOnlyList<string> Checks);
-
 public sealed record PromptUpsertRequest(string? Body);
 
 public sealed record ProjectPromptOverrideRequest(
@@ -813,11 +830,18 @@ public sealed record ProjectVerificationCommandBody(
     }
 }
 
+/// <summary>
+/// Body of the create and update Profile writes. The update route
+/// requires <see cref="ExpectedRevision"/>: the opaque revision the
+/// caller read with the content it is replacing. Create ignores the
+/// field; identity is its own uniqueness rule.
+/// </summary>
 public sealed record WorkflowProfileSaveRequest(
     string ProfileId,
     string? Name,
     string? Description,
-    string DefinitionSource)
+    string DefinitionSource,
+    string? ExpectedRevision = null)
 {
     public WorkflowProfileCollectionEntry ToEntry(string projectId, string? profileId = null) =>
         new(
@@ -829,3 +853,25 @@ public sealed record WorkflowProfileSaveRequest(
             false,
             DefinitionSource);
 }
+
+/// <summary>
+/// Body of <c>POST /api/projects/{projectRef}/workflow-profiles/validate</c>.
+/// The optional <c>profileId</c> only names the parse fallback for a source
+/// without an <c>id</c>; validation never writes or reserves the identity.
+/// </summary>
+public sealed record WorkflowProfileValidationRequest(
+    string? ProfileId,
+    string DefinitionSource);
+
+/// <summary>
+/// Answer of the no-write Profile validation: every definition and Action
+/// error the performed checks found, plus the scope of the Action check.
+/// <c>ActionValidationStatus</c> "skipped" with its reason means the check
+/// did not run — it is neither a pass nor a found error.
+/// </summary>
+public sealed record WorkflowProfileValidationResponse(
+    string ProjectId,
+    IReadOnlyList<WorkflowProfileValidationError> DefinitionErrors,
+    IReadOnlyList<WorkflowProfileValidationError> ActionErrors,
+    ActionValidationStatus ActionValidationStatus,
+    string? ActionValidationSkipReason);

@@ -125,3 +125,9 @@ public sealed record GitCommit(string Hash, string ShortHash, string Message, st
 public sealed record WorkspaceRemovalResult(bool Removed, string Status, string? Path, string? Reason, string Message);
 
 public sealed record RunnerFollowupDeliveryResult(bool Accepted, string? Error = null);
+public sealed record RepositoryPreflightParams(
+    [property: JsonPropertyName("gitUrl")] string GitUrl,
+    [property: JsonPropertyName("baseBranch")] string BaseBranch);
+
+public sealed record RepositoryPreflightResult(
+    [property: JsonPropertyName("exitCode")] int ExitCode);

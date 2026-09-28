@@ -42,6 +42,14 @@ public class IssueReadModel
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? WorkflowProfileId { get; set; } = IssueWorkflowProfiles.LocalId;
     public string? WorkflowProfileMode { get; set; }
+    /// <summary>
+    /// Where the effective next-start selection came from ("issue",
+    /// "project-default", or "system"); null when the Issue has no
+    /// Workflow. Reported beside <see cref="WorkflowProfileMode"/> so a
+    /// reader can distinguish the next-start selection from the binding of
+    /// a run that already started (#1099).
+    /// </summary>
+    public string? WorkflowProfileSource { get; set; }
     public bool NoWorkflow { get; set; }
     public int[] PrerequisiteNumbers { get; set; } = [];
     public IssueCommentDto[] Comments { get; set; } = [];

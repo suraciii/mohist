@@ -133,6 +133,7 @@ public static class WorkflowRunLineage
             CheckFailed v => v.Stage,
             CheckPending v => v.Stage,
             ChecksInterrupted v => v.Stage,
+            WorkflowProvenanceRecorded v => v.Stage,
             _ => null,
         };
     }
@@ -157,7 +158,8 @@ public static class WorkflowRunLineage
         CheckPassed or
         CheckFailed or
         CheckPending or
-        ChecksInterrupted => true,
+        ChecksInterrupted or
+        WorkflowProvenanceRecorded => true,
         _ => false,
     };
 }

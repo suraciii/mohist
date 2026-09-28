@@ -41,6 +41,15 @@ public interface IWorkflowProfileReferenceCoordinatorGrain : IGrainWithStringKey
         string commandId,
         long? expectedRevision);
 
+    /// <summary>
+    /// Validate and persist a custom Profile content update. The payload's
+    /// <see cref="WorkflowProfileCommandPayload.UpdateProfile.ExpectedContentRevision"/>
+    /// is the precondition the caller read; the provider compares it at the
+    /// storage boundary, so a stale command never overwrites a newer edit.
+    /// The fence persists that precondition with the payload: a replay
+    /// after a lost response distinguishes an already-applied commit from a
+    /// superseded command instead of writing unconditionally.
+    /// </summary>
     Task<WorkflowProfileSaveResult> UpdateProfileAsync(
         WorkflowProfileCommandPayload.UpdateProfile payload,
         string commandId,
@@ -161,7 +170,8 @@ public abstract record WorkflowProfileCommandPayload
         string ProfileId,
         string Name,
         string Description,
-        string DefinitionSource) : WorkflowProfileCommandPayload
+        string DefinitionSource,
+        [property: Id(6)] string? ExpectedContentRevision = null) : WorkflowProfileCommandPayload
     {
         public override string Kind => WorkflowProfileCommandPayloadKinds.UpdateProfile;
     }

@@ -267,11 +267,12 @@ Actions such as `mohist/opencode` and `mohist/pi` are rejected in Profile
 The Definition validator recursively checks template expressions in `with`
 values. The catalog does not repeat Profile, Definition-field, or template
 namespace validation. Diagnostic sources are combined into one validation
-exception, use one YAML path convention, and carry source labels. A successful
-save response contains `actionValidation: { performed, reason? }`. Built-in
-Profile loading, runtime loading, and `mo workflow validate --file` perform
-Definition validation without the catalog. Legacy `with.agent`, `with.kind`,
-`with.type`, and `with.expect` are rejected as unknown input keys.
+exception, use one YAML path convention, and carry source labels. A validation
+or save response states whether the Action check ran through
+`actionValidationStatus` and an `actionValidationSkipReason` when it was
+skipped. Built-in Profile loading and runtime loading perform Definition
+validation without the catalog. Legacy `with.agent`, `with.kind`, `with.type`,
+and `with.expect` are rejected as unknown input keys.
 
 ### `setVars`
 

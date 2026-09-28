@@ -183,9 +183,21 @@ Inputs:
 - `source` (required, text): source branch.
 - `target` (required, text): target branch.
 - `remote` (required, text): Git remote name.
+- `baseBranch` (optional, text): existing remote branch used as the validation
+  base when `target` is new. Required for first publication with commit policy;
+  otherwise validation uses `target`. An unavailable base blocks publication.
 - `force` (optional, Boolean, default `false`): whether to push with `--force`.
 - `forceWithLease` (optional, Boolean, default `false`): whether to push with
   `--force-with-lease`.
+- `strategy` (optional, text, default `partial-git`): publication strategy.
+  `partial-git` publishes from the workspace clone. `full-clone` first runs
+  `git fetch --no-filter <remote>` to materialize complete objects for
+  partial/promisor clones. Strategies are explicit; the action never silently
+  falls back to another strategy.
+- `requiredTrailers` (optional, array or comma-separated text): trailer tokens
+  required on commits being pushed. Validation runs before the push, and the
+  Action pushes the resolved commit SHA rather than re-reading a mutable source ref.
+- `author` / `committer` (optional, text): expected commit identity policy.
 
 Outputs:
 
@@ -208,3 +220,11 @@ Business error codes:
 - `base-moved`: the target branch moved, so the push is not a fast-forward
   update.
 - `push-failed`: push failed for an unspecified reason.
+- `publication-strategy-unsupported`: requested publication strategy is not
+  implemented by this action.
+- `publication-full-clone-failed`: complete objects could not be fetched; no
+  push was performed.
+- `publication-validation-failed`: commit message trailers or configured
+  identity did not validate.
+- `publication-validation-unavailable`: commit objects could not be read
+  locally (common with incomplete partial clones).

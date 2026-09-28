@@ -126,7 +126,7 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         var (projectId, _, _) = await SeedProjectAsync();
 
         await Assert.ThrowsAsync<WorkflowProfileReadOnlyException>(() =>
-            _provider.UpdateAsync(projectId, BuildCustom("mohist/github-pr")));
+            _provider.UpdateAsync(projectId, BuildCustom("mohist/github-pr"), expectedRevision: "unused"));
     }
 
     [Fact]
@@ -151,15 +151,85 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
                     with: {}
                 checks: []
             """;
-        var exception = await Assert.ThrowsAsync<WorkflowDefinitionValidationException>(() =>
-            _provider.CreateAsync(projectId, BuildCustom("bad", yaml: yaml)));
+        var result = await _provider.CreateAsync(projectId, BuildCustom("bad", yaml: yaml));
 
-        Assert.NotEmpty(exception.Errors);
-        Assert.Contains(exception.Errors, e => e.Source == ValidationSource.Definition);
+        Assert.False(result.ValidationResult.IsValid);
+        Assert.Contains(result.ValidationResult.DefinitionErrors, e => e.Source == ValidationSource.Definition);
 
         await using var db = new MohistDbContext(_database.Options);
         Assert.False(await db.WorkflowProfileRecords
             .AnyAsync(r => r.ProjectId == projectId && r.ProfileId == "bad"));
+    }
+
+    [Fact]
+    public async Task Create_CatalogUnavailable_SavesValidDefinitionWithExplicitSkippedFact()
+    {
+        var (projectId, _, _) = await SeedProjectAsync();
+
+        var result = await _provider.CreateAsync(projectId, BuildCustom("no-catalog"));
+
+        Assert.True(result.ValidationResult.IsValid);
+        Assert.Equal(ActionValidationStatus.Skipped, result.ValidationResult.ActionValidationStatus);
+        Assert.Equal(
+            WorkflowDefinitionValidationResult.CatalogUnavailableSkipReason,
+            result.ValidationResult.ActionValidationSkipReason);
+
+        await using var db = new MohistDbContext(_database.Options);
+        Assert.True(await db.WorkflowProfileRecords
+            .AnyAsync(r => r.ProjectId == projectId && r.ProfileId == "no-catalog"));
+    }
+
+    [Fact]
+    public async Task Validate_ReproductionInput_ReportsPathLocatedErrorsWithoutWriting()
+    {
+        var (projectId, _, _) = await SeedProjectAsync();
+
+        var validation = await _provider.ValidateAsync("stages:\n  - not-a-valid-stage: true\n");
+
+        Assert.False(validation.IsValid);
+        Assert.Contains(validation.DefinitionErrors, e => e.Path == "stages[0].not-a-valid-stage");
+        Assert.Contains(validation.DefinitionErrors, e => e.Path == "stages[0].stage");
+        Assert.Equal(ActionValidationStatus.Skipped, validation.ActionValidationStatus);
+        Assert.Equal(
+            WorkflowDefinitionValidationResult.CatalogUnavailableSkipReason,
+            validation.ActionValidationSkipReason);
+
+        await using var db = new MohistDbContext(_database.Options);
+        Assert.False(await db.WorkflowProfileRecords.AnyAsync(r => r.ProjectId == projectId));
+    }
+
+    [Fact]
+    public async Task Validate_AndSave_JudgeTheSameInputAndCatalogIdentically()
+    {
+        var (projectId, _, _) = await SeedProjectAsync();
+        var provider = new WorkflowProfileProvider(
+            new TestDbContextFactory(_database.Options),
+            new StubActionCatalogSource(SimpleCatalog()));
+
+        var yaml = """
+            id: shared-judgment
+            stages:
+              - stage: build
+                tasks:
+                  - id: t
+                    uses: mohist/ghost
+                    with: {}
+                checks: []
+            """;
+        var validation = await provider.ValidateAsync(yaml, "shared-judgment");
+        var save = await provider.CreateAsync(projectId, BuildCustom("shared-judgment", yaml: yaml));
+
+        Assert.False(validation.IsValid);
+        Assert.False(save.ValidationResult.IsValid);
+        Assert.Equal(validation.ActionValidationStatus, save.ValidationResult.ActionValidationStatus);
+        Assert.Equal(
+            validation.ActionErrors.Select(e => (e.Path, e.Message)),
+            save.ValidationResult.ActionErrors.Select(e => (e.Path, e.Message)));
+        Assert.Contains(validation.ActionErrors, e => e.Message.Contains("mohist/ghost"));
+
+        await using var db = new MohistDbContext(_database.Options);
+        Assert.False(await db.WorkflowProfileRecords
+            .AnyAsync(r => r.ProjectId == projectId && r.ProfileId == "shared-judgment"));
     }
 
     [Fact]
@@ -262,7 +332,8 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
                     with: {}
                 checks: []
             """;
-        await _provider.CreateAsync(projectId, BuildCustom("upd", yaml: original));
+        var created = await _provider.CreateAsync(projectId, BuildCustom("upd", yaml: original));
+        var revision = created.Profile.Revision;
 
         var updated = """
             id: upd
@@ -274,7 +345,7 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
                     with: {}
                 checks: []
             """;
-        var result = await _provider.UpdateAsync(projectId, BuildCustom("upd", yaml: updated));
+        var result = await _provider.UpdateAsync(projectId, BuildCustom("upd", yaml: updated), revision!);
 
         Assert.Equal(WorkflowProfileSourceProvenance.Verbatim, result.Profile.SourceProvenance);
         Assert.Equal(updated, result.Profile.DefinitionSource);

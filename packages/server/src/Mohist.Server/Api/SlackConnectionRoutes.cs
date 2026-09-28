@@ -921,11 +921,9 @@ public static partial class SlackConnectionRoutes
     }
 
     private static string BuildFollowupRejectionReply(bool isDirectMessage) =>
-        isDirectMessage
-            ? "This Session cannot continue automatically because its execution state is unresolved. Reconcile or reset it in Mohist, then send the message again."
-            : "This Session cannot continue automatically because its execution state is unresolved. Reconcile or reset it in Mohist, then mention the Bot again.";
+        SlackFollowupRejection.Text(isDirectMessage);
 
-    private static async Task EnqueueFollowupRejectionAsync(
+    private static Task EnqueueFollowupRejectionAsync(
         SlackOutboxStore outbox,
         string projectId,
         Agent.Domain.AgentConnection connection,
@@ -933,15 +931,14 @@ public static partial class SlackConnectionRoutes
         string? threadTs,
         bool isDirectMessage,
         CancellationToken ct) =>
-        await EnqueueRequiredReplyAsync(
+        SlackFollowupRejection.EnqueueAsync(
             outbox,
             projectId,
-            connection,
-            identity.ConversationId,
+            connection.Id,
+            identity,
             BuildFollowupRejectionReply(isDirectMessage),
-            $"slack-followup-rejected:{identity.AsKey()}",
-            ct,
-            threadTs);
+            threadTs,
+            ct);
 
     /// <summary>
     /// Leading marker that the Owner uses to start a brand new task

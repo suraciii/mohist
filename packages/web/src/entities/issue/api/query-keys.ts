@@ -22,6 +22,7 @@ export const issueDetailKeys = {
 
 export const workflowRunKeys = {
   detail: (workflowRunId?: string | null) => ['workflow-run', workflowRunId ?? null] as const,
+  binding: (workflowRunId?: string | null) => ['workflow-run', workflowRunId ?? null, 'binding'] as const,
 }
 
 export const issueWorkflowKeys = {

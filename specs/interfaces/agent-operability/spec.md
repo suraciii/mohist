@@ -84,6 +84,7 @@ Existing resource commands remain canonical:
 ```bash
 mo issue view <number> --json ...
 mo run view <run-id> --json ...
+mo run view <run-id> --json binding
 mo run why <run-id> --json ...
 mo session view <session-id> --json ...
 ```
@@ -94,6 +95,10 @@ small: resource identity, current state, blocker or waiting reason, next
 permitted action, and evidence references where they already exist. `mo run
 why` is the diagnosis path for a stopped or confusing Run; it must be
 discoverable from `mo run --help` and documented with the other Run actions.
+The Run binding read and the Issue's next-start selection facts keep two
+questions separate: what a started Run actually bound, and what the next start
+would select. [Workflow Profile](../../workflow/profiles/spec.md#read-the-actual-binding)
+owns that distinction.
 
 The CLI keeps the existing output rule: human output is concise, selected JSON
 is stable, and streams are NDJSON. A new generic `mo task` or `mo status`
@@ -108,6 +113,12 @@ resource identity, and replay the original operation when retried with the
 same key. Reusing a key with different inputs is a conflict. Extend the same
 contract to other mutations only when they become asynchronous or externally
 observable; do not pre-design every future command.
+
+Profile content edits use a different protection: the caller supplies the
+content revision it read, and a stale revision is a content conflict, not a
+keyed-write conflict. Replaying an edit is safe only while that revision is
+still current; after a lost response the caller reads the current content and
+revision instead of resending blindly.
 
 ### Deferred: resumable observation
 
@@ -172,6 +183,46 @@ A retry with the same identity returns the original operation and observation;
 it does not create another Job, Session, Turn, queue entry, or external effect.
 When an effect is unknown, the Agent receives an explicit unknown outcome and
 must resolve or hand it off before attempting a superseding action.
+
+## Workflow Operation Contract
+
+Workflow Profile maintenance is the first operation surface documented as one
+authoritative contract set. The owning specifications state each operation's
+inputs, results, effects, expected failures, limits, and access; this section
+maps the operations and links to their owners. Help from the installed binary
+is the version-bound syntax authority: it names the exact flags, fields, and
+error codes of the build in use, while the specifications own the stable
+semantics. Skills and guides refer to these contracts instead of copying a
+second rule set, and an example order is one valid path, not a required
+business sequence.
+
+- Read Profiles and their content revision: `mo workflow list`, `mo workflow
+  view`. [Workflow Profile](../../workflow/profiles/spec.md#manage-profiles)
+  owns the content model.
+- Validate a Definition without writing: `mo workflow validate`. Exit codes
+  and skipped-scope reporting are owned by
+  [Workflow Profile](../../workflow/profiles/spec.md#validate-before-saving)
+  and [CLI Reference](../cli/spec.md#workflow-profile).
+- Create or edit a Profile: `mo workflow create`, `mo workflow edit` with the
+  read content revision. Conflict and lost-response behavior is owned by
+  [Workflow Profile](../../workflow/profiles/spec.md#edit-with-a-content-revision).
+- Read what a Run actually bound: `mo run view --json binding`. Owned by
+  [Workflow Profile](../../workflow/profiles/spec.md#read-the-actual-binding).
+
+Both Agent environments use the same commands and contracts. An External
+Agent operates Mohist through the Skill and `mo` with its granted identity. A
+hosted Mohist Agent uses the same surface under its own grants; being hosted
+does not grant Profile-edit permission. Authorization is checked at the
+operation boundary, never by guidance.
+
+Adjacent contracts complete the operating loop: start and control
+([CLI Reference](../cli/spec.md#workflowrun) and
+[The Workflow](../../workflow/execution/spec.md)), progression and its pause
+([Epics](../../issue/epics/spec.md)), diagnosis (`mo run why`), and artifacts
+(`mo run artifact`). Pausing future progression does not stop current work;
+`stop` is the terminal control for one Run. Acceptance by a person remains
+distinct from any completed check: a passed Workflow is not an accepted
+requirement.
 
 ## Handoff and Supervision
 
@@ -342,6 +393,11 @@ preserve live in [the design note](design.md).
 - Failures on Issue and Run commands report a stable code, whether the effect
   is known, whether retry is safe, and the next action; `--json` selects the
   structured form instead of the two text lines.
+- `mo workflow validate` reports its complete validation scope through the
+ Server, `run view --json binding` reads the actual Run binding on demand,
+ and Issue reads expose the next-start selection facts. Profile content
+ revisions and the edit precondition are enforced at the authoritative write
+ boundary.
 
 Outside this increment, and not silently treated as current requirements:
 capability metadata catalogs, cursor-based observation of a Run, a complete
@@ -354,6 +410,7 @@ rather than adding a universal actor field.
 
 - [Product Vision](../../../docs/vision.md)
 - [Skills](../../agent/skills/spec.md)
+- [Workflow Profiles](../../workflow/profiles/spec.md)
 - [Agent Sessions](../../agent/execution/spec.md)
 - [Agent Supervision](../../agent/supervision/spec.md)
 - [External Agent API](../agent-api/spec.md)

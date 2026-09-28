@@ -13,6 +13,7 @@ using Mohist.Server.Workflow.Services;
 using Mohist.Workflow.Definition;
 using Xunit;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Infrastructure.Events;
 
 namespace Mohist.Server.Tests.Workflow.GrainContracts;
 
@@ -43,6 +44,33 @@ public sealed class WorkflowGrainApprovalRecoverySpecs
 
         Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation"));
         Assert.Equal("AwaitingApproval", await arrangement.Grain.GetRunStatusAsync());
+    }
+    [Fact]
+    public async Task AwaitingApproval_RecordsManualApprovalProvenance()
+    {
+        var arrangement = await ArrangeAsync("wr-gate-provenance-approval");
+        await ReportPlanAsync(arrangement);
+
+        await arrangement.Grain.ApproveAsync(
+            "operator-1",
+            actor: new WorkflowProvenanceActor(
+                WorkflowProvenanceActorKinds.User,
+                "operator-1"),
+            source: "api");
+
+        var stored = await arrangement.Events.ListAsync(arrangement.RunId);
+        var fact = Assert.Single(stored
+            .Where(evt => evt.Envelope.Type == EventCatalog.ReverseDns.WorkflowProvenanceRecorded)
+            .Select(evt => WorkflowEventSerializer.Unwrap(
+                WorkflowEventSerializer.FromData(
+                    nameof(WorkflowProvenanceRecorded),
+                    evt.Envelope.Data!.Value)))
+            .OfType<WorkflowProvenanceRecorded>());
+        Assert.Equal(WorkflowProvenanceActions.ManualApproval, fact.Action);
+        Assert.Equal(WorkflowProvenanceActorKinds.User, fact.ActorKind);
+        Assert.Equal("operator-1", fact.ActorId);
+        Assert.Equal("approved", fact.Outcome);
+        Assert.Equal("api", fact.Source);
     }
 
     [Fact]

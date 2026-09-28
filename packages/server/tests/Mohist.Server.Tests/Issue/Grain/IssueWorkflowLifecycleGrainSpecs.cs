@@ -1,11 +1,13 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Grains;
@@ -137,6 +139,98 @@ public sealed class IssueWorkflowLifecycleGrainSpecs
         Assert.NotNull(restarted);
         Assert.Equal("in_progress", restarted!.Status);
         Assert.Equal(newWrId, restarted.WorkflowRunId);
+    }
+
+    [Fact]
+    public async Task StartWorkAsync_WhenStoppedRunHasUnknownFailure_BlocksWithoutCreatingReplacement()
+    {
+        var (projectId, _, issueNumber, issueKey, oldWrId) = await SeedIssueInProgressAsync();
+
+        using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateScope())
+        {
+            var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
+            var source = new Uri(
+                WorkflowRunEventPersistence.WorkflowRunSource(oldWrId),
+                UriKind.Relative);
+            await events.AppendAsync(new CloudEvent(
+                $"event-{Guid.NewGuid():N}",
+                source,
+                EventCatalog.ReverseDns.WorkflowRunFailed,
+                new DateTimeOffset(2026, 9, 28, 0, 0, 0, TimeSpan.Zero),
+                WorkflowEventSerializer.ToData(new WorkflowRunFailed("unknown"))));
+        }
+
+        await _grains.GetGrain<IWorkflowGrain>(oldWrId).StopAsync("test-stop");
+
+        await Assert.ThrowsAsync<IssueStartPriorRunUnsafeException>(
+            () => _grains.GetGrain<IIssueGrain>(issueKey).StartWorkAsync());
+
+        var current = await GetIssueInfoAsync(projectId, issueNumber);
+        Assert.NotNull(current);
+        Assert.Equal(oldWrId, current!.WorkflowRunId);
+
+        using var verify = _fixture.Cluster.GetSiloServiceProvider(null).CreateScope();
+        var db = verify.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Single(await db.WorkflowRuns
+            .Where(row => row.MetadataProjectId == projectId && row.IssueNumber == issueNumber)
+            .ToListAsync());
+        Assert.Single(await db.Workspaces
+            .Where(row => row.ProjectId == projectId && row.Name == $"issue-{issueNumber}")
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task StartWorkAsync_WhenStoppedAfterPublicationTaskFailure_BlocksReplacement()
+    {
+        var (projectId, _, issueNumber, issueKey, oldWrId) = await SeedIssueInProgressAsync();
+
+        using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateScope())
+        {
+            var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
+            await events.AppendAsync(new CloudEvent(
+                $"event-{Guid.NewGuid():N}",
+                new Uri(WorkflowRunEventPersistence.WorkflowRunSource(oldWrId), UriKind.Relative),
+                EventCatalog.ReverseDns.TaskFailed,
+                new DateTimeOffset(2026, 9, 28, 0, 0, 0, TimeSpan.Zero),
+                WorkflowEventSerializer.ToData(new TaskFailed("publish", "push", "push failed"))));
+        }
+
+        await _grains.GetGrain<IWorkflowGrain>(oldWrId).StopAsync("test-stop");
+
+        await Assert.ThrowsAsync<IssueStartPriorRunUnsafeException>(
+            () => _grains.GetGrain<IIssueGrain>(issueKey).StartWorkAsync());
+
+        var current = await GetIssueInfoAsync(projectId, issueNumber);
+        Assert.Equal(oldWrId, current!.WorkflowRunId);
+    }
+
+    [Fact]
+    public async Task StartWorkAsync_WhenCorruptRunHasPushFact_BlocksReplacement()
+    {
+        var (projectId, _, issueNumber, issueKey, oldWrId) = await SeedIssueInProgressAsync();
+        using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateScope())
+        {
+            var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
+            await events.AppendAsync(new CloudEvent(
+                $"event-{Guid.NewGuid():N}",
+                new Uri(WorkflowRunEventPersistence.WorkflowRunSource(oldWrId), UriKind.Relative),
+                EventCatalog.ReverseDns.WorkflowProvenanceRecorded,
+                new DateTimeOffset(2026, 9, 28, 0, 0, 0, TimeSpan.Zero),
+                WorkflowEventSerializer.ToData(new WorkflowProvenanceRecorded(
+                    WorkflowProvenanceActions.Push,
+                    WorkflowProvenanceActorKinds.System,
+                    "runner-1",
+                    "mohist/push",
+                    "completed"))));
+        }
+
+        await TestLifecycle.Deactivate(_grains.GetGrain<IWorkflowGrain>(oldWrId));
+        await CorruptWorkflowRunStateAsync(oldWrId);
+
+        await Assert.ThrowsAsync<IssueStartPriorRunUnsafeException>(
+            () => _grains.GetGrain<IIssueGrain>(issueKey).StartWorkAsync());
+        var current = await GetIssueInfoAsync(projectId, issueNumber);
+        Assert.Equal(oldWrId, current!.WorkflowRunId);
     }
 
     [Fact]
@@ -305,6 +399,17 @@ public sealed class IssueWorkflowLifecycleGrainSpecs
         await _fixture.Cluster.GetSiloServiceProvider(null).GetRequiredService<IEventDispatcher>().DrainAsync();
 
         return (projectId, projectName, number, issueKey, wrId);
+    }
+
+    private async Task CorruptWorkflowRunStateAsync(string workflowRunId)
+    {
+        await using var db = new MohistDbContext(new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_fixture.ConnectionString)
+            .Options);
+        var row = await db.WorkflowRuns.FindAsync(workflowRunId)
+            ?? throw new InvalidOperationException($"Workflow run {workflowRunId} was not stored");
+        row.State = "{}";
+        await db.SaveChangesAsync();
     }
 
     private async Task PoisonWorkflowFailureReasonAsync(string workflowRunId, string reason)

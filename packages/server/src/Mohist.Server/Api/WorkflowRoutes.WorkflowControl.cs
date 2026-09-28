@@ -2,11 +2,13 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Api.DirectApi;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure.Idempotency;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Api;
@@ -73,7 +75,14 @@ public static partial class WorkflowRoutes
                         reader,
                         issueQuerier,
                         workflowRunId,
-                        () => grains.GetGrain<IWorkflowGrain>(workflowRunId).ApproveAsync(currentUser.Principal.Id, displayName.Value));
+                        () => grains.GetGrain<IWorkflowGrain>(workflowRunId).ApproveAsync(
+                            currentUser.Principal.Id,
+                            displayName.Value,
+                            new WorkflowProvenanceActor(
+                                WorkflowProvenanceActorKinds.User,
+                                currentUser.Principal.Id,
+                                displayName.Value),
+                            "api"));
                 });
         });
 
@@ -114,7 +123,15 @@ public static partial class WorkflowRoutes
                         reader,
                         issueQuerier,
                         workflowRunId,
-                        () => grains.GetGrain<IWorkflowGrain>(workflowRunId).RequestChangesAsync(req.Message, currentUser.Principal.Id, displayName.Value));
+                        () => grains.GetGrain<IWorkflowGrain>(workflowRunId).RequestChangesAsync(
+                            req.Message,
+                            currentUser.Principal.Id,
+                            displayName.Value,
+                            new WorkflowProvenanceActor(
+                                WorkflowProvenanceActorKinds.User,
+                                currentUser.Principal.Id,
+                                displayName.Value),
+                            "api"));
                 });
         });
 
@@ -143,7 +160,9 @@ public static partial class WorkflowRoutes
                         reader,
                         issueQuerier,
                         workflowRunId,
-                        () => grains.GetGrain<IWorkflowGrain>(workflowRunId).RetryAsync());
+                        () => grains.GetGrain<IWorkflowGrain>(workflowRunId).RetryAsync(
+                            new WorkflowProvenanceActor(WorkflowProvenanceActorKinds.User, currentUser.Principal.Id),
+                            "api"));
                 });
         });
 
@@ -155,7 +174,8 @@ public static partial class WorkflowRoutes
             ICurrentUser currentUser,
             IdempotencyFence fence,
             TimeProvider timeProvider,
-            IssueQuerier issueQuerier) =>
+            IssueQuerier issueQuerier,
+            IEventStore events) =>
         {
             var key = DirectApiWriteValidation.ReadIdempotencyKey(ctx.Request.Headers);
             return await KeyedControlWrites.ExecuteAsync(
@@ -174,11 +194,20 @@ public static partial class WorkflowRoutes
                             reader,
                             issueQuerier,
                             workflowRunId,
-                            () => grains.GetGrain<IWorkflowGrain>(workflowRunId).RerunAsync());
+                            () => grains.GetGrain<IWorkflowGrain>(workflowRunId).RerunAsync(
+                                new WorkflowProvenanceActor(WorkflowProvenanceActorKinds.User, currentUser.Principal.Id),
+                                "api"));
                     }
                     catch (Exception ex) when (WorkflowControlRecovery.IsWorkflowRunStateCorruption(ex))
                     {
-                        return await WorkflowControlRecovery.RecoverWorkflowRunScopedRerunAsync(grains, issueQuerier, workflowRunId);
+                        return await WorkflowControlRecovery.RecoverWorkflowRunScopedRerunAsync(
+                            grains,
+                            issueQuerier,
+                            workflowRunId,
+                            events,
+                            new WorkflowProvenanceActor(
+                                WorkflowProvenanceActorKinds.User,
+                                currentUser.Principal.Id));
                     }
                 });
         });
@@ -192,7 +221,8 @@ public static partial class WorkflowRoutes
             ICurrentUser currentUser,
             IdempotencyFence fence,
             TimeProvider timeProvider,
-            IssueQuerier issueQuerier) =>
+            IssueQuerier issueQuerier,
+            IEventStore events) =>
         {
             if (string.IsNullOrWhiteSpace(req?.Stage))
                 return ApiResults.BadRequest(
@@ -212,7 +242,10 @@ public static partial class WorkflowRoutes
                     {
                         if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.RetryOrRerun) is { } failure)
                             return failure;
-                        var result = await grains.GetGrain<IWorkflowGrain>(workflowRunId).RerunFromStageAsync(req.Stage);
+                        var result = await grains.GetGrain<IWorkflowGrain>(workflowRunId).RerunFromStageAsync(
+                            req.Stage,
+                            new WorkflowProvenanceActor(WorkflowProvenanceActorKinds.User, currentUser.Principal.Id),
+                            "api");
                         if (!result.Success)
                         {
                             return result.Code switch
@@ -229,7 +262,14 @@ public static partial class WorkflowRoutes
                     }
                     catch (Exception ex) when (WorkflowControlRecovery.IsWorkflowRunStateCorruption(ex))
                     {
-                        return await WorkflowControlRecovery.RecoverWorkflowRunScopedRerunAsync(grains, issueQuerier, workflowRunId);
+                        return await WorkflowControlRecovery.RecoverWorkflowRunScopedRerunAsync(
+                            grains,
+                            issueQuerier,
+                            workflowRunId,
+                            events,
+                            new WorkflowProvenanceActor(
+                                WorkflowProvenanceActorKinds.User,
+                                currentUser.Principal.Id));
                     }
                 });
         });

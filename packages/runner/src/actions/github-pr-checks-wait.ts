@@ -60,7 +60,7 @@ export type GitHubPrCheckRecorder = (
 ) => void
 
 export type GitHubPrChecksWaitResult =
-  | { kind: 'ok' }
+  | { kind: 'ok'; checks: { name: string; bucket: string }[] }
   | { kind: 'failed'; message: string; output: string }
   | { kind: 'unavailable'; message: string; output: string }
   | { kind: 'cancelled'; message: string; output: string }
@@ -140,7 +140,7 @@ export async function waitForGitHubPrChecks(
           }
         }
         if (classification.kind === 'passed') {
-          return { kind: 'ok' }
+          return { kind: 'ok', checks: checks.map(({ name, bucket }) => ({ name, bucket })) }
         }
       }
     }

@@ -2901,6 +2901,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         {
             await _stateStore.SaveAsync(SessionId, session);
             _session = session;
+            await SettlePendingFollowupsForUnboundLaunchAsync(session, turn, status, result);
             _followupDispatchScheduler?.Schedule(
                 session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
                 session.Id);
@@ -2912,6 +2913,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             return;
         }
         await CommitAsync(session, events);
+        await SettlePendingFollowupsForUnboundLaunchAsync(session, turn, status, result);
         _followupDispatchScheduler?.Schedule(
             session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
             session.Id);
@@ -3001,6 +3003,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         {
             await _stateStore.SaveAsync(SessionId, session);
             _session = session;
+            await SettlePendingFollowupsForUnboundLaunchAsync(session, turn, status, result);
             await ObserveWorkflowExecutionAsync(
                 turn,
                 ObservationKind(status),
@@ -3009,6 +3012,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             return;
         }
         await CommitAsync(session, events);
+        await SettlePendingFollowupsForUnboundLaunchAsync(session, turn, status, result);
         await ObserveWorkflowExecutionAsync(
             turn,
             ObservationKind(status),
@@ -3325,23 +3329,5 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             && (!before.TryGetValue(turn.Id, out var prior)
                 || prior is not (AgentTurnStatus.Failed or AgentTurnStatus.Cancelled or AgentTurnStatus.Unknown)));
     }
-
-    private async Task TryEmitFollowupTerminalDeliveriesAsync(
-        AgentSession session,
-        Dictionary<string, AgentTurnStatus> before)
-    {
-        var turns = session.Status.Turns;
-        if (turns is null || turns.Count == 0) return;
-        foreach (var turn in turns)
-        {
-            if (!string.IsNullOrWhiteSpace(turn.JobId)) continue;
-            before.TryGetValue(turn.Id, out var prior);
-            if (IsTerminalTurn(prior) || !IsTerminalTurn(turn.Status)) continue;
-            await TryEmitFollowupDeliveryAsync(session, turn);
-        }
-    }
-
-    private static bool IsTerminalTurn(AgentTurnStatus status) =>
-        status is not AgentTurnStatus.Queued and not AgentTurnStatus.Executing;
 
 }

@@ -109,11 +109,21 @@ public sealed class GitHubPullRequestReviewHandler : ICloudEventHandler
             switch (payload.State)
             {
                 case GitHubPullRequestReviewState.Approved:
-                    await workflow.ApproveAsync(decidedBy);
+                    await workflow.ApproveAsync(
+                        decidedBy,
+                        actor: new WorkflowProvenanceActor(
+                            WorkflowProvenanceActorKinds.External,
+                            decidedBy),
+                        source: "github-review");
                     break;
                 case GitHubPullRequestReviewState.ChangesRequested:
                     await workflow.RequestChangesAsync(
-                        GitHubPullRequestReviewTranslation.ChangeRequestReason(payload.Body), decidedBy);
+                        GitHubPullRequestReviewTranslation.ChangeRequestReason(payload.Body),
+                        decidedBy,
+                        actor: new WorkflowProvenanceActor(
+                            WorkflowProvenanceActorKinds.External,
+                            decidedBy),
+                        source: "github-review");
                     break;
                 default:
                     return;

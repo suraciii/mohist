@@ -122,4 +122,51 @@ public class WorkspaceStateTests
         var error = Assert.Throws<WorkspaceDomainException>(() => state.EnsureActive());
         Assert.Equal("workspace_archived", error.Code);
     }
+
+    [Fact]
+    public void RestoreArchivedByOrigin_ArchivedWorkspaceRestoresAndClearsStaleHome()
+    {
+        var origin = new WorkspaceOrigin.Issue(42);
+        var state = Active(origin);
+        state.EnsureMaterializedOn("runner-a", "/workspace/issue-42");
+        state.ArchiveByOrigin(origin, DateTimeOffset.UnixEpoch.AddMinutes(1));
+
+        Assert.True(state.RestoreArchivedByOrigin(origin));
+
+        Assert.Equal(WorkspaceStatus.Active, state.Status);
+        Assert.Null(state.ArchivedAt);
+        Assert.Null(state.Home);
+        Assert.Equal("pay", state.Name);
+        Assert.Equal(origin, state.Origin);
+        Assert.Equal(["server"], state.RepositoryNames);
+    }
+
+    [Fact]
+    public void RestoreArchivedByOrigin_ActiveWorkspaceIsIdempotentNoOp()
+    {
+        var origin = new WorkspaceOrigin.Issue(42);
+        var state = Active(origin);
+        var home = state.EnsureMaterializedOn("runner-a", "/workspace/issue-42");
+
+        Assert.False(state.RestoreArchivedByOrigin(origin));
+
+        Assert.Equal(WorkspaceStatus.Active, state.Status);
+        Assert.Null(state.ArchivedAt);
+        Assert.Same(home, state.Home);
+    }
+
+    [Fact]
+    public void RestoreArchivedByOrigin_DifferentOriginReportsMismatch()
+    {
+        var origin = new WorkspaceOrigin.Issue(42);
+        var state = Active(origin);
+        state.ArchiveByOrigin(origin, DateTimeOffset.UnixEpoch);
+
+        var error = Assert.Throws<WorkspaceDomainException>(() =>
+            state.RestoreArchivedByOrigin(new WorkspaceOrigin.Issue(43)));
+
+        Assert.Equal("workspace_origin_mismatch", error.Code);
+        Assert.Equal(WorkspaceStatus.Archived, state.Status);
+        Assert.NotNull(state.ArchivedAt);
+    }
 }

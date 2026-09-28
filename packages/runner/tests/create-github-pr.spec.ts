@@ -3,10 +3,11 @@ import type { JsonObject } from '../src/core/types.js'
 import type { ActionTestContext as ActionContext } from './support/action-test-context.js'
 import { callAction } from './support/call-action.js'
 import { createDefaultRegistry } from '../src/actions/registry.js'
-import type { RunnerCommandRunner, RunnerFileSystem, RunnerGitRunner } from '../src/system/filesystem.js'
+import type { RunnerCommandRunner, RunnerFileSystem, RunnerResourceContext } from '../src/system/filesystem.js'
 import { withTestRunnerResources } from './support/test-resources.js'
 import { MemoryFileSystem } from './support/memory-filesystem.js'
 import { NETWORK_COMMAND_TIMEOUT_MS } from '../src/actions/git.js'
+import { PUBLICATION_LOG_FORMAT } from '../src/actions/publication.js'
 import { createGitHubPrAction } from '../src/actions/github-pr.js'
 import { omitGitHubClosingReferences } from '../src/actions/github-pr-issue-fields.js'
 
@@ -28,7 +29,7 @@ const PROJECT_PATH = '/project'
 
 type CreateGitHubPrTestResources = {
   fileSystem: RunnerFileSystem
-  githubPrGitRunner?: RunnerGitRunner
+  commandRunner?: NonNullable<RunnerResourceContext['commandRunner']>
   githubPrGhRunner?: RunnerCommandRunner
   issueFieldCommandRunner?: (
     command: string,
@@ -58,6 +59,32 @@ function fail(stderr: string, stdout = ''): GitResponse {
     stderr,
     exitCode: 1,
     combinedOutput: [stdout.trim(), stderr.trim()].filter(Boolean).join('\n'),
+  }
+}
+
+const MERGE_BASE_SHA = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+const PUBLISHED_COMMIT_SHA = 'cccccccccccccccccccccccccccccccccccccccc'
+const MERGE_BASE_COMMAND = `merge-base origin/master ${PUBLISHED_COMMIT_SHA}`
+const LOG_COMMAND = `log --format=${PUBLICATION_LOG_FORMAT} ${MERGE_BASE_SHA}..${PUBLISHED_COMMIT_SHA}`
+
+/** One valid commit record in the NUL-delimited publication log format. */
+function commitLog(message: string, sha = PUBLISHED_COMMIT_SHA): string {
+  return `${sha}\x00Workflow Agent\x00agent@example.com\x00Workflow Agent\x00agent@example.com\x00${message}\x00`
+}
+
+const VALID_COMMIT_LOG = commitLog('Use GitHub PR workflow\n\nOpen, review, and merge a GitHub PR.\n')
+
+/** Serves the read-only merge-base/log history validation the action runs before any external write. */
+function validHistoryRespond(_workDir: string, args: string[]): GitResponse {
+  if (args.join(' ') === 'ls-remote origin refs/heads/mohist/run-wr-gh-pr-1')
+    return ok(`${PUBLISHED_COMMIT_SHA}\trefs/heads/mohist/run-wr-gh-pr-1\n`)
+  switch (args.join(' ')) {
+    case MERGE_BASE_COMMAND:
+      return ok(`${MERGE_BASE_SHA}\n`)
+    case LOG_COMMAND:
+      return ok(VALID_COMMIT_LOG)
+    default:
+      return fail(`unexpected git call: ${args.join(' ')}`)
   }
 }
 
@@ -117,10 +144,25 @@ function installGit(
   resources: CreateGitHubPrTestResources,
   respond: (workDir: string, args: string[], signal: AbortSignal) => GitResponse | Promise<GitResponse>,
 ) {
-  resources.githubPrGitRunner = async (workDir, args, signal, options) => {
-    const recorded: GitCall = { command: args.join(' '), timeoutMs: options?.timeoutMs }
-    resources.gitCalls.push(recorded)
-    return await respond(workDir, args, signal)
+  // The action reads commit history through the generic command runner; gh and
+  // mo keep their dedicated runners, so only `git` commands arrive here.
+  resources.commandRunner = {
+    run: async (command, args, cwd, signal, _env, options) => {
+      if (command !== 'git') throw new Error(`unexpected command routed to the git fixture: ${command}`)
+      const recorded: GitCall = {
+        command: args.join(' '),
+        timeoutMs: (options as { timeoutMs?: number } | undefined)?.timeoutMs,
+      }
+      resources.gitCalls.push(recorded)
+      const response = await respond(cwd, args, signal)
+      return {
+        exitCode: response.exitCode,
+        stdout: response.stdout,
+        stderr: response.stderr,
+        status: response.status,
+        timeoutMs: response.timeoutMs,
+      }
+    },
   }
 }
 
@@ -177,18 +219,8 @@ describe('mohist/create-github-pr action', () => {
     const moCalls = installMoIssueShow(resources)
 
     installGit(resources, (_workDir, args) => {
-      const cmd = args.join(' ')
-      gitCalls.push(cmd)
-      switch (cmd) {
-        case 'fetch origin master':
-          return ok('From https://example.com/repo.git\n')
-        case 'rev-parse origin/master':
-          return ok('base-sha-1\n')
-        case 'push --force-with-lease origin mohist/run-wr-gh-pr-1':
-          return ok('To https://example.com/repo.git\n')
-        default:
-          return fail(`unexpected git call: ${cmd}`)
-      }
+      gitCalls.push(args.join(' '))
+      return validHistoryRespond(_workDir, args)
     })
 
     installGh(resources, (cmd, args) => {
@@ -221,7 +253,12 @@ describe('mohist/create-github-pr action', () => {
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
-    expect(gitCalls).toEqual([])
+    expect(gitCalls).toEqual([
+      'ls-remote origin refs/heads/mohist/run-wr-gh-pr-1',
+      MERGE_BASE_COMMAND,
+      LOG_COMMAND,
+      'ls-remote origin refs/heads/mohist/run-wr-gh-pr-1',
+    ])
     expect(ghCalls).toEqual([
       'gh --version',
       'gh auth status',
@@ -243,6 +280,7 @@ describe('mohist/create-github-pr action', () => {
 
   it('omits GitHub closing references from the PR body', async (resources) => {
     let createArgs: string[] | undefined
+    installGit(resources, validHistoryRespond)
     installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(' ')
       if (full === 'gh --version' || full === 'gh auth status') return ghOk('ok\n')
@@ -281,6 +319,7 @@ describe('mohist/create-github-pr action', () => {
     let listCalls = 0
     let createdBody: string | undefined
     let editedBody: string | undefined
+    installGit(resources, validHistoryRespond)
     installGh(resources, (cmd, args) => {
       if (cmd === 'gh' && args[0] === '--version') return ghOk('ok\n')
       if (cmd === 'gh' && args.join(' ') === 'auth status') return ghOk('ok\n')
@@ -313,12 +352,7 @@ describe('mohist/create-github-pr action', () => {
 
   it('uses the explicitly declared repository despite different Variables', async (resources) => {
     const prArguments: string[][] = []
-    installGit(resources, (_workDir, args) => {
-      if (args.join(' ') === 'fetch origin master') return ok('')
-      if (args.join(' ') === 'rev-parse origin/master') return ok('base-sha\n')
-      if (args.join(' ') === 'push --force-with-lease origin mohist/run-wr-gh-pr-1') return ok('')
-      return fail(`unexpected git call: ${args.join(' ')}`)
-    })
+    installGit(resources, validHistoryRespond)
     installGh(resources, (_cmd, args) => {
       if (args[0] === '--version' || args.join(' ') === 'auth status') return ghOk('ok\n')
       if (args[0] === 'pr') prArguments.push(args)
@@ -365,13 +399,7 @@ describe('mohist/create-github-pr action', () => {
   it('forwards gh command output to the task log sink', async (resources) => {
     const writes: Array<{ source: string; text: string }> = []
     installMoIssueShow(resources)
-    installGit(resources, (_workDir, args) => {
-      const cmd = args.join(' ')
-      if (cmd === 'fetch origin master') return ok('base fetched\n')
-      if (cmd === 'rev-parse origin/master') return ok('base-sha-1\n')
-      if (cmd === 'push --force-with-lease origin mohist/run-wr-gh-pr-1') return ok('pushed\n')
-      return fail(`unexpected git call: ${cmd}`)
-    })
+    installGit(resources, validHistoryRespond)
     resources.githubPrGhRunner = async (cmd, args, cwd, _signal, _env, options) => {
       const full = [cmd, ...args].join(' ')
       options?.onLine?.(`captured ${full}`)
@@ -393,18 +421,7 @@ describe('mohist/create-github-pr action', () => {
   it('reuses an existing open PR without mutating title/body when gh pr list returns a match', async (resources) => {
     const ghCalls: string[] = []
     installMoIssueShow(resources, 'Fresh issue title', 'Fresh issue body')
-    installGit(resources, (_workDir, args) => {
-      switch (args.join(' ')) {
-        case 'fetch origin master':
-          return ok('')
-        case 'rev-parse origin/master':
-          return ok('base-sha-1\n')
-        case 'push --force-with-lease origin mohist/run-wr-gh-pr-1':
-          return ok('')
-        default:
-          return fail(`unexpected git call: ${args.join(' ')}`)
-      }
-    })
+    installGit(resources, validHistoryRespond)
     installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(' ')
       ghCalls.push(full)
@@ -453,16 +470,7 @@ describe('mohist/create-github-pr action', () => {
     installGit(resources, (workDir, args) => {
       const command = args.join(' ')
       gitCalls.push({ workDir, command })
-      switch (command) {
-        case 'fetch origin master':
-          return ok('')
-        case 'rev-parse origin/master':
-          return ok('base-sha-1\n')
-        case 'push --force-with-lease origin mohist/run-wr-gh-pr-1':
-          return ok('')
-        default:
-          return fail(`unexpected git call: ${command}`)
-      }
+      return validHistoryRespond(workDir, args)
     })
     installGh(resources, (cmd, args, cwd) => {
       const command = [cmd, ...args].join(' ')
@@ -498,6 +506,18 @@ describe('mohist/create-github-pr action', () => {
     expect(result.error).toBeUndefined()
     expect(ghCalls.map((call) => call.cwd)).toEqual([WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH])
     expect(ghCalls.some((call) => call.cwd === PROJECT_PATH)).toBe(false)
+    expect(gitCalls.map((call) => call.workDir)).toEqual([
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+    ])
+    expect(gitCalls.map((call) => call.command)).toEqual([
+      'ls-remote origin refs/heads/mohist/run-wr-gh-pr-1',
+      MERGE_BASE_COMMAND,
+      LOG_COMMAND,
+      'ls-remote origin refs/heads/mohist/run-wr-gh-pr-1',
+    ])
     expect(output.prNumber).toBe(42)
   })
 
@@ -525,8 +545,27 @@ describe('mohist/create-github-pr action', () => {
     expect(result.error?.message).toContain("Unsupported titleFrom source 'issue.summary'")
   })
 
-  it('does not invoke Git when GitHub creates the PR', async (resources) => {
-    installGit(resources, () => fail('create-github-pr must not invoke git'))
+  it('blocks a PR write when its published source moves after commit validation', async (resources) => {
+    let reads = 0
+    installGit(resources, (workDir, args) => {
+      if (args[0] === 'ls-remote' && ++reads === 2) return ok(`${MERGE_BASE_SHA}\trefs/heads/mohist/run-wr-gh-pr-1\n`)
+      return validHistoryRespond(workDir, args)
+    })
+    installGh(resources, (cmd, args) =>
+      [cmd, ...args].join(' ') === 'gh --version' || [cmd, ...args].join(' ') === 'gh auth status'
+        ? ghOk('ok')
+        : ghFail('PR write should not run'),
+    )
+    const result = await callAction(createGitHubPrAction, context({ title: 'Issue title', body: 'Issue body' }))
+    expect(result.error).toMatchObject({
+      code: 'publication-validation-failed',
+      message: expect.stringContaining('moved'),
+    })
+    expect(resources.ghCalls.map((call) => call.command)).toEqual(['gh --version', 'gh auth status'])
+  })
+
+  it('performs only read-only history-validation Git calls when GitHub creates the PR', async (resources) => {
+    installGit(resources, validHistoryRespond)
     installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(' ')
       if (full === 'gh --version' || full === 'gh auth status') return ghOk('ok\n')
@@ -548,8 +587,13 @@ describe('mohist/create-github-pr action', () => {
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
-    expect(resources.gitCalls).toEqual([])
     expect(output.operation).toBe('created')
+    expect(resources.gitCalls.map((call) => call.command)).toEqual([
+      'ls-remote origin refs/heads/mohist/run-wr-gh-pr-1',
+      MERGE_BASE_COMMAND,
+      LOG_COMMAND,
+      'ls-remote origin refs/heads/mohist/run-wr-gh-pr-1',
+    ])
   })
 
   it('reports config-error when the gh CLI precheck fails', async (resources) => {
@@ -576,18 +620,7 @@ describe('mohist/create-github-pr action', () => {
 
   it('does not pass --draft when draft is explicitly false', async (resources) => {
     const ghCalls: string[] = []
-    installGit(resources, (_workDir, args) => {
-      switch (args.join(' ')) {
-        case 'fetch origin master':
-          return ok('')
-        case 'rev-parse origin/master':
-          return ok('base-sha-1\n')
-        case 'push --force-with-lease origin mohist/run-wr-gh-pr-1':
-          return ok('')
-        default:
-          return fail(`unexpected git call: ${args.join(' ')}`)
-      }
-    })
+    installGit(resources, validHistoryRespond)
     installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(' ')
       ghCalls.push(full)
@@ -628,19 +661,7 @@ describe('mohist/create-github-pr action', () => {
 
   it('NetworkGitHubCommands_AllReceiveTimeoutMs', async (resources) => {
     installMoIssueShow(resources)
-    installGit(resources, (_workDir, args) => {
-      const cmd = args.join(' ')
-      switch (cmd) {
-        case 'fetch origin master':
-          return ok('')
-        case 'rev-parse origin/master':
-          return ok('base-sha-1\n')
-        case 'push --force-with-lease origin mohist/run-wr-gh-pr-1':
-          return ok('')
-        default:
-          return fail(`unexpected git call: ${cmd}`)
-      }
-    })
+    installGit(resources, validHistoryRespond)
     installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(' ')
       switch (full) {
@@ -678,24 +699,16 @@ describe('mohist/create-github-pr action', () => {
       expect(call?.timeoutMs, `gh call ${command} missing timeoutMs`).toBe(NETWORK_COMMAND_TIMEOUT_MS)
     }
 
-    expect(resources.gitCalls).toEqual([])
+    for (const command of ['ls-remote origin refs/heads/mohist/run-wr-gh-pr-1', MERGE_BASE_COMMAND, LOG_COMMAND]) {
+      const call = resources.gitCalls.find((c) => c.command === command)
+      expect(call?.timeoutMs, `git call ${command} missing timeoutMs`).toBe(NETWORK_COMMAND_TIMEOUT_MS)
+    }
+    expect(resources.gitCalls).toHaveLength(4)
   })
 
   it('GhPrCreateTimeout_ClassifiesAsRetrySafeAndSurfacesDuration', async (resources) => {
     installMoIssueShow(resources)
-    installGit(resources, (_workDir, args) => {
-      const cmd = args.join(' ')
-      switch (cmd) {
-        case 'fetch origin master':
-          return ok('')
-        case 'rev-parse origin/master':
-          return ok('base-sha-1\n')
-        case 'push --force-with-lease origin mohist/run-wr-gh-pr-1':
-          return ok('')
-        default:
-          return fail(`unexpected git call: ${cmd}`)
-      }
-    })
+    installGit(resources, validHistoryRespond)
     installGh(resources, (cmd, args) => {
       const full = [cmd, ...args].join(' ')
       switch (full) {
@@ -731,5 +744,70 @@ describe('mohist/create-github-pr action', () => {
     expect(result.error).toBeDefined()
     expect(result.error).toMatchObject({ code: 'timeout' })
     expect(result.error?.message).toContain('timed out')
+  })
+
+  it('blocks PR creation when a source commit carries a literal escaped newline under the default policy', async (resources) => {
+    installGit(resources, (_workDir, args) => {
+      if (args[0] === 'ls-remote') return validHistoryRespond(_workDir, args)
+      switch (args.join(' ')) {
+        case MERGE_BASE_COMMAND:
+          return ok(`${MERGE_BASE_SHA}\n`)
+        case LOG_COMMAND:
+          return ok(commitLog('Add the workflow step\\n\\nwith escaped newlines'))
+        default:
+          return fail(`unexpected git call: ${args.join(' ')}`)
+      }
+    })
+    installGh(resources, (cmd, args) => {
+      const full = [cmd, ...args].join(' ')
+      switch (full) {
+        case 'gh --version':
+        case 'gh auth status':
+          return ghOk('ok\n')
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    const result = await callAction(createGitHubPrAction, context({ title: 'Issue title', body: 'Issue body' }))
+
+    expect(result.error).toMatchObject({ code: 'publication-validation-failed' })
+    expect(result.error?.message).toContain('literal escaped newline')
+    expect(result.error?.message).toContain('No PR was written')
+    expect(resources.ghCalls.map((call) => call.command)).toEqual(['gh --version', 'gh auth status'])
+  })
+
+  it('does not let an embedded record separator smuggle a malformed trailer past the commit gate', async (resources) => {
+    installGit(resources, (_workDir, args) => {
+      if (args[0] === 'ls-remote') return validHistoryRespond(_workDir, args)
+      switch (args.join(' ')) {
+        case MERGE_BASE_COMMAND:
+          return ok(`${MERGE_BASE_SHA}\n`)
+        case LOG_COMMAND:
+          return ok(commitLog('Implement the workflow step\n\nPolicy\x1e: yes'))
+        default:
+          return fail(`unexpected git call: ${args.join(' ')}`)
+      }
+    })
+    installGh(resources, (cmd, args) => {
+      const full = [cmd, ...args].join(' ')
+      switch (full) {
+        case 'gh --version':
+        case 'gh auth status':
+          return ghOk('ok\n')
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    const result = await callAction(
+      createGitHubPrAction,
+      context({ title: 'Issue title', body: 'Issue body', requiredTrailers: ['Policy'] }),
+    )
+
+    expect(result.error).toMatchObject({ code: 'publication-validation-failed' })
+    expect(result.error?.message).toContain('Malformed trailer line')
+    expect(result.error?.message).toContain('No PR was written')
+    expect(resources.ghCalls.map((call) => call.command)).toEqual(['gh --version', 'gh auth status'])
   })
 })

@@ -84,6 +84,22 @@ func TestWorkspaceCreateUsesNearestProjectStateAndRepositories(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRestorePostsToRestoreRoute(t *testing.T) {
+	var got *http.Request
+	files := map[string]string{"/work/tree/.mohist/cli-state.json": `{"activeProjectId":"nearest"}`}
+	deps, _, errOut := projectSpaceDeps(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = r
+		return response(200, `{"success":true,"data":{"name":"issue-7","status":"active"}}`), nil
+	}), files)
+
+	if code := Run(context.Background(), []string{"workspace", "restore", "issue-7"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if got == nil || got.Method != http.MethodPost || got.URL.EscapedPath() != "/api/projects/nearest/workspaces/issue-7/restore" {
+		t.Fatalf("request=%v", got)
+	}
+}
+
 func TestProjectVariableSetRejectsAmbiguousValueLocally(t *testing.T) {
 	calls := 0
 	deps, _, _ := projectSpaceDeps(t, roundTripFunc(func(*http.Request) (*http.Response, error) {

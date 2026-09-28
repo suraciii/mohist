@@ -17,11 +17,23 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task StopAsync(string? reason = null);
     Task<WorkflowWithdrawalResult> WithdrawIfBeforeIntegrateAsync(string? reason = null);
 
-    Task ApproveAsync(string? decidedBy = null, string? displayName = null);
-    Task<string> RequestChangesAsync(string body, string? decidedBy = null, string? displayName = null);
-    Task RetryAsync();
-    Task RerunAsync();
-    Task<WorkflowControlResult> RerunFromStageAsync(string stageId);
+    Task ApproveAsync(
+        string? decidedBy = null,
+        string? displayName = null,
+        WorkflowProvenanceActor? actor = null,
+        string? source = null);
+    Task<string> RequestChangesAsync(
+        string body,
+        string? decidedBy = null,
+        string? displayName = null,
+        WorkflowProvenanceActor? actor = null,
+        string? source = null);
+    Task RetryAsync(WorkflowProvenanceActor? actor = null, string? source = null);
+    Task RerunAsync(WorkflowProvenanceActor? actor = null, string? source = null);
+    Task<WorkflowControlResult> RerunFromStageAsync(
+        string stageId,
+        WorkflowProvenanceActor? actor = null,
+        string? source = null);
     Task<RuntimeTaskAddedResult> AddTaskAsync(RuntimeTaskInput task);
     Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request);
     Task<bool> HasIncompleteTaskWithUsesAsync(string uses);

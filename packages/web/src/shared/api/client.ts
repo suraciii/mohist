@@ -2,6 +2,14 @@ import type { ApiResponse } from './types'
 
 const BASE = '/api'
 
+function failureMessage(error: ApiResponse<unknown>): string {
+  const message = error.error ?? 'Request failed'
+  if (!error.code?.startsWith('repository_') || !error.nextAction) return message
+  const field =
+    error.details && typeof error.details === 'object' && 'field' in error.details ? error.details.field : null
+  return `${typeof field === 'string' ? `${field}: ` : ''}${message} ${error.nextAction}`
+}
+
 class ApiError extends Error {
   constructor(
     message: string,
@@ -58,7 +66,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
       unauthorizedListener?.()
     }
     throw new ApiError(
-      json.error ?? `Request failed: ${res.status}`,
+      failureMessage(json),
       res.status,
       json.data,
       json.code,

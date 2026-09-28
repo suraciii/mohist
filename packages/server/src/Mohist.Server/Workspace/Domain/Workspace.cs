@@ -86,6 +86,25 @@ public sealed class WorkspaceState
         return true;
     }
 
+    public bool RestoreArchivedByOrigin(WorkspaceOrigin origin)
+    {
+        if (Status == WorkspaceStatus.Active)
+            return false;
+
+        if (!Equals(Origin, origin))
+            throw new WorkspaceDomainException(
+                "workspace_origin_mismatch",
+                $"Workspace '{Name}' does not belong to origin '{OriginKind(origin)}'.");
+
+        Status = WorkspaceStatus.Active;
+        ArchivedAt = null;
+        // The pre-archive materialization claim is stale: the runner may be
+        // gone or the directory reclaimed, so the next dispatch must
+        // re-materialize instead of binding to the old home.
+        Home = null;
+        return true;
+    }
+
     public void Close(DateTimeOffset now)
     {
         EnsureCloseAllowed();

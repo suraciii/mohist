@@ -198,8 +198,8 @@ enter the language.
 - `epic`: `list`, `view`, `create`, `edit`, `add`, `remove`, `start`, `pause`,
   `resume`, `done`, `close`, `reopen`.
 - `label`: `list`, `create`, `edit`, `delete`.
-- `workflow`: `list`, `view`, `create`, `edit`, `delete`, `validate`;
-  `view --yaml` reads the raw Workflow Definition.
+- `workflow`: `list`, `view`, `create`, `edit`, `delete`, `validate`, `enable`,
+  `disable`; `view --yaml` reads the raw Workflow Definition.
 - `run`: `list`, `view`, `why`, `watch`, `approve`, `request-changes`, `retry`,
   `rerun`, `pause`, `resume`, `stop`; `view --yaml` reads the complete
   Definition bound to the Run; `feedback list/view`;
@@ -340,6 +340,19 @@ step.
 `--parent`, and `--epic`. With `--json` field selection, one call can compare
 multiple Issues without an `issue view` call for each one.
 
+`mo issue events <number> [--limit <positive-integer>]` reads the bounded
+Issue event feed from the project-scoped `/events` endpoint. Its JSON catalog
+is `id`, `eventId`, `source`, `type`, `specVersion`, `subject`, `time`,
+`dataContentType`, `data`, and `extensions`; `--json <fields>` selects from
+that catalog and bare `--json` discovers it without a request.
+`mo issue logs <number> --task <task-id> [--cursor <non-negative-integer>]
+[--limit <positive-integer>]` reads one Workflow task's cursor-paginated logs.
+The task selector is required; there is no issue-wide logs endpoint. The
+task-scoped route is `/workflow/tasks/{task-id}/logs`, with the task id
+path-escaped by the CLI. Its JSON catalog is `lines`, `nextCursor`, and
+`truncated`; each line contains `seq`, `timestamp`, `source`, and `text`.
+Unknown selected fields are rejected before HTTP.
+
 Approval Point decisions, recovery, pause, and termination change the WorkflowRun
 and therefore exist only under `mo run`. Issue comments, prerequisites, templates, Variables,
 diff, and commits remain under `mo issue` because they describe or support the
@@ -353,6 +366,13 @@ Project default, or Profile Definition affects only future Runs. See
 [Workflow Profile: Select a Profile](../../workflow/profiles/spec.md#select-a-profile) for
 the complete timing rules. `workflow edit --help` must state that active Runs
 keep their bound Definition.
+
+`mo workflow enable <profile-id>` and `mo workflow disable <profile-id>` use
+the supported Project routes to change whether a Profile is available for
+future selections. Both return the JSON object `{profileId, enabled}` and
+support `--json profileId,enabled` or bare `--json` discovery. Disabling the
+last enabled built-in Profile is rejected by the Server. Enablement changes
+do not rewrite the Definition or alter Runs that already captured a Profile.
 
 The Profile collection belongs to Workflow. The Project default and explicit
 Issue selection are references to a Profile and do not belong to the Profile.
@@ -370,9 +390,57 @@ WorkflowProfile and WorkflowRun semantics.
 
 `mo workflow create` and `mo workflow edit` accept a Workflow Definition through
 `--file <path>`. `--file -` reads from stdin.
-`mo workflow validate --file <path>` validates optional Profile metadata and
-the Workflow Definition locally. It does not inspect Agent existence, Action
-availability, or connect to the Server.
+
+### Validate
+
+`mo workflow validate --file <path|-> [--id <profile-id>]` validates the
+submitted Definition with the selected Project's Server. It reads the file or
+stdin locally first: a missing file, an unreadable file, or a failed stdin
+read is a local usage error that exits `2` before any Server request. Bare
+`--json` and leaf help stay available offline, without a Server request.
+
+Complete validation covers Profile metadata, Definition structure, field
+types, template expressions, and Action availability and Action Input against
+the Action catalog reported for the Project. It requires the selected Project
+and a reachable Server with the caller's normal access, and it performs no
+writes. Exit `0` means every promised check ran and found no error. Exit `1`
+marks an invalid or incomplete validation: found errors, or a skipped scope
+with its reason when the Server or the Action catalog is unavailable. A
+skipped check never becomes a passed check merely because no error was
+collected. Exit `130` keeps the existing cancellation behavior. The same
+structured facts — per-error field path and cause, the Action check status,
+and a skip reason — survive normal output and selected JSON output.
+
+### Create and edit
+
+A create or edit revalidates the submitted Definition with the same rules as
+`validate` for the same input and catalog context; a changed catalog context
+can change the result. A rejected save reports each performed check's error
+path and cause and changes no stored content.
+
+A save that policy permits can still exit `0` while the Action catalog is
+unavailable. Its result then reports both the saved content and the skipped
+Action check with its reason. A saved result states its validation scope and
+must not state that the Workflow is ready to execute. Save-only resource
+rules — a duplicate Profile ID on create, a read-only built-in Profile, and a
+stale content revision — are save rejections, not validation errors.
+
+`mo workflow edit <profile> --file <path|-> --expected-revision <revision>`
+updates replaceable Profile content: name, description, and Definition
+source. The revision is the opaque token `mo workflow view` returns with the
+content the caller actually read. A missing or stale `--expected-revision`
+fails without a write and keeps the caller's draft; the caller re-reads the
+Profile to compare changes. There is no force-overwrite flag, and the CLI
+does not fetch a fresh revision silently before submitting an old draft. An
+unsupported update without the required revision receives a clear error, not
+an unprotected overwrite.
+
+A successful edit returns the Profile identity, the resulting revision, the
+validation scope, and the future-run-only effect. After a lost response, read
+the current content and revision: matching content proves the current state,
+not which request produced it, and an outcome that stays unattributed must be
+reported instead of retried blindly. A rejected stale command does not affect
+later commands.
 
 ## WorkflowRun
 
@@ -395,6 +463,17 @@ attempts, dispatch facts, and bounded event evidence that explain why a Run is
 stopped or not advancing. Use it after `mo run view` shows a failure, blocker,
 or unexpected stage state. It is a read-only diagnosis and does not retry,
 rerun, pause, or stop the Run.
+
+The `dispatch` object preserves the existing `status` and `snapshot` fields
+and may include `activeWork`, an observation of persisted Runner-visible work
+with `workId`, `workType`, `stage`, and `matchesSnapshotWorkId`. A missing
+snapshot with matching active work means the persisted work is present but its
+dispatch snapshot is absent; a non-matching observation identifies divergent
+work; absence of both remains truly missing. Human output explicitly prints
+`observation: active work present` whenever `activeWork` is present alongside
+`status: missing`, so `run why` does not contradict `runner status` while
+preserving the fact that the dispatch snapshot itself is missing. The
+observation never fabricates a snapshot.
 
 An accepted control answers with the Run it changed, in the same shape `run view`
 reads: `status` (including the `status` string, `currentStage`, and the
@@ -441,6 +520,36 @@ unchanged when the Profile is edited later. The option is mutually exclusive
 with `--json`. Task views expose
 `agentJobId` and `agentSessionId` for Agent-backed tasks so clients can
 navigate to the owning AgentJob and AgentSession.
+
+`binding` is a field of the `run view` catalog, not a separate command. It is
+read on demand: only a caller that selects the field pays for it, and the
+ordinary status answer stays concise. Run controls share the `run view` field
+catalog, so a control that selects `binding` answers with the same on-demand
+read.
+
+```bash
+mo run view wr_abc123 --json binding
+mo run view --issue 42 --json id,status,binding
+```
+
+The structured binding read identifies the Run, Project, and Issue when the
+Run still retains it, the bound Profile, whether that selection was explicit,
+the retained start-time scope, and the bound semantic definition. It reports
+only facts the Run retained: it does not invent an original YAML source or a
+historical revision, and it never falls back to the Profile's current content.
+When the stored definition is missing or unreadable, the read states the
+reason — `no-snapshot`, `unreadable-snapshot`, or `unreadable-run-state` —
+and preserves the identity and status facts the Run still retains; a missing
+read, an access denial, and unavailable content stay distinct instead of
+collapsing into one null. When the definition is available, the read returns
+it complete without truncation. See
+[Workflow Profile: Read the Actual Binding](../../workflow/profiles/spec.md#read-the-actual-binding)
+for the product semantics.
+
+Issue reads state the next-start Profile facts separately: the Issue's
+explicit selection or inherited effective selection, and where that selection
+came from. `issue view` exposes them beside `workflowRunId`; they describe the
+next start, not the binding of the current Run.
 
 Project, Issue, and WorkflowRun each own one set of Variables. All three scopes
 use the same `variable list/get/set/unset` key-value language.
@@ -1026,7 +1135,7 @@ mo run variable get --issue 42 agent.model --effective --stage check
 mo runner status
 mo service status runner
 
-# Validate a local Workflow Definition without connecting to the Server.
+# Validate a Definition with the selected Project's Server before saving.
 mo workflow validate --file workflow.yaml
 ```
 

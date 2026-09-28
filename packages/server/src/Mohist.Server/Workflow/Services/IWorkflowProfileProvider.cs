@@ -34,7 +34,8 @@ public interface IWorkflowProfileProvider
     /// Returns the resolved WorkflowDefinition for a Profile. Built-ins
     /// emit their authoritative in-binary definition; custom Profiles
     /// deserialize the persisted YAML source. Returns <c>null</c> when
-    /// the ID is unknown.
+    /// the ID is unknown. Reads needing content, structure, and revision
+    /// as one version use <see cref="GetDetailAsync"/> instead.
     /// </summary>
     Task<WorkflowDefinition?> GetDefinitionAsync(string projectId, string profileId, CancellationToken ct = default);
 
@@ -45,10 +46,35 @@ public interface IWorkflowProfileProvider
     Task<string?> GetDefinitionSourceAsync(string projectId, string profileId, CancellationToken ct = default);
 
     /// <summary>
+    /// Coherent read of one Profile: the replaceable content (name,
+    /// description, definition source), the derived definition, and the
+    /// content revision come from a single row version for custom
+    /// Profiles, so a concurrent save cannot interleave between the
+    /// facts. Built-ins answer from the in-binary catalog with a null
+    /// revision. Returns <c>null</c> when the ID is unknown.
+    /// </summary>
+    Task<WorkflowProfileDetail?> GetDetailAsync(string projectId, string profileId, CancellationToken ct = default);
+
+    /// <summary>
     /// Returns the source provenance for a custom Profile. <c>null</c>
     /// for built-ins.
     /// </summary>
     Task<WorkflowProfileSourceProvenance?> GetSourceProvenanceAsync(string projectId, string profileId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Validates a Definition source with the same definition and Action
+    /// rules as a save, without writing anything. Parse failures,
+    /// removed-runtime-Action rejections, and catalog-backed Action-contract
+    /// checks are reported through the returned result; the Action check is
+    /// reported as <see cref="ActionValidationStatus.Skipped"/> with its
+    /// reason when no Runner Action catalog is available. Save-only resource
+    /// rules (identity conflicts, read-only targets, expected revision)
+    /// are not part of this operation.
+    /// </summary>
+    Task<WorkflowDefinitionValidationResult> ValidateAsync(
+        string definitionSource,
+        string? profileId = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Validates a custom Profile against the authoritative Definition
@@ -65,13 +91,19 @@ public interface IWorkflowProfileProvider
 
     /// <summary>
     /// Validates and updates a custom Profile, preserving the verbatim
-    /// source. Built-in IDs are rejected with
+    /// source. The update is an authoritative compare-and-set at the
+    /// storage boundary: <paramref name="expectedRevision"/> must be the
+    /// revision the caller read with the content it is replacing, and a
+    /// mismatch throws <see cref="WorkflowProfileRevisionConflictException"/>
+    /// without writing anything. Built-in IDs are rejected with
     /// <see cref="WorkflowProfileReadOnlyException"/>; missing customs
-    /// surface as <see cref="WorkflowProfileNotFoundException"/>.
+    /// surface as <see cref="WorkflowProfileNotFoundException"/>. The
+    /// successful result carries the newly issued revision.
     /// </summary>
     Task<WorkflowProfileSaveResult> UpdateAsync(
         string projectId,
         WorkflowProfileCollectionEntry request,
+        string expectedRevision,
         CancellationToken ct = default);
 
     /// <summary>
@@ -115,7 +147,10 @@ public interface IWorkflowProfileProvider
 /// a single Profile as exposed through the collection
 /// provider. Built-in entries have <see cref="SourceProvenance"/> =
     /// <c>BuiltIn</c>; custom entries carry <c>Verbatim</c> or
-    /// <c>CanonicalLegacy</c> provenance.
+    /// <c>CanonicalLegacy</c> provenance. On reads and save results
+/// <see cref="Revision"/> is the opaque token covering all replaceable
+/// content (name, description, definition source); an update must present
+/// the token it actually read. Built-ins carry no revision.
 /// </summary>
 [GenerateSerializer]
 public sealed record WorkflowProfileCollectionEntry(
@@ -125,7 +160,8 @@ public sealed record WorkflowProfileCollectionEntry(
     [property: Id(3)] string Description,
     [property: Id(4)] WorkflowProfileSourceProvenance SourceProvenance,
     [property: Id(5)] bool IsBuiltIn,
-    [property: Id(6)] string? DefinitionSource)
+    [property: Id(6)] string? DefinitionSource,
+    [property: Id(7)] string? Revision = null)
 {
     public static WorkflowProfileCollectionEntry BuiltIn(
         string profileId,
@@ -152,6 +188,16 @@ public enum WorkflowProfileSourceProvenance
     CanonicalLegacy,
 }
 
+/// <summary>
+/// one Profile's replaceable content, derived definition, and revision
+/// as a single coherent version, as returned by
+/// <see cref="IWorkflowProfileProvider.GetDetailAsync"/>. Provider-only
+/// shape: it never crosses a grain boundary.
+/// </summary>
+public sealed record WorkflowProfileDetail(
+    WorkflowProfileCollectionEntry Profile,
+    WorkflowDefinition Definition);
+
 [GenerateSerializer]
 public sealed record WorkflowProfileSaveResult(
     [property: Id(0)] WorkflowProfileCollectionEntry Profile,
@@ -161,11 +207,20 @@ public sealed record WorkflowProfileSaveResult(
 public sealed record WorkflowDefinitionValidationResult(
     [property: Id(0)] IReadOnlyList<WorkflowProfileValidationError> DefinitionErrors,
     [property: Id(1)] IReadOnlyList<WorkflowProfileValidationError> ActionErrors,
-    [property: Id(2)] ActionValidationStatus ActionValidationStatus)
+    [property: Id(2)] ActionValidationStatus ActionValidationStatus,
+    [property: Id(3)] string? ActionValidationSkipReason = null)
 {
+    /// <summary>
+    /// Reported reason whenever the Action check is skipped because no
+    /// Runner has reported an Action catalog yet.
+    /// </summary>
+    public const string CatalogUnavailableSkipReason =
+        "no Runner has reported an Action catalog yet";
+
     public bool HasDefinitionErrors => DefinitionErrors.Count > 0;
     public bool HasActionErrors => ActionErrors.Count > 0;
     public bool IsValid => DefinitionErrors.Count == 0 && ActionErrors.Count == 0;
+    public bool IsComplete => ActionValidationStatus == ActionValidationStatus.Performed;
 }
 
 [GenerateSerializer]

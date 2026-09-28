@@ -2,8 +2,10 @@ using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Auth.Identity;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Api;
@@ -44,7 +46,14 @@ public static partial class IssueRoutes
             var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.ActiveOnly);
             if (control.Result is not null) return control.Result;
             var wrId = control.WorkflowRunId!;
-            await grains.GetGrain<IWorkflowGrain>(wrId).ApproveAsync(decidedBy, displayName.Value);
+            await grains.GetGrain<IWorkflowGrain>(wrId).ApproveAsync(
+                decidedBy,
+                displayName.Value,
+                new WorkflowProvenanceActor(
+                    WorkflowProvenanceActorKinds.User,
+                    decidedBy,
+                    displayName.Value),
+                "api");
             return ApiResults.Ok();
         });
 
@@ -67,7 +76,15 @@ public static partial class IssueRoutes
             var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.ActiveOnly);
             if (control.Result is not null) return control.Result;
             var wrId = control.WorkflowRunId!;
-            await grains.GetGrain<IWorkflowGrain>(wrId).RequestChangesAsync(req.Message, decidedBy, displayName.Value);
+            await grains.GetGrain<IWorkflowGrain>(wrId).RequestChangesAsync(
+                req.Message,
+                decidedBy,
+                displayName.Value,
+                new WorkflowProvenanceActor(
+                    WorkflowProvenanceActorKinds.User,
+                    decidedBy,
+                    displayName.Value),
+                "api");
             return ApiResults.Ok();
         });
 
@@ -76,13 +93,18 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueQuerier issuesQuery) =>
+            IssueQuerier issuesQuery,
+            ICurrentUser currentUser) =>
         {
             var project = GetRequiredProject(ctx);
             var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.RetryOrRerun);
             if (control.Result is not null) return control.Result;
             var wrId = control.WorkflowRunId!;
-            await grains.GetGrain<IWorkflowGrain>(wrId).RetryAsync();
+            await grains.GetGrain<IWorkflowGrain>(wrId).RetryAsync(
+                new WorkflowProvenanceActor(
+                    WorkflowProvenanceActorKinds.User,
+                    currentUser.Principal.Id),
+                "api");
             return ApiResults.Ok();
         });
 
@@ -91,7 +113,9 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueQuerier issuesQuery) =>
+            IssueQuerier issuesQuery,
+            ICurrentUser currentUser,
+            IEventStore events) =>
         {
             var project = GetRequiredProject(ctx);
             try
@@ -99,11 +123,23 @@ public static partial class IssueRoutes
                 var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.RetryOrRerun);
                 if (control.Result is not null) return control.Result;
                 var wrId = control.WorkflowRunId!;
-                await grains.GetGrain<IWorkflowGrain>(wrId).RerunAsync();
+                await grains.GetGrain<IWorkflowGrain>(wrId).RerunAsync(
+                    new WorkflowProvenanceActor(
+                        WorkflowProvenanceActorKinds.User,
+                        currentUser.Principal.Id),
+                    "api");
             }
             catch (Exception ex) when (WorkflowControlRecovery.IsWorkflowRunStateCorruption(ex))
             {
-                return await WorkflowControlRecovery.RecoverIssueScopedRerunAsync(grains, issuesQuery, project.Id, number);
+                return await WorkflowControlRecovery.RecoverIssueScopedRerunAsync(
+                    grains,
+                    issuesQuery,
+                    project.Id,
+                    number,
+                    events,
+                    new WorkflowProvenanceActor(
+                        WorkflowProvenanceActorKinds.User,
+                        currentUser.Principal.Id));
             }
             return ApiResults.Ok();
         });
@@ -114,7 +150,9 @@ public static partial class IssueRoutes
             int number,
             RerunFromStageRequest? req,
             IGrainFactory grains,
-            IssueQuerier issuesQuery) =>
+            IssueQuerier issuesQuery,
+            ICurrentUser currentUser,
+            IEventStore events) =>
         {
             var project = GetRequiredProject(ctx);
             if (string.IsNullOrWhiteSpace(req?.Stage))
@@ -124,7 +162,12 @@ public static partial class IssueRoutes
                 var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.RetryOrRerun);
                 if (control.Result is not null) return control.Result;
                 var wrId = control.WorkflowRunId!;
-                var result = await grains.GetGrain<IWorkflowGrain>(wrId).RerunFromStageAsync(req.Stage);
+                var result = await grains.GetGrain<IWorkflowGrain>(wrId).RerunFromStageAsync(
+                    req.Stage,
+                    new WorkflowProvenanceActor(
+                        WorkflowProvenanceActorKinds.User,
+                        currentUser.Principal.Id),
+                    "api");
                 if (!result.Success)
                 {
                     return result.Code switch
@@ -137,7 +180,15 @@ public static partial class IssueRoutes
             }
             catch (Exception ex) when (WorkflowControlRecovery.IsWorkflowRunStateCorruption(ex))
             {
-                return await WorkflowControlRecovery.RecoverIssueScopedRerunAsync(grains, issuesQuery, project.Id, number);
+                return await WorkflowControlRecovery.RecoverIssueScopedRerunAsync(
+                    grains,
+                    issuesQuery,
+                    project.Id,
+                    number,
+                    events,
+                    new WorkflowProvenanceActor(
+                        WorkflowProvenanceActorKinds.User,
+                        currentUser.Principal.Id));
             }
             return ApiResults.Ok();
         });

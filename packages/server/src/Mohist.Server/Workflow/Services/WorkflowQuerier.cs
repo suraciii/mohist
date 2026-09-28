@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -80,18 +81,74 @@ public class WorkflowQuerier : IScopedService, IWorkflowStatusReader
         return view;
     }
 
+    /// <summary>
+    /// On-demand actual-binding read (issue #1099). Returns only the
+    /// start-time facts the run itself retains — identity, bound Profile,
+    /// timing, and the bound semantic definition snapshot. The definition,
+    /// when present, comes from the run's own
+    /// <see cref="WorkflowRun.BoundWorkflowDefinitionJson"/>; a later
+    /// Profile edit never substitutes for it, and no original YAML source
+    /// or historical revision is reconstructed.
+    /// </summary>
     public virtual async Task<WorkflowRunBindingView?> GetBindingAsync(string workflowRunId)
     {
         await using var db = await _db.CreateDbContextAsync();
-        var state = await db.WorkflowRuns.AsNoTracking()
-            .Where(row => row.WorkflowRunId == workflowRunId)
-            .Select(row => row.State)
-            .FirstOrDefaultAsync();
-        if (state is null) return null;
-        var run = _runDeserializer.Deserialize(state);
-        return run is null
-            ? null
-            : new WorkflowRunBindingView(run.WorkflowProfileId);
+        var row = await db.WorkflowRuns.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.WorkflowRunId == workflowRunId);
+        if (row is null) return null;
+
+        WorkflowRun? run;
+        try
+        {
+            run = _runDeserializer.Deserialize(row.State);
+        }
+        catch
+        {
+            // Schema-incompatible or truncated state deserializes no
+            // better than undecodable JSON: the row's retained identity
+            // columns are the honest answer.
+            run = null;
+        }
+        if (run is null)
+        {
+            // The stored state cannot be decoded. The row still carries
+            // retained identity columns, so the read reports those facts and
+            // marks the definition unavailable rather than failing or
+            // guessing from the live Profile cascade.
+            return WorkflowRunBindingView.FromUnreadableState(row);
+        }
+
+        return new WorkflowRunBindingView(
+            run.Id,
+            run.Metadata.ProjectId,
+            run.Metadata.IssueNumber,
+            WorkflowStatusMapper.WireStatus(run.Status),
+            run.WorkflowProfileId,
+            run.ExplicitWorkflowProfileId,
+            run.Metadata.CreatedAt,
+            run.StartedAt,
+            ReadBoundDefinition(run));
+    }
+
+    private static WorkflowRunBindingDefinitionView ReadBoundDefinition(WorkflowRun run)
+    {
+        if (string.IsNullOrWhiteSpace(run.BoundWorkflowDefinitionJson))
+            return WorkflowRunBindingDefinitionView.Unavailable(
+                WorkflowRunBindingDefinitionView.ReasonNoSnapshot);
+
+        try
+        {
+            return new WorkflowRunBindingDefinitionView(
+                Available: true,
+                Source: WorkflowRunBindingDefinitionView.SourceRunSnapshot,
+                Reason: null,
+                Content: WorkflowYamlSerializer.FromJson(run.BoundWorkflowDefinitionJson));
+        }
+        catch (Exception)
+        {
+            return WorkflowRunBindingDefinitionView.Unavailable(
+                WorkflowRunBindingDefinitionView.ReasonUnreadableSnapshot);
+        }
     }
 
     private async Task<WorkflowRun?> LoadAndCacheAsync(
@@ -247,4 +304,62 @@ public class WorkflowQuerier : IScopedService, IWorkflowStatusReader
 
 }
 
-public sealed record WorkflowRunBindingView(string? WorkflowProfileId);
+/// <summary>
+/// The structured actual-binding read for one WorkflowRun (issue #1099):
+/// run/Project/Issue identity, the bound Profile identities retained at
+/// start, the retained timing facts, and the bound semantic definition.
+/// Every fact comes from the run's own stored state; nothing is resolved
+/// against the latest Profile, and no snapshot id or original YAML is
+/// invented.
+/// </summary>
+public sealed record WorkflowRunBindingView(
+    string WorkflowRunId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ProjectId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? IssueNumber,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? Status,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? WorkflowProfileId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ExplicitWorkflowProfileId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] DateTimeOffset? CreatedAt,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] DateTimeOffset? StartedAt,
+    WorkflowRunBindingDefinitionView Definition)
+{
+    /// <summary>
+    /// Fallback for a run whose stored state cannot be decoded: identity
+    /// columns the row still retains survive, while status, Profile, timing,
+    /// and the definition are reported unknown rather than guessed.
+    /// </summary>
+    internal static WorkflowRunBindingView FromUnreadableState(WorkflowRunRow row) => new(
+        row.WorkflowRunId,
+        row.MetadataProjectId,
+        row.IssueNumber,
+        Status: null,
+        WorkflowProfileId: null,
+        ExplicitWorkflowProfileId: null,
+        CreatedAt: null,
+        StartedAt: null,
+        WorkflowRunBindingDefinitionView.Unavailable(
+            WorkflowRunBindingDefinitionView.ReasonUnreadableRunState));
+}
+/// <summary>
+/// Availability and content of the definition one run actually bound at
+/// start time. When <see cref="Available"/> is true the content is the
+/// run's retained semantic snapshot — not the user's original text and not
+/// the latest Profile — and the read returns it complete, without
+/// truncation. When it is false, <see cref="Reason"/> states the known
+/// cause and nothing is substituted.
+/// </summary>
+public sealed record WorkflowRunBindingDefinitionView(
+    bool Available,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? Source,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? Reason,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] WorkflowDefinition? Content)
+{
+    /// <summary>The content belongs to the run's start-time snapshot.</summary>
+    public const string SourceRunSnapshot = "run-snapshot";
+    public const string ReasonNoSnapshot = "no-snapshot";
+    public const string ReasonUnreadableSnapshot = "unreadable-snapshot";
+    public const string ReasonUnreadableRunState = "unreadable-run-state";
+
+    public static WorkflowRunBindingDefinitionView Unavailable(string reason) =>
+        new(false, Source: null, Reason: reason, Content: null);
+}
