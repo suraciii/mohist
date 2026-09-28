@@ -511,6 +511,8 @@ public partial class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingT
         var events = await _eventStore.ListAsync(workflowRunId, limit: int.MaxValue);
         var hasExternalEffect = false;
         var hasUnknownFailure = false;
+        var hasTaskFailure = false;
+        var hasStoppedRun = false;
 
         foreach (var stored in events)
         {
@@ -539,7 +541,27 @@ public partial class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingT
                 // publication fact leaves its external boundary unknown.
                 hasUnknownFailure = true;
             }
+            else if (string.Equals(
+                         stored.Envelope.Type,
+                         EventCatalog.ReverseDns.TaskFailed,
+                         StringComparison.Ordinal))
+            {
+                hasTaskFailure = true;
+            }
+            else if (string.Equals(
+                         stored.Envelope.Type,
+                         EventCatalog.ReverseDns.WorkflowRunStopped,
+                         StringComparison.Ordinal))
+            {
+                hasStoppedRun = true;
+            }
         }
+
+        // Stop can win the race with the workflow's terminal failure
+        // projection. A failed publication task followed by stop is still an
+        // unsettled external boundary, even when no WorkflowRunFailed event
+        // was committed.
+        hasUnknownFailure |= hasTaskFailure && hasStoppedRun;
 
         if (hasExternalEffect || hasUnknownFailure)
         {

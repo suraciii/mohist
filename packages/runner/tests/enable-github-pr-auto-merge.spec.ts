@@ -15,6 +15,10 @@ function view(overrides: Record<string, unknown> = {}) {
     mergeCommit: null,
     autoMergeRequest: null,
     statusCheckRollup: [],
+    headRefOid: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    baseRefOid: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    headRefName: 'mohist/run-wr-42',
+    baseRefName: 'main',
     ...overrides,
   })
 }
@@ -27,7 +31,9 @@ const inputs = {
   method: 'squash',
   subject: 'Ship it',
   source: 'mohist/run-wr-42',
-  target: 'origin/main',
+  target: 'main',
+  requiredTrailers: ['Workflow-Run'],
+  body: 'Workflow-Run: wr-42',
 }
 
 const MERGE_BASE_SHA = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
@@ -46,7 +52,7 @@ function commitLog(message: string, sha = SOURCE_COMMIT_SHA) {
 function validGitHistory(): NonNullable<RunnerResourceContext['githubPrGitRunner']> {
   return async (_workDir, args) => {
     if (args[0] === 'merge-base') return gitOk(`${MERGE_BASE_SHA}\n`)
-    if (args[0] === 'log') return gitOk(commitLog('Ship it\n\nDetails\n'))
+    if (args[0] === 'log') return gitOk(commitLog('Ship it\n\nWorkflow-Run: wr-42\n'))
     const command = args.join(' ')
     return {
       success: false,
@@ -70,6 +76,32 @@ function resources(
   }
 }
 
+describe('auto-merge publication gate', () => {
+  it('rejects an omitted trailer policy before any GitHub call', async () => {
+    const gh = vi.fn()
+    const { requiredTrailers: _omitted, ...withoutPolicy } = inputs
+    const output = await withRunnerResources(resources(gh), () => enableGitHubPrAutoMergeAction(withoutPolicy, host()))
+    expect(output.error?.code).toBe('invalid-input')
+    expect(gh).not.toHaveBeenCalled()
+  })
+
+  it('rejects a PR whose published head branch differs from the declared source before registration', async () => {
+    const gh = vi
+      .fn()
+      .mockResolvedValueOnce(result('gh version'))
+      .mockResolvedValueOnce(result('auth ok'))
+      .mockResolvedValueOnce(result(view({ headRefName: 'other-branch' })))
+    const git = vi.fn()
+    const output = await withRunnerResources(resources(gh, {}, git), () =>
+      enableGitHubPrAutoMergeAction(inputs, host()),
+    )
+    expect(output.error?.code).toBe('publication-validation-failed')
+    expect(output.error?.message).toContain('PR head or base')
+    expect(git).not.toHaveBeenCalled()
+    expect(gh.mock.calls.some((call) => call[1].includes('--auto'))).toBe(false)
+  })
+})
+
 describe('enable auto merge', () => {
   it('registers once and completes when GitHub reports merged', async () => {
     const gh = vi
@@ -85,6 +117,22 @@ describe('enable auto merge', () => {
     expect(out.output).toMatchObject({ enabled: true, mergeCommitSha: 'sha' })
     expect(out.output.output).toContain('enabled')
     expect(gh.mock.calls.filter((call: any) => call[1].includes('--auto'))).toHaveLength(1)
+    const registration = gh.mock.calls.find((call) => call[1].includes('--auto'))
+    expect(registration?.[1]).toContain('--match-head-commit')
+    expect(registration?.[1]).toContain(SOURCE_COMMIT_SHA)
+  })
+
+  it('does not treat a changed head at registration as a successful merge registration', async () => {
+    const gh = vi
+      .fn()
+      .mockResolvedValueOnce(result('gh version'))
+      .mockResolvedValueOnce(result('auth ok'))
+      .mockResolvedValueOnce(result(view()))
+      .mockResolvedValueOnce(result('', 1, 'Pull request head commit does not match expected SHA'))
+    const output = await withRunnerResources(resources(gh), () => enableGitHubPrAutoMergeAction(inputs, host()))
+    expect(output.error?.code).toBe('retry-safe')
+    expect(output.error?.message).toContain('head moved')
+    expect(gh.mock.calls.filter((call) => call[1].includes('--auto'))).toHaveLength(1)
   })
 
   it('uses the bounded PR title when no explicit subject is provided', async () => {
@@ -129,15 +177,15 @@ describe('enable auto merge', () => {
     const git = vi
       .fn()
       .mockResolvedValueOnce(gitOk(`${MERGE_BASE_SHA}\n`))
-      .mockResolvedValueOnce(gitOk(commitLog('Subject\n\nPolicy: yes\n')))
+      .mockResolvedValueOnce(gitOk(commitLog('Subject\n\nDetails\n')))
     const out: any = await withRunnerResources(resources(gh, {}, git), () =>
       enableGitHubPrAutoMergeAction(
         {
           ...inputs,
           body: 'Details\n\nPolicy: yes',
           requiredTrailers: ['Policy'],
-          source: 'HEAD',
-          target: 'origin/main',
+          source: 'mohist/run-wr-42',
+          target: 'main',
         } as any,
         host(),
       ),
@@ -155,10 +203,7 @@ describe('enable auto merge', () => {
       .mockResolvedValueOnce(result(view()))
     const git = vi.fn()
     const out: any = await withRunnerResources(resources(gh, {}, git), () =>
-      enableGitHubPrAutoMergeAction(
-        { ...inputs, body: 'Details', requiredTrailers: ['Policy'], source: 'HEAD', target: 'origin/main' } as any,
-        host(),
-      ),
+      enableGitHubPrAutoMergeAction({ ...inputs, body: 'Details', requiredTrailers: ['Policy'] } as any, host()),
     )
     expect(out.error.code).toBe('publication-validation-failed')
     expect(git).not.toHaveBeenCalled()

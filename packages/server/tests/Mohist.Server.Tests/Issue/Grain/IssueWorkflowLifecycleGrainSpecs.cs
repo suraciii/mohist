@@ -180,6 +180,31 @@ public sealed class IssueWorkflowLifecycleGrainSpecs
     }
 
     [Fact]
+    public async Task StartWorkAsync_WhenStoppedAfterPublicationTaskFailure_BlocksReplacement()
+    {
+        var (projectId, _, issueNumber, issueKey, oldWrId) = await SeedIssueInProgressAsync();
+
+        using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateScope())
+        {
+            var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
+            await events.AppendAsync(new CloudEvent(
+                $"event-{Guid.NewGuid():N}",
+                new Uri(WorkflowRunEventPersistence.WorkflowRunSource(oldWrId), UriKind.Relative),
+                EventCatalog.ReverseDns.TaskFailed,
+                new DateTimeOffset(2026, 9, 28, 0, 0, 0, TimeSpan.Zero),
+                WorkflowEventSerializer.ToData(new TaskFailed("publish", "push", "push failed"))));
+        }
+
+        await _grains.GetGrain<IWorkflowGrain>(oldWrId).StopAsync("test-stop");
+
+        await Assert.ThrowsAsync<IssueStartPriorRunUnsafeException>(
+            () => _grains.GetGrain<IIssueGrain>(issueKey).StartWorkAsync());
+
+        var current = await GetIssueInfoAsync(projectId, issueNumber);
+        Assert.Equal(oldWrId, current!.WorkflowRunId);
+    }
+
+    [Fact]
     public async Task StartWorkAsync_WhenCorruptRunHasPushFact_BlocksReplacement()
     {
         var (projectId, _, issueNumber, issueKey, oldWrId) = await SeedIssueInProgressAsync();

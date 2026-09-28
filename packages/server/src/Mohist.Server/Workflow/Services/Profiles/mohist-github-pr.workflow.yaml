@@ -259,6 +259,10 @@ stages:
       source: ${{ workspace.branch }}
       target: ${{ repository.baseBranch }}
       method: squash
+      requiredTrailers:
+      - Workflow-Run
+      body: |
+        Workflow-Run: ${{ workflow.runId }}
       working-directory: REPOS/${{ repository.name }}
     recovery:
       budget: 2

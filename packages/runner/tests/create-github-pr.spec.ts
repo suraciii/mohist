@@ -64,8 +64,8 @@ function fail(stderr: string, stdout = ''): GitResponse {
 
 const MERGE_BASE_SHA = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 const PUBLISHED_COMMIT_SHA = 'cccccccccccccccccccccccccccccccccccccccc'
-const MERGE_BASE_COMMAND = 'merge-base master mohist/run-wr-gh-pr-1'
-const LOG_COMMAND = `log --format=${PUBLICATION_LOG_FORMAT} ${MERGE_BASE_SHA}..mohist/run-wr-gh-pr-1`
+const MERGE_BASE_COMMAND = `merge-base origin/master ${PUBLISHED_COMMIT_SHA}`
+const LOG_COMMAND = `log --format=${PUBLICATION_LOG_FORMAT} ${MERGE_BASE_SHA}..${PUBLISHED_COMMIT_SHA}`
 
 /** One valid commit record in the NUL-delimited publication log format. */
 function commitLog(message: string, sha = PUBLISHED_COMMIT_SHA): string {
@@ -76,6 +76,8 @@ const VALID_COMMIT_LOG = commitLog('Use GitHub PR workflow\n\nOpen, review, and 
 
 /** Serves the read-only merge-base/log history validation the action runs before any external write. */
 function validHistoryRespond(_workDir: string, args: string[]): GitResponse {
+  if (args.join(' ') === 'ls-remote origin refs/heads/mohist/run-wr-gh-pr-1')
+    return ok(`${PUBLISHED_COMMIT_SHA}\trefs/heads/mohist/run-wr-gh-pr-1\n`)
   switch (args.join(' ')) {
     case MERGE_BASE_COMMAND:
       return ok(`${MERGE_BASE_SHA}\n`)
@@ -251,7 +253,12 @@ describe('mohist/create-github-pr action', () => {
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
-    expect(gitCalls).toEqual([MERGE_BASE_COMMAND, LOG_COMMAND])
+    expect(gitCalls).toEqual([
+      'ls-remote origin refs/heads/mohist/run-wr-gh-pr-1',
+      MERGE_BASE_COMMAND,
+      LOG_COMMAND,
+      'ls-remote origin refs/heads/mohist/run-wr-gh-pr-1',
+    ])
     expect(ghCalls).toEqual([
       'gh --version',
       'gh auth status',
@@ -499,8 +506,18 @@ describe('mohist/create-github-pr action', () => {
     expect(result.error).toBeUndefined()
     expect(ghCalls.map((call) => call.cwd)).toEqual([WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH])
     expect(ghCalls.some((call) => call.cwd === PROJECT_PATH)).toBe(false)
-    expect(gitCalls.map((call) => call.workDir)).toEqual([WORKSPACE_PATH, WORKSPACE_PATH])
-    expect(gitCalls.map((call) => call.command)).toEqual([MERGE_BASE_COMMAND, LOG_COMMAND])
+    expect(gitCalls.map((call) => call.workDir)).toEqual([
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+    ])
+    expect(gitCalls.map((call) => call.command)).toEqual([
+      'ls-remote origin refs/heads/mohist/run-wr-gh-pr-1',
+      MERGE_BASE_COMMAND,
+      LOG_COMMAND,
+      'ls-remote origin refs/heads/mohist/run-wr-gh-pr-1',
+    ])
     expect(output.prNumber).toBe(42)
   })
 
@@ -528,6 +545,25 @@ describe('mohist/create-github-pr action', () => {
     expect(result.error?.message).toContain("Unsupported titleFrom source 'issue.summary'")
   })
 
+  it('blocks a PR write when its published source moves after commit validation', async (resources) => {
+    let reads = 0
+    installGit(resources, (workDir, args) => {
+      if (args[0] === 'ls-remote' && ++reads === 2) return ok(`${MERGE_BASE_SHA}\trefs/heads/mohist/run-wr-gh-pr-1\n`)
+      return validHistoryRespond(workDir, args)
+    })
+    installGh(resources, (cmd, args) =>
+      [cmd, ...args].join(' ') === 'gh --version' || [cmd, ...args].join(' ') === 'gh auth status'
+        ? ghOk('ok')
+        : ghFail('PR write should not run'),
+    )
+    const result = await callAction(createGitHubPrAction, context({ title: 'Issue title', body: 'Issue body' }))
+    expect(result.error).toMatchObject({
+      code: 'publication-validation-failed',
+      message: expect.stringContaining('moved'),
+    })
+    expect(resources.ghCalls.map((call) => call.command)).toEqual(['gh --version', 'gh auth status'])
+  })
+
   it('performs only read-only history-validation Git calls when GitHub creates the PR', async (resources) => {
     installGit(resources, validHistoryRespond)
     installGh(resources, (cmd, args) => {
@@ -552,7 +588,12 @@ describe('mohist/create-github-pr action', () => {
 
     expect(result.error).toBeUndefined()
     expect(output.operation).toBe('created')
-    expect(resources.gitCalls.map((call) => call.command)).toEqual([MERGE_BASE_COMMAND, LOG_COMMAND])
+    expect(resources.gitCalls.map((call) => call.command)).toEqual([
+      'ls-remote origin refs/heads/mohist/run-wr-gh-pr-1',
+      MERGE_BASE_COMMAND,
+      LOG_COMMAND,
+      'ls-remote origin refs/heads/mohist/run-wr-gh-pr-1',
+    ])
   })
 
   it('reports config-error when the gh CLI precheck fails', async (resources) => {
@@ -658,11 +699,11 @@ describe('mohist/create-github-pr action', () => {
       expect(call?.timeoutMs, `gh call ${command} missing timeoutMs`).toBe(NETWORK_COMMAND_TIMEOUT_MS)
     }
 
-    for (const command of [MERGE_BASE_COMMAND, LOG_COMMAND]) {
+    for (const command of ['ls-remote origin refs/heads/mohist/run-wr-gh-pr-1', MERGE_BASE_COMMAND, LOG_COMMAND]) {
       const call = resources.gitCalls.find((c) => c.command === command)
       expect(call?.timeoutMs, `git call ${command} missing timeoutMs`).toBe(NETWORK_COMMAND_TIMEOUT_MS)
     }
-    expect(resources.gitCalls).toHaveLength(2)
+    expect(resources.gitCalls).toHaveLength(4)
   })
 
   it('GhPrCreateTimeout_ClassifiesAsRetrySafeAndSurfacesDuration', async (resources) => {
@@ -707,6 +748,7 @@ describe('mohist/create-github-pr action', () => {
 
   it('blocks PR creation when a source commit carries a literal escaped newline under the default policy', async (resources) => {
     installGit(resources, (_workDir, args) => {
+      if (args[0] === 'ls-remote') return validHistoryRespond(_workDir, args)
       switch (args.join(' ')) {
         case MERGE_BASE_COMMAND:
           return ok(`${MERGE_BASE_SHA}\n`)
@@ -737,6 +779,7 @@ describe('mohist/create-github-pr action', () => {
 
   it('does not let an embedded record separator smuggle a malformed trailer past the commit gate', async (resources) => {
     installGit(resources, (_workDir, args) => {
+      if (args[0] === 'ls-remote') return validHistoryRespond(_workDir, args)
       switch (args.join(' ')) {
         case MERGE_BASE_COMMAND:
           return ok(`${MERGE_BASE_SHA}\n`)

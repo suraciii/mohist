@@ -160,7 +160,7 @@ export async function pushAction(inputs: JsonObject, host: ActionHost): Promise<
 
   const validation = await validateCommitsBeforePush(
     workDir,
-    source,
+    landedCommit,
     remote,
     typeof inputs['baseBranch'] === 'string' ? inputs['baseBranch'] : target,
     publicationPolicyFromInputs(inputs),
@@ -186,6 +186,8 @@ export async function pushAction(inputs: JsonObject, host: ActionHost): Promise<
       strategyName,
     )
   }
+  // Publish precisely the commit whose metadata passed the gate, not a branch that may have moved.
+  const publishedRefspec = `${landedCommit}:refs/heads/${target}`
 
   const pushArgs = ['push']
   if (force) {
@@ -197,7 +199,7 @@ export async function pushAction(inputs: JsonObject, host: ActionHost): Promise<
       pushArgs.push(`--force-with-lease=${target}:${remoteBefore.tip}`)
     }
   }
-  pushArgs.push(remote, refspec)
+  pushArgs.push(remote, publishedRefspec)
   const push = await git(workDir, pushArgs, host.signal, networkOpts)
   steps.push({
     name: 'git-push',

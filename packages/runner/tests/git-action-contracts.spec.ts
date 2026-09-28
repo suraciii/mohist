@@ -26,6 +26,9 @@ describe('local Git Action manifests', () => {
     expect(inputs('mohist/enable-github-pr-auto-merge')).toMatchObject({
       repositoryUrl: { required: true },
       prNumber: { required: true },
+      source: { required: true },
+      target: { required: true },
+      requiredTrailers: { required: true },
       subject: { types: ['string'] },
       body: { types: ['string'] },
     })
@@ -37,7 +40,10 @@ describe('local Git Action manifests', () => {
       validateActionInput(autoMerge.definition.manifest, {
         repositoryUrl: 'https://github.com/o/r.git',
         prNumber: 42,
-        body: 'Signed-off-by: Agent <agent@example.com>',
+        source: 'feature',
+        target: 'main',
+        requiredTrailers: ['Workflow-Run'],
+        body: 'Workflow-Run: run-42',
       }),
     ).toMatchObject({ kind: 'ok' })
     expect(registry.resolve('mohist/archive-change').kind).toBe('unknown')

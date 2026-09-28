@@ -107,8 +107,17 @@ export async function createGitHubPrAction(inputs: JsonObject, host: ActionHost)
     return fail('publication-validation-failed', `PR publication blocked:\n${details}`, { output: details })
   }
   const commitValidation = await validateSourceCommits(workDir, source, target, publicationPolicy, host.signal)
-  if (commitValidation) {
+  if (commitValidation.kind === 'failure') {
     return fail(commitValidation.code, commitValidation.message, { output: commitValidation.message })
+  }
+  const currentHead = await git(workDir, ['ls-remote', 'origin', `refs/heads/${source}`], host.signal, {
+    timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+  })
+  if (!currentHead.success || currentHead.stdout.trim().split(/\s+/)[0] !== commitValidation.publishedSha) {
+    return fail(
+      'publication-validation-failed',
+      'PR publication blocked: the published source moved during validation. No PR was written.',
+    )
   }
   const opened = await openOrReusePr(
     gh,
@@ -282,24 +291,41 @@ async function validateSourceCommits(
   target: string,
   policy: PublicationPolicy,
   signal: AbortSignal,
-): Promise<{ code: GitHubPrErrorCode; message: string } | null> {
-  const mergeBase = await git(workDir, ['merge-base', target, source], signal, {
+): Promise<{ kind: 'failure'; code: GitHubPrErrorCode; message: string } | { kind: 'ok'; publishedSha: string }> {
+  const publishedHead = await git(workDir, ['ls-remote', 'origin', `refs/heads/${source}`], signal, {
+    timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+  })
+  const [publishedSha, publishedRef] = publishedHead.stdout.trim().split(/\s+/)
+  if (
+    !publishedHead.success ||
+    publishedRef !== `refs/heads/${source}` ||
+    !/^[0-9a-f]{40,64}$/.test(publishedSha ?? '')
+  ) {
+    return {
+      kind: 'failure',
+      code: 'publication-validation-failed',
+      message: 'PR publication blocked: the published source branch could not be resolved. No PR was written.',
+    }
+  }
+  const mergeBase = await git(workDir, ['merge-base', `origin/${target}`, publishedSha!], signal, {
     timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
   })
   if (!mergeBase.success || !mergeBase.stdout.trim()) {
     return {
+      kind: 'failure',
       code: 'publication-validation-failed',
       message: `PR publication blocked: commits could not be read for validation (${mergeBase.combinedOutput || 'git merge-base failed'}). No PR was written.`,
     }
   }
   const log = await git(
     workDir,
-    ['log', `--format=${PUBLICATION_LOG_FORMAT}`, `${mergeBase.stdout.trim()}..${source}`],
+    ['log', `--format=${PUBLICATION_LOG_FORMAT}`, `${mergeBase.stdout.trim()}..${publishedSha}`],
     signal,
     { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS },
   )
   if (!log.success) {
     return {
+      kind: 'failure',
       code: 'publication-validation-failed',
       message: `PR publication blocked: commits could not be read for validation (${log.combinedOutput || 'git log failed'}). No PR was written.`,
     }
@@ -309,13 +335,23 @@ async function validateSourceCommits(
     commits = parsePublicationCommits(log.stdout)
   } catch {
     return {
+      kind: 'failure',
       code: 'publication-validation-failed',
       message: 'PR publication blocked: malformed commit history. No PR was written.',
     }
   }
+  if (commits.length === 0) {
+    return {
+      kind: 'failure',
+      code: 'publication-validation-failed',
+      message:
+        'PR publication blocked: the source branch contains no commits relative to the target. No PR was written.',
+    }
+  }
   const errors = validatePublicationCommits(commits, policy)
-  if (errors.length === 0) return null
+  if (errors.length === 0) return { kind: 'ok', publishedSha: publishedSha! }
   return {
+    kind: 'failure',
     code: 'publication-validation-failed',
     message: `PR publication blocked by commit validation:\n${formatPublicationValidationErrors(errors)}\nNo PR was written.`,
   }

@@ -54,17 +54,32 @@ internal static class WorkflowControlRecovery
                     actor,
                     outcome: IsOutcomeKnownFailure(ex) ? "failed" : "unknown",
                     reason: ex.Message);
-                throw;
+                return RecoveryFailureResult(ex);
             }
 
-            await AppendRecoveryFactAsync(
-                events,
-                workflowRunId,
-                projectId,
-                number,
-                actor,
-                outcome: "succeeded",
-                result: replacementRunId);
+            try
+            {
+                await AppendRecoveryFactAsync(
+                    events,
+                    workflowRunId,
+                    projectId,
+                    number,
+                    actor,
+                    outcome: "succeeded",
+                    result: replacementRunId);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(ApiResults.Failure(
+                    "Replacement workflow started, but recovery provenance could not be recorded",
+                    StatusCodes.Status503ServiceUnavailable,
+                    "recovery_provenance_unknown",
+                    new { replacementRunId, reason = ex.Message },
+                    effect: ApiEffect.Unknown,
+                    retrySafe: false,
+                    nextAction: "Inspect the issue and workflow history before retrying recovery"),
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
         }
         else
         {
@@ -75,6 +90,37 @@ internal static class WorkflowControlRecovery
 
     private static bool IsOutcomeKnownFailure(Exception ex) =>
         ex is ArgumentException or InvalidOperationException;
+
+    private static IResult RecoveryFailureResult(Exception ex)
+    {
+        var response = RecoveryFailureResponse(ex);
+        return Results.Json(response.Body, statusCode: response.StatusCode);
+    }
+
+    private static (int StatusCode, ApiResponse<object> Body) RecoveryFailureResponse(Exception ex)
+    {
+        var known = IsOutcomeKnownFailure(ex);
+        var statusCode = known
+            ? StatusCodes.Status409Conflict
+            : StatusCodes.Status503ServiceUnavailable;
+        var code = known ? "replacement_rejected" : "replacement_unknown";
+        var error = known
+            ? "Replacement workflow could not be started"
+            : "Replacement workflow outcome is unknown";
+        var nextAction = known
+            ? "Resolve the issue start error, then retry recovery"
+            : "Inspect the issue and workflow history before retrying recovery";
+        return (
+            statusCode,
+            ApiResults.Failure(
+                error,
+                statusCode,
+                code,
+                new { reason = ex.Message },
+                known ? ApiEffect.None : ApiEffect.Unknown,
+                retrySafe: false,
+                nextAction: nextAction));
+    }
 
     private static async Task TryAppendRecoveryFactAsync(
         IEventStore events,
@@ -129,12 +175,29 @@ internal static class WorkflowControlRecovery
             await TryAppendRecoveryFactAsync(
                 events, workflowRunId, issue.ProjectId, issue.Number, actor,
                 IsOutcomeKnownFailure(ex) ? "failed" : "unknown", reason: ex.Message);
-            throw;
+            var response = RecoveryFailureResponse(ex);
+            return KeyedControlWrites.Outcome.Rejected(response.StatusCode, response.Body);
         }
 
-        await AppendRecoveryFactAsync(
-            events, workflowRunId, issue.ProjectId, issue.Number, actor,
-            outcome: "succeeded", result: replacementRunId);
+        try
+        {
+            await AppendRecoveryFactAsync(
+                events, workflowRunId, issue.ProjectId, issue.Number, actor,
+                outcome: "succeeded", result: replacementRunId);
+        }
+        catch (Exception ex)
+        {
+            return KeyedControlWrites.Outcome.Rejected(
+                StatusCodes.Status503ServiceUnavailable,
+                ApiResults.Failure(
+                    "Replacement workflow started, but recovery provenance could not be recorded",
+                    StatusCodes.Status503ServiceUnavailable,
+                    "recovery_provenance_unknown",
+                    new { replacementRunId, reason = ex.Message },
+                    effect: ApiEffect.Unknown,
+                    retrySafe: false,
+                    nextAction: "Inspect the issue and workflow history before retrying recovery"));
+        }
         return KeyedControlWrites.Outcome.Accepted(ApiResults.SuccessEnvelope());
     }
 

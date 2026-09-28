@@ -195,7 +195,8 @@ Inputs:
   partial/promisor clones. Strategies are explicit; the action never silently
   falls back to another strategy.
 - `requiredTrailers` (optional, array or comma-separated text): trailer tokens
-  required on commits being pushed. Validation runs before the push.
+  required on commits being pushed. Validation runs before the push, and the
+  Action pushes the resolved commit SHA rather than re-reading a mutable source ref.
 - `author` / `committer` (optional, text): expected commit identity policy.
 
 Outputs:
