@@ -66,7 +66,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
       unauthorizedListener?.()
     }
     throw new ApiError(
-      json.error ? failureMessage(json) : `Request failed: ${res.status}`,
+      failureMessage(json),
       res.status,
       json.data,
       json.code,
