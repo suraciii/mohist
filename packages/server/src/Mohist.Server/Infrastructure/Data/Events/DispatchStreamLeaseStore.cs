@@ -251,7 +251,13 @@ public sealed class DispatchStreamLeaseStore : IDispatchStreamLeaseStore
     async Task<int> IDispatchStreamLeaseStore.CountParkedAsync(DateTimeOffset now, CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return await db.DispatchStreamLeases.AsNoTracking()
-            .CountAsync(l => l.NextAttemptAt != null && l.NextAttemptAt > now, ct);
+        // SQLite cannot translate DateTimeOffset comparisons, and its TEXT
+        // storage sorts by local wall-clock, so the instant comparison must
+        // happen after materialization. The null filter stays in SQL.
+        var nextAttempts = await db.DispatchStreamLeases.AsNoTracking()
+            .Where(l => l.NextAttemptAt != null)
+            .Select(l => l.NextAttemptAt)
+            .ToListAsync(ct);
+        return nextAttempts.Count(next => next > now);
     }
 }
